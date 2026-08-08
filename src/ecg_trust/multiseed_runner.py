@@ -2035,7 +2035,10 @@ def _verify_prediction(
         "checkpoint_epoch": run.best_epoch,
     }
     for field, expected in expected_extra.items():
-        if extra.get(field) != expected:
+        observed = extra.get(field)
+        if field == "checkpoint_sha256":
+            observed = _hash(observed, "prediction checkpoint SHA-256")
+        if observed != expected:
             raise MultiSeedRunnerError(f"prediction {field} lineage mismatch")
     integrity = _hash(artifact.integrity_sha256, "prediction artifact integrity")
     return artifact, _file_sha256(prediction_path), integrity

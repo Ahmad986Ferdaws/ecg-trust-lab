@@ -13,7 +13,11 @@ import pytest
 import ecg_trust.multiseed_runner as runner
 from ecg_trust.experiment_config import DevelopmentExperimentConfig
 from ecg_trust.experiment_runner import DevelopmentRunResult
-from ecg_trust.predictions import PredictionArtifact, create_prediction_artifact
+from ecg_trust.predictions import (
+    PredictionArtifact,
+    create_prediction_artifact,
+    save_prediction_artifact,
+)
 from ecg_trust.protocol import ExperimentProtocol, FoldRole
 
 
@@ -478,6 +482,43 @@ def test_run_dispatches_four_trainings_and_commits_six_prediction_completions(
         assert set(payload) == runner._MEMBER_COMPLETION_KEYS
         assert payload["status"] == "complete"
         runner._verify_self_hash(payload, "member completion")
+
+
+def test_prediction_verifier_accepts_exporters_unprefixed_checkpoint_hash(
+    tmp_path: Path,
+) -> None:
+    protocol = ExperimentProtocol.canonical()
+    member: dict[str, object] = {
+        "seed": 2027,
+        "prediction_path": str((tmp_path / "fold8.npz").resolve()),
+        "prediction_json_path": str((tmp_path / "fold8.json").resolve()),
+    }
+    run = _fake_verified_run(member, tmp_path / "resnet1d-seed2027")
+    artifact = _prediction(protocol, architecture="resnet1d", seed=2027)
+    artifact = create_prediction_artifact(
+        ecg_id=artifact.ecg_id,
+        patient_id=artifact.patient_id,
+        strat_fold=artifact.strat_fold,
+        targets=artifact.targets,
+        raw_logits=artifact.raw_logits,
+        model_name=run.run_name,
+        model_seed=run.seed,
+        protocol=protocol,
+        config_hash=run.resolved_config_hash,
+        manifest_hash=run.manifest_sha256,
+        fold_role=FoldRole.MODEL_SELECTION,
+        created_at_utc="2026-08-08T00:00:00Z",
+        extra_metadata={
+            "lineage": "development",
+            "checkpoint_sha256": run.hashes["best.ckpt"].removeprefix("sha256:"),
+            "checkpoint_epoch": run.best_epoch,
+        },
+    )
+    save_prediction_artifact(artifact, tmp_path / "fold8.npz", protocol=protocol)
+
+    verified, _, _ = runner._verify_prediction(member, run, protocol=protocol)
+
+    assert verified.extra_metadata["checkpoint_sha256"] == "e" * 64
 
 
 def test_study_winner_is_recomputed_instead_of_trusted() -> None:
