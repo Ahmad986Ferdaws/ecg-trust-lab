@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a provenance-bound frozen refit on PTB-XL folds 1-8."""
+"""Run a legacy or freeze-bound fresh refit on PTB-XL folds 1-8."""
 
 from __future__ import annotations
 
@@ -52,6 +52,9 @@ def main(argv: list[str] | None = None) -> int:
         "diagnostic best training loss: "
         f"{result.best_training_loss:.6f} at epoch {result.best_training_loss_epoch}"
     )
+    if result.completion_path is not None:
+        print(f"refit completion: {result.completion_path}")
+        print(f"completion SHA-256: {result.completion_sha256}")
     return 0
 
 

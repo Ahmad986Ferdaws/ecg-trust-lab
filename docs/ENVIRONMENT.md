@@ -1,7 +1,7 @@
 # Verified development environment
 
 **Verified:** August 8, 2026  
-**Status:** Ready for PTB-XL data acquisition and pipeline implementation
+**Status:** Verified for CUDA training, immutable release stages, and the local research viewer
 
 ## Installed project environment
 
@@ -30,6 +30,11 @@ The runtime, virtual environment, and cache are intentionally ignored by version
 | Captum | 0.9.0 |
 | Optuna | 4.9.0 |
 | TensorBoard | 2.21.0 |
+| FastAPI | 0.141.1 |
+| Uvicorn | 0.52.1 |
+| Plotly | 6.9.0 |
+| Jinja2 | 3.1.6 |
+| python-multipart | 0.0.32 |
 | pytest | 9.1.1 |
 | Ruff | 0.16.2 |
 | mypy | 2.3.0 |
@@ -59,11 +64,12 @@ The system CUDA 12.4 toolkit remains installed but is not used by this environme
 
 ## Quality checks
 
-The initial package passed:
+The integrated package gate on August 8, 2026 passed:
 
-- `uv run pytest` — 1 test passed;
-- `uv run ruff check src tests` — all checks passed;
-- `uv run mypy` — no issues in three source files;
+- `uv run pytest -q` — 246 tests passed (one upstream Starlette/httpx
+  deprecation warning);
+- `uv run ruff check src tests scripts` — all checks passed;
+- `uv run mypy` — no issues in 35 source files;
 - `uv run ecg-verify` — real CUDA BF16 training passed.
 
 ## Commands
@@ -77,7 +83,7 @@ uv run ecg-verify
 
 # Run project checks
 uv run pytest
-uv run ruff check src tests
+uv run ruff check src tests scripts
 uv run mypy
 ```
 

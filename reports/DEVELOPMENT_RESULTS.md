@@ -1,15 +1,49 @@
-# Preliminary development results
+# Development results
 
-**Status:** single-seed model-selection evidence only  
+**Status:** equal-budget single-seed model-selection evidence; multi-seed confirmation pending
+
 **Protocol:** PTB-XL 1.0.3, 100 Hz, folds 1–7 train, fold 8 model selection  
 **Seed:** 2026  
 **Labels:** NORM, MI, STTC, CD, HYP
 
 These numbers are not fold-10 test results and are not final research claims.
-They establish that the pipeline is credible enough to proceed to equal-budget
-tuning and multiple seeds. Fold 9 and fold 10 were not accessed by either run.
+They establish that the pipeline is credible enough to proceed to paired
+multi-seed confirmation. Fold 9 and fold 10 were not accessed by any run.
 
-## Matched-capacity comparison
+## Equal-budget paired sweep
+
+Both architectures completed the same immutable 12-row Latin-hypercube
+candidate plan with a fixed seed of 2026, a 30-epoch ceiling, identical data
+roles, no pruning, and alternating first-model order. A machine-verified sweep
+summary confirms 12 unique complete candidates for each architecture. One
+ResNet attempt was interrupted by the terminal transport, marked failed, and
+retried with the identical candidate and seed; it reproduced the partial
+history exactly and did not consume the candidate budget.
+
+| Model | Winning candidate | Best epoch | Completed epochs | Fold-8 macro AUROC | Peak allocated VRAM | Runtime | Batch | Learning rate | Weight decay |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1D ResNet | 11 | 12 | 22 | 0.931852 | 455.4 MiB | 382.6 s | 128 | 0.00242420 | 0.0000147610 |
+| ECG transformer | 6 | 21 | 30 | 0.923927 | 1,204.6 MiB | 793.6 s | 192 | 0.00123597 | 0.00141241 |
+
+The seed-2026 development difference is 0.007925 macro-AUROC in favor of the
+ResNet. This is not yet the architecture decision: the preregistered rule uses
+the mean over paired seeds 2026, 2027, and 2028 with a practical margin of
+0.005. Both architectures proceed through all later stages regardless of that
+decision.
+
+The final sweep summary is identified by SHA-256
+`04574c17773dea894efd84bf2ed5fa5be685ce3a6687deb3524a373ea6d8df6b`.
+Its shared candidate-plan hash is
+`fd1c140be07f8f99d1655c21e8986bac6759c1838be438e22fd18c475a51f8f7`.
+The exact winner checkpoints are:
+
+- ResNet candidate 11: `5eaa84fa5f47a66cbd4f9ccc3bb5fea75f7abf2a6ff31bff288d90ba9089cd97`
+- Transformer candidate 6: `004cf4be1d423fbdb4828f098467d0747b73c25df6c86678ced1186d2b87a476`
+
+The verified sweep-winner training-curve figure is generated at
+`artifacts/figures/sweep_winner_training_curves.png`.
+
+## Initial matched-capacity comparison
 
 | Model | Parameters | Best epoch | Completed epochs | Macro AUROC | Macro AUPRC | Brier | ECE | Peak allocated VRAM | Train time |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -41,9 +75,11 @@ records/s for the transformer; first-epoch initialization is included.
 
 Rounded per-label values are for orientation; machine-readable histories and
 checkpoints under `runs/development/` retain full precision and complete
-provenance. The apparent ResNet advantage is not yet a conclusion: the next
-gate requires equal-budget tuning, at least three seeds, and paired
-patient-cluster confidence intervals.
+provenance. The initial comparison motivated the matched sweep above. The
+apparent ResNet advantage is still not a final conclusion: the next gate
+requires all three paired seeds, and the final architecture comparison
+requires paired patient-cluster confidence intervals on the single authorized
+fold-10 batch.
 
 ## Selected checkpoint SHA-256
 

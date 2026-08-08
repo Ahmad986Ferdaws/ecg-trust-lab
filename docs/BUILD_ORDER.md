@@ -15,6 +15,7 @@ final configuration is frozen.
   the verified GPU forward/backward test.
 - **Data/science stack:** WFDB, NumPy, pandas, SciPy, scikit-learn, PyArrow.
 - **Research stack:** Optuna, TensorBoard, Captum, Matplotlib, Seaborn.
+- **Demo stack:** FastAPI, Uvicorn, Jinja2, Plotly, multipart WFDB uploads.
 - **Quality stack:** pytest, Ruff, strict mypy, Git, deterministic run metadata.
 
 The machine has enough capacity. The main advantage of the GPU is fast
@@ -45,15 +46,18 @@ iteration and equal-budget sweeps, not fitting an otherwise oversized model.
    tune only on fold 8, and investigate any large gap from the published
    roughly 0.92–0.93 macro-AUROC range before adding complexity.
 
-6. **Run the fair architecture comparison — active.** Train the matched-capacity
+6. **Run the fair architecture comparison — complete.** Train the matched-capacity
    ResNet and ECG transformer under the same data, tuning budget, optimizer
    budget, augmentations, and seeds. Record parameters, throughput, peak VRAM,
-   wall time, and fold-8 metrics.
+   wall time, and fold-8 metrics. The paired 12-candidate sweep completed with
+   fold-8 leaders of 0.931852 for ResNet and 0.923927 for the transformer.
 
-7. **Freeze choices, then calibrate.** Refit the two chosen configurations on
-   folds 1–8 with frozen epoch budgets. Fit temperature scaling, thresholds,
-   and abstention cutoffs only on fold 9. Save the resolved configuration and
-   protocol hashes before final testing.
+7. **Freeze choices, then calibrate — active.** Confirm both winning
+   configurations at paired seeds 2026, 2027, and 2028; freeze the architecture
+   decision and robust median epoch budgets; refit all six models on folds 1–8;
+   then fit temperature scaling, thresholds, and abstention cutoffs only on
+   fold 9. Save the resolved configuration and protocol hashes before final
+   testing.
 
 8. **Open fold 10 once.** Generate immutable logits/probabilities and report
    per-label and macro AUROC/AUPRC, Brier score, log loss, ECE, thresholded
@@ -71,19 +75,25 @@ iteration and equal-budget sweeps, not fitting an otherwise oversized model.
 
 ## Immediate command sequence
 
-Run from the project root:
+The equal-budget sweep is already complete. After committing the downstream
+orchestration as a clean revision, run the fixed confirmation from the project
+root:
 
 ```powershell
 uv run ecg-verify
 uv run python scripts/smoke_dataset.py
-uv run python scripts/sweep.py preflight
-uv run python scripts/sweep.py status
-uv run python scripts/sweep.py run
 uv run pytest
 uv run ruff check src tests scripts
 uv run mypy
+git status --short
+uv run python scripts/multiseed.py plan
+uv run python scripts/multiseed.py status
+uv run python scripts/multiseed.py run
 ```
 
-Use `scripts/sweep.py run --resume` only for the exact persisted candidate
-plan after an interruption. No fold-9 or fold-10 command belongs in routine
-development instructions.
+If interrupted, use `scripts/multiseed.py run --resume` only for the persisted,
+hash-matched plan. Once all six member receipts verify, pass those six paths
+explicitly to `scripts/freeze_multiseed.py`, then run each generated refit
+recipe with `scripts/refit.py`. No fold-9 or fold-10 command belongs in routine
+development instructions; the release pipeline exposes those stages only
+after the six-refit bundle gate passes.

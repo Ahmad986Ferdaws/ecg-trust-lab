@@ -21,18 +21,21 @@ current fold-8 evidence from future final-test claims.
   provenance hash `55dd86001dee2006cb241ff8b4f3970d8fcbb1ae9ecd430f5dd61478673ce235`.
 - Project-local Python 3.12.13, PyTorch 2.13.0 + CUDA 13.0, cuDNN 9.2, and BF16
   pass the real RTX 5070 Ti forward/backward check.
-- Matched-capacity single-seed development runs are complete. On fold 8, the
-  8.74M-parameter ResNet reached 0.9287 macro-AUROC and the 8.73M-parameter
-  transformer reached 0.9237. These are model-selection results, not fold-10
-  test results.
+- The matched equal-budget sweep is complete: both architectures ran the same
+  12-candidate plan. The fold-8 leaders were 0.931852 macro-AUROC for ResNet
+  candidate 11 and 0.923927 for transformer candidate 6. These are
+  model-selection results, not fold-10 test results.
 - Calibration, abstention, patient-bootstrap, subgroup, corruption,
   attribution, immutable prediction, refit, final-report, and demo-backend
   layers are implemented and tested.
-- The schema-v2 paired sweep executor is ready: one deterministic 12-row
-  Latin-hypercube plan is shared by both architectures, the HPO seed is fixed,
-  execution alternates model order by candidate, and resume verifies immutable
-  artifacts before counting a trial complete.
-- Repository gate: 206 tests pass; Ruff and strict mypy are clean.
+- The fixed seeds 2026/2027/2028 confirmation, immutable architecture freeze,
+  six folds-1-8 refits, fold-9 release gate, and one-time fold-10 ledger are
+  implemented with end-to-end provenance and adversarial integrity checks.
+- A local FastAPI/Plotly research viewer is implemented for compatible WFDB
+  uploads and curated examples; it will be bound to the final frozen model and
+  calibration artifacts after the one-time evaluation.
+- Repository gate on August 8, 2026: 246 tests pass; Ruff and strict mypy are
+  clean across 35 source modules.
 - Fold 9 and fold 10 have not been used for the reported development results.
 
 ## Development commands
@@ -47,9 +50,13 @@ uv run python scripts/benchmark_models.py --help
 uv run python scripts/train.py --config configs/train_smoke.yaml
 uv run python scripts/sweep.py preflight
 uv run python scripts/sweep.py status
+uv run python scripts/multiseed.py --help
+uv run python scripts/freeze_multiseed.py --help
 uv run python scripts/refit.py --help
+uv run python scripts/release_pipeline.py --help
 uv run python scripts/predict.py --help
 uv run python -m ecg_trust.calibration_cli --help
+uv run python scripts/demo_server.py --help
 uv run pytest
 uv run ruff check src tests scripts
 uv run mypy

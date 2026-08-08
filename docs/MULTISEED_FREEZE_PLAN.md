@@ -20,38 +20,30 @@ the selected trial is one member of the confirmation set; seeds `2027` and
 `2028` measure additional initialization/data-order sensitivity. A
 hardware/interruption failure is rerun with the same seed and exact config.
 
-## Audit of the current refit implementation
+## Implementation status (August 8, 2026)
 
-The existing refit runner already enforces important invariants:
+The post-sweep contract is implemented and its integrated gate passes. The
+multi-seed runner requires a clean downstream Git commit, proves the sweep
+commit is its ancestor, and rejects any A-to-B change in the fixed scientific
+kernel. It reuses only the two verified seed-2026 sweep winners, trains the four
+missing seed/architecture members, and publishes six aligned fold-8 receipts.
 
-- refit folds are exactly 1–8 and normalization remains fitted on folds 1–7;
-- manifest, protocol, normalization provenance, patient isolation, model
-  architecture/preset, optimizer values, batch size, and selected checkpoint
-  config hash are checked;
-- the model is initialized afresh, no validation dataset is constructed, and
-  no early stopping or model selection occurs;
-- `final.ckpt`, rather than minimum-training-loss diagnostics, is authoritative.
+The freeze/refit path now enforces all planned invariants:
 
-It is not yet sufficient as the post-sweep multi-seed contract:
+- the immutable freeze binds the sweep, six receipts, architecture decision,
+  median epoch budgets, manifest, normalization, model identity and parameter
+  count, explicit AdamW policy, downstream revision, and dependency lock;
+- publication stages all six exact recipes transactionally and commits the
+  freeze last;
+- refits use fresh weights, exactly folds 1–8, folds-1–7 normalization, no
+  validation, no early stopping, and one frozen budget per architecture;
+- retries use immutable `attemptNN` directories instead of overwriting partial
+  state;
+- `refit_completion.json` binds and re-verifies every upstream and downstream
+  artifact before a six-member release bundle can be sealed.
 
-- `FrozenRefitConfig` points directly to one editable checkpoint path and does
-  not bind a sweep/confirmation freeze artifact or expected checkpoint hash;
-- the runner does not verify a sibling completed-run metadata artifact or
-  history, so it cannot prove that the checkpoint came from a complete
-  confirmatory run;
-- the refit seed and BF16 policy are not compared with the selected development
-  run, and only batch size—not the full loader/reproducibility policy—is bound;
-- lineage does not contain comparison ID, winning sweep trial, candidate
-  manifest, confirmatory seed set, architecture decision, or code/lock hashes;
-- final refit metadata does not bind the SHA-256 of `final.ckpt`;
-- `last.ckpt` is labelled crash-recovery state, but there is no implemented
-  mid-run resume path;
-- the checked refit YAMLs are placeholders for the seed-2026 matched defaults.
-  Their `frozen_epochs: 50`, checkpoint paths, and optimizer values cannot be
-  used after a sweep whose development ceiling is 30.
-
-Do not manually mutate the two checked placeholder YAMLs into post-sweep
-recipes. Generate new, hash-bound recipes from the freeze artifact.
+The checked legacy YAMLs are not post-sweep recipes. Generate the six
+hash-bound JSON recipes from `scripts/freeze_multiseed.py`.
 
 ## Exact confirmation procedure
 

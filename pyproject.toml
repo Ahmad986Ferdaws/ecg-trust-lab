@@ -11,12 +11,16 @@ requires-python = ">=3.12,<3.13"
 authors = [{ name = "PTB-XL ECG Research Project" }]
 dependencies = [
   "captum>=0.8.0",
+  "fastapi>=0.141.1",
+  "jinja2>=3.1.6",
   "matplotlib>=3.10",
   "numpy>=2.0",
   "optuna>=4.5",
   "pandas>=2.3",
+  "plotly>=6.9.0",
   "psutil>=7.0",
   "pyarrow>=20.0",
+  "python-multipart>=0.0.32",
   "pyyaml>=6.0",
   "rich>=14.0",
   "scikit-learn>=1.7",
@@ -26,6 +30,7 @@ dependencies = [
   "torch>=2.12,<2.14",
   "tqdm>=4.67",
   "typer>=0.16",
+  "uvicorn[standard]>=0.52.1",
   "wfdb>=4.3",
 ]
 
@@ -34,6 +39,7 @@ ecg-verify = "ecg_trust.system_check:main"
 
 [dependency-groups]
 dev = [
+  "httpx>=0.28.1",
   "mypy>=1.17",
   "pytest>=8.4",
   "pytest-cov>=6.2",

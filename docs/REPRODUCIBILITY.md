@@ -1,9 +1,10 @@
 # Reproducibility protocol
 
 This document is the executable record for the current PTB-XL five-superclass
-pipeline. Run commands from the repository root in PowerShell. It describes
-what the checked-in code can do today and explicitly marks deferred sweep and
-multi-seed automation rather than inventing results or commands.
+pipeline. Run commands from the repository root in PowerShell. The matched
+12-by-2 sweep is complete; the fixed multi-seed confirmation and downstream
+release machinery are implemented, while their scientific results remain
+pending until each gated command actually completes.
 
 The scientific task is multi-label prediction of `[NORM, MI, STTC, CD, HYP]`
 from a ten-second, 100 Hz, 12-lead ECG. It is diagnostic-superclass
@@ -47,10 +48,12 @@ The code enforces the following boundaries:
 - calibration and final predictions must match on model name, seed, protocol
   hash, resolved config hash, manifest hash, and label order.
 
-The token is deliberate friction, not a global one-time-use ledger: a user can
-issue another token by repeating the acknowledgement. Scientific one-time-use
-governance therefore also requires the access purpose, date, operator, and
-result hash to be recorded outside the process.
+The low-level exporter token is deliberate friction. The formal
+`release_pipeline.py run-final` path adds the authoritative control: a
+canonical opening marker bound to the exact refit/calibration bundle, an
+exclusive writer lock, rejection of pre-ledger outputs, and a persistent
+one-time ledger containing the purpose, operator, timestamps, and artifact
+hashes. Final reporting must use that release path, not direct ad hoc exports.
 
 Fold 8 is development evidence. Fold 9 is post-processing evidence. Neither is
 a held-out final-test result.
@@ -78,10 +81,12 @@ and seed Python, NumPy, PyTorch, CUDA, DataLoader workers, and the loader
 generator.
 
 The runners record Python, platform, PyTorch, CUDA runtime, device, BF16 status,
-and GPU memory metadata. They do **not** currently record a Git revision. Before
-confirmatory work, create a commit and record `git rev-parse HEAD` and
-`git status --short` separately. If the repository has no `HEAD` or is dirty,
-state that plainly; do not describe the run as a frozen release.
+GPU memory, Git, source-tree, dependency-lock, manifest, and normalization
+provenance. The multi-seed planner requires a completely clean downstream
+commit B, proves that the sweep commit A is its ancestor, and requires a
+byte-empty A-to-B diff over the fixed scientific kernel. It also records the
+exact allowed non-kernel changes. A dirty or unaddressable tree cannot create
+a confirmation plan.
 
 ## 3. Quality gate
 
@@ -283,38 +288,28 @@ weight decay 0.01, five warmup epochs, warmup-cosine scheduling, gradient norm
 1.0, at most 50 epochs, and fold-8 macro AUROC early stopping with patience 10
 and minimum delta 0.0001. Both checked configs currently contain seed 2026.
 
-The primary equal-budget search is implemented as one paired schema-v2
-comparison. Before launch, inspect the deterministic plan and current storage
-without writing study state:
+The primary equal-budget search is one paired schema-v2 comparison. Inspect its
+completed state without writing study data:
 
 ```powershell
 uv run python scripts/sweep.py preflight
 uv run python scripts/sweep.py status
 ```
 
-The plan contains 12 Latin-hypercube candidates. Both architectures receive
+The plan contains 12 Latin-hypercube candidates. Both architectures received
 the exact same candidate rows and fixed development seed `2026`; candidate
 order alternates which architecture runs first. The objective is uncalibrated
 fold-8 macro ROC-AUC with all five labels defined, Optuna pruning is disabled,
-and failures retry the same candidate without consuming the completion budget.
-Start a fresh study only after preflight and repository gates pass:
-
-```powershell
-uv run python scripts/sweep.py run
-```
-
-After an interruption, resume only the persisted, hash-matched plan:
-
-```powershell
-uv run python scripts/sweep.py run --resume
-```
+and a failed attempt does not consume the completion budget. All 24 required
+candidates are complete. Do not start a second sweep for this comparison.
 
 The runner holds an exclusive comparison lock, rejects source/input/config
 drift, verifies run metadata, histories, resolved configs, protocol files, and
 both checkpoints before counting a candidate complete, and releases winners
-only after both architectures have 12 verified completions. There is not yet a
-checked-in multi-seed launcher; the fixed confirmation seeds are `2026`,
-`2027`, and `2028`, as specified in `docs/MULTISEED_FREEZE_PLAN.md`.
+only after both architectures have 12 verified completions. The immutable
+summary is
+`runs/sweeps/ptbxl_matched_equal_budget_v1/sweep_summary.json`, SHA-256
+`04574c17773dea894efd84bf2ed5fa5be685ce3a6687deb3524a373ea6d8df6b`.
 
 Each completed development run contains:
 
@@ -340,43 +335,56 @@ state.
 
 ### 8.3 Freeze the epoch budget and refit
 
-The refit YAML files intentionally require review. `selection.frozen_epochs`
-must equal the selected zero-based development checkpoint epoch plus one. The
-runner verifies this against `best.ckpt` and refuses an arbitrary value.
-
-Inspect the selected epoch count:
-
-```powershell
-$resnetEpochs = 1 + [int]((Get-Content `
-  runs\development\resnet1d_matched_seed2026\run_metadata.json | `
-  ConvertFrom-Json).best_epoch)
-$transformerEpochs = 1 + [int]((Get-Content `
-  runs\development\ecg_transformer_matched_seed2026\run_metadata.json | `
-  ConvertFrom-Json).best_epoch)
-"ResNet frozen epochs: $resnetEpochs"
-"Transformer frozen epochs: $transformerEpochs"
-```
-
-Update the corresponding `selection.frozen_epochs` in a frozen, named config;
-also ensure its development checkpoint, architecture, preset, optimization,
-batch size, and seed refer to the selected run. Then execute:
+The fixed confirmation seeds are `2026`, `2027`, and `2028`. Plan creation is
+allowed only from a clean downstream commit B whose scientific kernel is
+byte-identical to sweep commit A. Seed 2026 reuses each verified sweep winner;
+only the four architecture/seed combinations for 2027 and 2028 train anew.
+All six members receive fresh fold-8 prediction exports:
 
 ```powershell
-uv run python scripts/refit.py --config configs/refit_resnet_frozen.yaml `
-  --protocol configs/protocol.yaml
-
-uv run python scripts/refit.py --config configs/refit_transformer_frozen.yaml `
-  --protocol configs/protocol.yaml
+git status --short
+uv run python scripts/multiseed.py plan
+uv run python scripts/multiseed.py status
+uv run python scripts/multiseed.py run
 ```
 
-The checked refit configs contain `frozen_epochs: 50` as a value that must
-match the selected checkpoint; it is not automatically a scientifically frozen
-budget. Do not run a refit config whose value has not been reconciled.
+The first command must print nothing. After an interruption, use `run --resume`
+only against the exact persisted plan. The runner uses immutable attempt
+directories, a three-attempt infrastructure-failure ceiling, an exclusive
+writer lock, and complete source/hash verification before publishing any
+`member_completion.json`.
+
+After all six receipts verify, freeze them explicitly; do not discover a
+subset by score or directory order:
+
+```powershell
+uv run python scripts/freeze_multiseed.py `
+  --completion runs\confirmation\ptbxl_matched_equal_budget_v1\members\resnet1d\seed2026\member_completion.json `
+  --completion runs\confirmation\ptbxl_matched_equal_budget_v1\members\resnet1d\seed2027\member_completion.json `
+  --completion runs\confirmation\ptbxl_matched_equal_budget_v1\members\resnet1d\seed2028\member_completion.json `
+  --completion runs\confirmation\ptbxl_matched_equal_budget_v1\members\ecg_transformer\seed2026\member_completion.json `
+  --completion runs\confirmation\ptbxl_matched_equal_budget_v1\members\ecg_transformer\seed2027\member_completion.json `
+  --completion runs\confirmation\ptbxl_matched_equal_budget_v1\members\ecg_transformer\seed2028\member_completion.json
+```
+
+The freeze applies the preregistered 0.005 mean-score margin, retains both
+architectures, and derives one median selected-epoch budget per architecture.
+It transactionally publishes exactly six immutable JSON recipes and commits
+the freeze artifact last. Run every generated recipe:
+
+```powershell
+Get-ChildItem `
+  runs\confirmation\ptbxl_matched_equal_budget_v1\refit_recipes\*-refit.json | `
+  ForEach-Object {
+    uv run python scripts/refit.py --config $_.FullName `
+      --protocol configs/protocol.yaml
+  }
+```
 
 Each successful refit writes:
 
 ```text
-runs/refit/<run_name>/
+runs/refit/ptbxl_matched_equal_budget_v1/<run_name>/attemptNN/
   final.ckpt                   # authoritative frozen-epoch checkpoint
   last.ckpt                    # crash-recovery checkpoint
   best_training_loss.ckpt      # diagnostic only; never model selection
@@ -384,12 +392,15 @@ runs/refit/<run_name>/
   protocol.json
   resolved_refit_config.json
   refit_metadata.json
+  attempt_identity.json
+  refit_completion.json        # downstream release authority
 ```
 
-The refit metadata binds the selected development checkpoint SHA-256 and config
-hash, selected fold-8 epoch/score, refit config, manifest, normalization,
-runtime, and final checkpoint role. A refit uses folds 1-8, keeps folds-1-7
-normalization, and performs no validation or early stopping.
+Each retry receives a new immutable attempt directory. The completion receipt
+binds the freeze, recipe, source confirmation member, downstream commit and
+lock, final checkpoint, resolved config, metadata, protocol, manifest, and
+normalization. A refit uses folds 1-8, retains folds-1-7 normalization, starts
+from fresh weights, and performs no validation or early stopping.
 
 ## 9. Export immutable fold predictions
 
@@ -397,6 +408,14 @@ normalization, and performs no validation or early stopping.
 wrapper and hash, checkpoint schema/config/protocol/manifest lineage,
 normalization file hash and folds-1-7 provenance, exact model metadata/state,
 patient-fold isolation, and requested fold role before constructing a dataset.
+
+At downstream commit B, this low-level exporter still supports the legacy
+single-run refit schema only. It is intentionally kept byte-identical to sweep
+commit A while the four confirmation runs and six refits execute. Do not use
+the legacy fold-9/fold-10 examples below for the post-sweep release. After all
+six refit receipts exist, a separately recorded commit C must add and test
+schema-v2 completion support; only then may `release_pipeline.py` cross the
+six-refit bundle gate into fold 9.
 
 A selected development checkpoint may export fold 8 only:
 
