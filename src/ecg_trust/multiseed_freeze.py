@@ -49,6 +49,7 @@ REFIT_RECIPE_RUN_KIND = "post_sweep_frozen_refit"
 CONFIRMATION_SEEDS: tuple[int, ...] = (2026, 2027, 2028)
 ARCHITECTURES: tuple[str, ...] = ("resnet1d", "ecg_transformer")
 PRACTICAL_MARGIN = 0.005
+PREDICTION_METRIC_ABSOLUTE_TOLERANCE = 1e-6
 FREEZE_PATH_PLACEHOLDER = "${FREEZE_ARTIFACT_PATH}"
 FREEZE_HASH_PLACEHOLDER = "${FREEZE_ARTIFACT_SHA256}"
 OBJECTIVE = "fold8_uncalibrated_macro_roc_auc"
@@ -300,6 +301,9 @@ class VerifiedConfirmationMember:
         return self.best_epoch + 1
 
     def to_freeze_dict(self) -> dict[str, object]:
+        recompute_delta = abs(
+            self.recomputed_macro_auroc - self.best_validation_macro_auroc
+        )
         return {
             "architecture": self.architecture,
             "seed": self.seed,
@@ -327,6 +331,10 @@ class VerifiedConfirmationMember:
             "alignment_sha256": self.alignment_sha256,
             "best_epoch": self.best_epoch,
             "selected_epoch_count": self.selected_epoch_count,
+            "training_receipt_macro_auroc": self.best_validation_macro_auroc,
+            "recomputed_macro_auroc": self.recomputed_macro_auroc,
+            "absolute_recompute_delta": recompute_delta,
+            "recompute_absolute_tolerance": PREDICTION_METRIC_ABSOLUTE_TOLERANCE,
             "macro_auroc": self.recomputed_macro_auroc,
         }
 
@@ -728,7 +736,12 @@ def load_confirmation_member(
     score = metrics.macro.roc_auc
     if score is None or metrics.macro.roc_auc_labels != len(LABEL_ORDER):
         raise MultiSeedFreezeError("fold-8 prediction does not define all five label AUROCs")
-    _same_float(score, best_score, "recomputed fold-8 macro AUROC")
+    _same_float(
+        score,
+        best_score,
+        "recomputed fold-8 macro AUROC",
+        tolerance=PREDICTION_METRIC_ABSOLUTE_TOLERANCE,
+    )
     return VerifiedConfirmationMember(
         completion_path=path,
         completion_sha256=completion_file_hash,
@@ -1010,7 +1023,7 @@ def _refit_recipe_template(
             "prediction_json": str(member.prediction_json_path),
             "prediction_artifact_sha256": member.prediction_artifact_sha256,
             "best_epoch": member.best_epoch,
-            "best_validation_macro_auroc": member.recomputed_macro_auroc,
+            "best_validation_macro_auroc": member.best_validation_macro_auroc,
         },
         "selection": {
             "objective": OBJECTIVE,
@@ -1254,6 +1267,7 @@ def create_multiseed_freeze_payload(
             "tie_policy": TIE_POLICY,
             "epoch_budget_rule": EPOCH_BUDGET_RULE,
             "carry_forward_policy": CARRY_FORWARD_POLICY,
+            "prediction_metric_absolute_tolerance": PREDICTION_METRIC_ABSOLUTE_TOLERANCE,
         },
         "architectures": architecture_payloads,
         "decision": {
@@ -1358,7 +1372,7 @@ def _validate_recipe_templates(root: Mapping[str, object]) -> None:
             "best_checkpoint_sha256": "best_checkpoint_sha256",
             "prediction_artifact_sha256": "prediction_artifact_sha256",
             "best_epoch": "best_epoch",
-            "best_validation_macro_auroc": "macro_auroc",
+            "best_validation_macro_auroc": "training_receipt_macro_auroc",
         }
         for recipe_key, member_key in source_checks.items():
             if source.get(recipe_key) != member.get(member_key):
@@ -1414,6 +1428,7 @@ def _validate_internal_freeze(root: Mapping[str, object], protocol: ExperimentPr
         "tie_policy": TIE_POLICY,
         "epoch_budget_rule": EPOCH_BUDGET_RULE,
         "carry_forward_policy": CARRY_FORWARD_POLICY,
+        "prediction_metric_absolute_tolerance": PREDICTION_METRIC_ABSOLUTE_TOLERANCE,
     }
     if dict(plan) != expected_plan:
         raise MultiSeedFreezeError("freeze confirmation plan drifted from the fixed contract")
@@ -1435,6 +1450,31 @@ def _validate_internal_freeze(root: Mapping[str, object], protocol: ExperimentPr
                 raise MultiSeedFreezeError("confirmation member manifest hash drifted")
             if member.get("normalization_sha256") != root.get("normalization_hash"):
                 raise MultiSeedFreezeError("confirmation member normalization hash drifted")
+            receipt_score = _finite_float(
+                member.get("training_receipt_macro_auroc"), "training receipt score"
+            )
+            recomputed_score = _finite_float(
+                member.get("recomputed_macro_auroc"), "recomputed prediction score"
+            )
+            _same_float(
+                member.get("macro_auroc"),
+                recomputed_score,
+                "authoritative member score",
+            )
+            recompute_delta = abs(recomputed_score - receipt_score)
+            _same_float(
+                member.get("absolute_recompute_delta"),
+                recompute_delta,
+                "member score recomputation delta",
+            )
+            if (
+                member.get("recompute_absolute_tolerance")
+                != PREDICTION_METRIC_ABSOLUTE_TOLERANCE
+                or recompute_delta > PREDICTION_METRIC_ABSOLUTE_TOLERANCE
+            ):
+                raise MultiSeedFreezeError(
+                    "member prediction score exceeds the frozen recomputation tolerance"
+                )
         scores = [
             _finite_float(_mapping(item, "member").get("macro_auroc"), "member score")
             for item in members

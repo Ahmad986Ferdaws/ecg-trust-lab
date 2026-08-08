@@ -66,7 +66,7 @@ The system CUDA 12.4 toolkit remains installed but is not used by this environme
 
 The integrated package gate on August 8, 2026 passed:
 
-- `uv run pytest -q` — 247 tests passed (one upstream Starlette/httpx
+- `uv run pytest -q` — 248 tests passed (one upstream Starlette/httpx
   deprecation warning);
 - `uv run ruff check src tests scripts` — all checks passed;
 - `uv run mypy` — no issues in 35 source files;

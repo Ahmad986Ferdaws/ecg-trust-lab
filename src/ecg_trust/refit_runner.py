@@ -450,7 +450,7 @@ def _load_post_sweep_development(
         "prediction_json_path": member.prediction_json_path,
         "prediction_artifact_sha256": member.prediction_artifact_sha256,
         "best_epoch": member.best_epoch,
-        "best_validation_macro_auroc": member.recomputed_macro_auroc,
+        "best_validation_macro_auroc": member.best_validation_macro_auroc,
     }
     if observed_source != expected_source:
         raise FrozenRefitError("recipe source evidence differs from member completion")
@@ -479,7 +479,7 @@ def _load_post_sweep_development(
             checkpoint_sha256=member.best_checkpoint_sha256.removeprefix("sha256:"),
             checkpoint_config_hash=member.config_hash,
             selected_epoch=member.best_epoch,
-            selected_macro_auroc=member.recomputed_macro_auroc,
+            selected_macro_auroc=member.best_validation_macro_auroc,
             source_seed=member.seed,
             member_completion_sha256=member.completion_sha256,
             freeze_artifact_sha256=freeze.artifact_sha256,

@@ -13,6 +13,7 @@ from torch import Tensor, nn
 from torch.optim import AdamW
 from torch.utils.data import Dataset, TensorDataset
 
+import ecg_trust.multiseed_freeze as multiseed_freeze
 import ecg_trust.multiseed_runner as multiseed_runner
 from ecg_trust.constants import LEADS, TARGET_COLUMNS
 from ecg_trust.data.dataset import NormalizationProvenance, NormalizationStats
@@ -48,6 +49,24 @@ from ecg_trust.training import EarlyStopping, save_checkpoint
 def _json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def test_prediction_metric_tolerance_is_narrow_and_accepts_live_bf16_recompute_noise() -> None:
+    receipt = 0.9321268269904716
+    recomputed = 0.932126951151762
+    multiseed_freeze._same_float(
+        recomputed,
+        receipt,
+        "recomputed score",
+        tolerance=multiseed_freeze.PREDICTION_METRIC_ABSOLUTE_TOLERANCE,
+    )
+    with pytest.raises(MultiSeedFreezeError, match="source evidence"):
+        multiseed_freeze._same_float(
+            receipt + 1.1e-6,
+            receipt,
+            "recomputed score",
+            tolerance=multiseed_freeze.PREDICTION_METRIC_ABSOLUTE_TOLERANCE,
+        )
 
 
 def _manifest(tmp_path: Path) -> tuple[pd.DataFrame, Path, Path]:

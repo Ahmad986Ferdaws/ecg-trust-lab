@@ -370,7 +370,10 @@ uv run python scripts/freeze_multiseed.py `
 The freeze applies the preregistered 0.005 mean-score margin, retains both
 architectures, and derives one median selected-epoch budget per architecture.
 It transactionally publishes exactly six immutable JSON recipes and commits
-the freeze artifact last. Run every generated recipe:
+the freeze artifact last. Each prediction-recomputed fold-8 macro-AUROC must
+agree with its training receipt within an absolute `1e-6`; both values and the
+delta are preserved, and the architecture decision uses the recomputed values.
+Run every generated recipe:
 
 ```powershell
 Get-ChildItem `
