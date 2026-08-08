@@ -1,0 +1,42 @@
+schema_version: 1
+run_name: ecg_transformer_matched_seed2026
+
+folds:
+  train: [1, 2, 3, 4, 5, 6, 7]
+  model_selection: [8]
+
+data:
+  manifest: data/manifests/ptbxl_superclasses_v1.0.3.parquet
+  dataset_root: data/raw/ptb-xl/1.0.3
+  normalization: artifacts/preprocessing/ptbxl_v1.0.3_train_folds_1-7_normalization.json
+  max_train_records: null
+  max_validation_records: null
+
+model:
+  architecture: ecg_transformer
+  preset: matched_capacity
+
+loader:
+  batch_size: 128
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+
+optimization:
+  epochs: 50
+  learning_rate: 0.001
+  weight_decay: 0.01
+  warmup_epochs: 5
+  minimum_lr_ratio: 0.01
+  gradient_clip_norm: 1.0
+  early_stopping_patience: 10
+  early_stopping_min_delta: 0.0001
+  scheduler: warmup_cosine
+
+runtime:
+  seed: 2026
+  device: auto
+  bf16: true
+
+output:
+  root_dir: runs/development

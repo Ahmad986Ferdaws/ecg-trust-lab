@@ -1,0 +1,56 @@
+schema_version: 2
+comparison_id: ptbxl_matched_equal_budget_v1
+study_name: ptbxl_resnet1d_matched_v1
+architecture: resnet1d
+base_experiment: configs/train_resnet_matched.yaml
+
+budget:
+  complete_candidates: 12
+  max_epochs: 30
+
+candidate_design:
+  algorithm: scipy_qmc_latin_hypercube
+  version: 1
+  seed: 20260808
+
+objective:
+  name: fold8_uncalibrated_macro_roc_auc
+  direction: maximize
+  required_label_count: 5
+  require_all_labels_defined: true
+  pruning: none
+
+seed_policy:
+  kind: fixed_across_candidates
+  experiment_seed: 2026
+
+tie_break:
+  order:
+    - objective_desc
+    - completed_epochs_asc
+    - candidate_index_asc
+    - trial_number_asc
+
+failure_policy:
+  retry_same_candidate: true
+  failed_attempts_consume_budget: false
+  interrupted_attempts_mark_failed: true
+  max_attempts_per_candidate: 3
+
+storage:
+  sqlite: runs/sweeps/ptbxl_matched_equal_budget_v1/optuna.sqlite3
+  output_root: runs/sweeps/ptbxl_matched_equal_budget_v1
+
+search_space:
+  learning_rate:
+    low: 0.0001
+    high: 0.003
+    log: true
+  weight_decay:
+    low: 0.00001
+    high: 0.03
+    log: true
+  batch_size: [64, 128, 192]
+  gradient_clip_norm: [0.5, 1.0, 2.0]
+  warmup_epochs: [2, 4, 6]
+  minimum_lr_ratio: [0.01, 0.05, 0.1]

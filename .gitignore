@@ -1,0 +1,33 @@
+# Python and uv
+.venv/
+.uv-cache/
+.python/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors and operating system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local data and generated artifacts
+data/raw/
+data/interim/
+data/manifests/
+artifacts/
+outputs/
+runs/
+*.ckpt
+*.pt
+*.pth
+
+# Keep directory placeholders
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!artifacts/.gitkeep

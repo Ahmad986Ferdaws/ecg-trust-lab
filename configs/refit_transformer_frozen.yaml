@@ -1,0 +1,45 @@
+schema_version: 1
+run_kind: frozen_refit
+run_name: ecg_transformer_refit_folds1-8_seed2026
+
+folds:
+  refit: [1, 2, 3, 4, 5, 6, 7, 8]
+  # Normalization intentionally remains frozen before fold 8 is added to fitting.
+  normalization: [1, 2, 3, 4, 5, 6, 7]
+
+data:
+  manifest: data/manifests/ptbxl_superclasses_v1.0.3.parquet
+  dataset_root: data/raw/ptb-xl/1.0.3
+  normalization: artifacts/preprocessing/ptbxl_v1.0.3_train_folds_1-7_normalization.json
+
+selection:
+  development_checkpoint: runs/development/ecg_transformer_matched_seed2026/best.ckpt
+  selection_metric: fold8_macro_auroc
+  # Replace with the selected zero-based checkpoint epoch + 1. The runner verifies it.
+  frozen_epochs: 50
+
+model:
+  architecture: ecg_transformer
+  preset: matched_capacity
+
+loader:
+  batch_size: 128
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+
+optimization:
+  learning_rate: 0.001
+  weight_decay: 0.01
+  warmup_epochs: 5
+  minimum_lr_ratio: 0.01
+  gradient_clip_norm: 1.0
+  scheduler: warmup_cosine
+
+runtime:
+  seed: 2026
+  device: auto
+  bf16: true
+
+output:
+  root_dir: runs/refit
