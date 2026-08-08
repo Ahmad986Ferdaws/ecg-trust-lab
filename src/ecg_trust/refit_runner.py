@@ -567,7 +567,12 @@ def _model_metadata(model: nn.Module, selection: ModelConfig) -> dict[str, objec
         metadata["resolved_architecture_config"] = asdict(raw_config)
     if selection.preset == "matched_capacity":
         metadata["capacity_match"] = MATCHED_CAPACITY_PRESET.metadata()
-    return metadata
+    normalized: object = json.loads(
+        json.dumps(metadata, sort_keys=True, allow_nan=False, separators=(",", ":"))
+    )
+    if not isinstance(normalized, dict):  # pragma: no cover - defensive JSON invariant
+        raise FrozenRefitError("model metadata did not normalize to a JSON object")
+    return cast(dict[str, object], normalized)
 
 
 def _runtime_metadata(runtime: TrainingRuntime) -> dict[str, object]:

@@ -34,7 +34,7 @@ current fold-8 evidence from future final-test claims.
 - A local FastAPI/Plotly research viewer is implemented for compatible WFDB
   uploads and curated examples; it will be bound to the final frozen model and
   calibration artifacts after the one-time evaluation.
-- Repository gate on August 8, 2026: 248 tests pass; Ruff and strict mypy are
+- Repository gate on August 8, 2026: 250 tests pass; Ruff and strict mypy are
   clean across 35 source modules.
 - Fold 9 and fold 10 have not been used for the reported development results.
 

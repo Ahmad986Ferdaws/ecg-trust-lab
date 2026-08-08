@@ -15,11 +15,12 @@ from torch.utils.data import Dataset, TensorDataset
 
 import ecg_trust.multiseed_freeze as multiseed_freeze
 import ecg_trust.multiseed_runner as multiseed_runner
+import ecg_trust.refit_runner as refit_runner
 from ecg_trust.constants import LEADS, TARGET_COLUMNS
 from ecg_trust.data.dataset import NormalizationProvenance, NormalizationStats
 from ecg_trust.data.manifest import sha256_file
 from ecg_trust.experiment_config import DevelopmentExperimentConfig, ModelConfig
-from ecg_trust.experiment_runner import training_manifest_sha256
+from ecg_trust.experiment_runner import build_experiment_model, training_manifest_sha256
 from ecg_trust.multiseed_freeze import (
     ARCHITECTURES,
     CONFIRMATION_SEEDS,
@@ -67,6 +68,24 @@ def test_prediction_metric_tolerance_is_narrow_and_accepts_live_bf16_recompute_n
             "recomputed score",
             tolerance=multiseed_freeze.PREDICTION_METRIC_ABSOLUTE_TOLERANCE,
         )
+
+
+@pytest.mark.parametrize("architecture", ARCHITECTURES)
+def test_matched_model_metadata_is_canonical_json_before_frozen_identity_comparison(
+    architecture: str,
+) -> None:
+    selection = ModelConfig.from_mapping(
+        {"architecture": architecture, "preset": "matched_capacity"}
+    )
+    model = build_experiment_model(selection)
+
+    metadata = refit_runner._model_metadata(model, selection)
+
+    assert metadata == json.loads(json.dumps(metadata))
+    resolved = metadata["resolved_architecture_config"]
+    assert isinstance(resolved, dict)
+    if architecture == "resnet1d":
+        assert isinstance(resolved["stage_channels"], list)
 
 
 def _manifest(tmp_path: Path) -> tuple[pd.DataFrame, Path, Path]:
