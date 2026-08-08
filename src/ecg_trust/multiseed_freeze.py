@@ -29,6 +29,10 @@ import torch
 from ecg_trust.constants import LEADS
 from ecg_trust.data.manifest import sha256_file
 from ecg_trust.evaluation import compute_multilabel_metrics
+from ecg_trust.multiseed_runner import (
+    MultiSeedRunnerError,
+    load_multiseed_member_plan,
+)
 from ecg_trust.predictions import (
     PredictionArtifact,
     PredictionArtifactError,
@@ -561,7 +565,17 @@ def load_confirmation_member(
         if artifact_path.parent != run_dir:
             raise MultiSeedFreezeError("development artifacts must be siblings in run_dir")
 
-    member_plan_hash = _verify_file(member_plan, root["member_plan_sha256"], "member plan")
+    member_plan_hash = _normalized_sha256(
+        root["member_plan_sha256"], "member plan artifact hash"
+    )
+    try:
+        member_plan_payload = load_multiseed_member_plan(
+            member_plan,
+            expected_hash=member_plan_hash,
+            protocol=protocol,
+        )
+    except (OSError, MultiSeedRunnerError, ValueError) as error:
+        raise MultiSeedFreezeError(f"invalid member plan: {error}") from error
     metadata_hash = _verify_file(metadata_path, root["run_metadata_sha256"], "run metadata")
     resolved_file_hash = _verify_file(
         resolved_path, root["resolved_config_sha256"], "resolved config"
@@ -586,6 +600,27 @@ def load_confirmation_member(
     normalization_hash = _normalized_sha256(
         root["normalization_sha256"], "member normalization hash"
     )
+    expected_member_plan_values: dict[str, object] = {
+        "comparison_id": comparison_id,
+        "architecture": architecture,
+        "seed": seed,
+        "source_kind": "reused_sweep_winner" if seed == 2026 else "confirmation_training",
+        "protocol_hash": protocol_hash,
+        "manifest_sha256": manifest_hash,
+        "normalization_sha256": normalization_hash,
+    }
+    for field, expected in expected_member_plan_values.items():
+        if member_plan_payload.get(field) != expected:
+            raise MultiSeedFreezeError(f"member plan {field} disagrees with completion")
+    expected_member_plan_paths = {
+        "completion_path": path,
+        "prediction_path": prediction_path,
+        "prediction_json_path": prediction_json,
+    }
+    for field, expected in expected_member_plan_paths.items():
+        observed = _path(member_plan_payload.get(field), f"member plan {field}", base_dir=base)
+        if observed != expected:
+            raise MultiSeedFreezeError(f"member plan {field} disagrees with completion")
     best_epoch = _integer(root["best_epoch"], "member best_epoch")
     completed_epochs = _integer(root["completed_epochs"], "member completed_epochs", minimum=1)
     if best_epoch >= completed_epochs or completed_epochs > 30:

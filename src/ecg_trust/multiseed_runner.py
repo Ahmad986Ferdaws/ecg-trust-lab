@@ -1558,6 +1558,21 @@ def _load_member_plan(
     return payload
 
 
+def load_multiseed_member_plan(
+    path: str | Path,
+    *,
+    expected_hash: str,
+    protocol: ExperimentProtocol,
+) -> Mapping[str, object]:
+    """Load one self-hashed member plan without requiring the old B commit to be current."""
+
+    return _load_member_plan(
+        Path(path).resolve(),
+        expected_hash=_hash(expected_hash, "member plan expected hash"),
+        protocol=protocol,
+    )
+
+
 def load_multiseed_plan(
     path: str | Path,
     *,
@@ -2694,6 +2709,7 @@ __all__ = [
     "MultiSeedRunResult",
     "MultiSeedRunnerError",
     "create_multiseed_plan",
+    "load_multiseed_member_plan",
     "load_multiseed_plan",
     "read_multiseed_status",
     "run_multiseed_confirmation",

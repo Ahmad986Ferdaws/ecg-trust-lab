@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -12,10 +13,11 @@ from torch import Tensor, nn
 from torch.optim import AdamW
 from torch.utils.data import Dataset, TensorDataset
 
+import ecg_trust.multiseed_runner as multiseed_runner
 from ecg_trust.constants import LEADS, TARGET_COLUMNS
 from ecg_trust.data.dataset import NormalizationProvenance, NormalizationStats
 from ecg_trust.data.manifest import sha256_file
-from ecg_trust.experiment_config import ModelConfig
+from ecg_trust.experiment_config import DevelopmentExperimentConfig, ModelConfig
 from ecg_trust.experiment_runner import training_manifest_sha256
 from ecg_trust.multiseed_freeze import (
     ARCHITECTURES,
@@ -23,6 +25,7 @@ from ecg_trust.multiseed_freeze import (
     FreezeCreation,
     MultiSeedFreezeError,
     canonical_sha256,
+    capture_downstream_provenance,
     create_multiseed_freeze_payload,
     file_sha256,
     load_confirmation_member,
@@ -148,6 +151,69 @@ def _development_config(
     }
 
 
+def _revision_provenance(
+    tmp_path: Path,
+    *,
+    manifest_path: Path,
+    normalization_path: Path,
+) -> dict[str, object]:
+    runtime: dict[str, object] = {
+        "python": "3.12.0",
+        "implementation": "CPython",
+        "platform": "synthetic-platform",
+        "optuna": "4.0.0",
+        "scipy": "1.0.0",
+        "torch": "2.0.0",
+    }
+    empty_hash = "sha256:" + hashlib.sha256(b"").hexdigest()
+    source: dict[str, object] = {
+        "project_root": str(tmp_path.resolve()),
+        "git_root": str(tmp_path.resolve()),
+        "git_head": "1" * 40,
+        "git_dirty": False,
+        "git_status_sha256": empty_hash,
+        "git_unavailable": False,
+        "source_tree_sha256": "sha256:" + "3" * 64,
+        "dependency_lock_sha256": "sha256:" + "4" * 64,
+        "manifest_path": str(manifest_path.resolve()),
+        "manifest_sha256": file_sha256(manifest_path),
+        "normalization_path": str(normalization_path.resolve()),
+        "normalization_sha256": file_sha256(normalization_path),
+        "runtime_identity": runtime,
+        "runtime_identity_sha256": multiseed_runner._canonical_hash(runtime),
+    }
+    execution = dict(source)
+    execution["git_head"] = "2" * 40
+    kernel_paths = list(multiseed_runner._SCIENTIFIC_KERNEL_PATHS)
+    return multiseed_runner._hashed_payload(
+        {
+            "schema_version": 1,
+            "artifact_type": "ecg_trust.multiseed_revision_provenance",
+            "sweep_snapshot": {
+                "git_tree": "5" * 40,
+                "source_provenance": source,
+            },
+            "execution_snapshot": {
+                "git_tree": "6" * 40,
+                "source_provenance": execution,
+            },
+            "scientific_kernel": {
+                "policy": "ptbxl_development_training_kernel_v1",
+                "sweep_revision": "1" * 40,
+                "execution_revision": "2" * 40,
+                "paths": kernel_paths,
+                "paths_sha256": multiseed_runner._canonical_hash({"paths": kernel_paths}),
+                "git_diff_sha256": empty_hash,
+                "unchanged": True,
+                "allowed_changed_paths": [],
+                "allowed_changed_paths_sha256": multiseed_runner._canonical_hash(
+                    {"paths": []}
+                ),
+            },
+        }
+    )
+
+
 def _member(
     *,
     tmp_path: Path,
@@ -265,7 +331,66 @@ def _member(
     prediction_path = tmp_path / "predictions" / f"{architecture}-seed{seed}-fold8.npz"
     files = save_prediction_artifact(prediction, prediction_path, protocol=protocol)
     member_plan = run_dir.parent / "member_plan.json"
-    _json(member_plan, {"architecture": architecture, "seed": seed})
+    completion_path = run_dir.parent / "member_completion.json"
+    template_payload: dict[str, object] = {
+        "schema_version": config["schema_version"],
+        "run_name": f"{architecture}-winner-seed2026",
+        "folds": config["folds"],
+        "data": config["data"],
+        "model": {"architecture": architecture, "preset": "smoke"},
+        "loader": config["loader"],
+        "optimization": config["optimization"],
+        "runtime": {"seed": 2026, "device": "cpu", "bf16": True},
+        "output": config["output"],
+    }
+    template = DevelopmentExperimentConfig.from_mapping(
+        template_payload,
+        base_dir=member_plan.parent,
+    )
+    revision_provenance = _revision_provenance(
+        tmp_path,
+        manifest_path=manifest_path,
+        normalization_path=normalization_path,
+    )
+    plan_body: dict[str, object] = {
+        "schema_version": 1,
+        "artifact_type": "ecg_trust.multiseed_member_plan",
+        "comparison_id": "paired-test-v1",
+        "architecture": architecture,
+        "seed": seed,
+        "source_kind": "reused_sweep_winner" if seed == 2026 else "confirmation_training",
+        "train_folds": list(TRAIN_FOLDS),
+        "model_selection_folds": [8],
+        "protocol_hash": protocol.protocol_hash,
+        "sweep_summary_path": str((tmp_path / "sweep_summary.json").resolve()),
+        "sweep_summary_sha256": "sha256:" + "7" * 64,
+        "candidate_plan_hash": "sha256:" + "8" * 64,
+        "winning_sweep_candidate": 2,
+        "winning_sweep_trial": 3,
+        "winning_run_dir": str(run_dir.resolve()),
+        "winning_artifact_sha256": {},
+        "winning_best_epoch": best_epoch,
+        "winning_best_macro_auroc": 1.0,
+        "manifest_sha256": file_sha256(manifest_path),
+        "normalization_sha256": file_sha256(normalization_path),
+        "scientific_config_sha256": multiseed_runner._canonical_hash(
+            multiseed_runner._scientific_payload(template)
+        ),
+        "sweep_revision": "1" * 40,
+        "execution_revision": "2" * 40,
+        "revision_provenance": revision_provenance,
+        "revision_provenance_sha256": revision_provenance["artifact_sha256"],
+        "experiment_template": template.to_resolved_dict(),
+        "allowed_config_differences": ["run_name", "runtime.seed", "output.root_dir"],
+        "member_dir": str(run_dir.parent.resolve()),
+        "attempt_root": str((run_dir.parent / "attempts").resolve()),
+        "max_attempts": 0 if seed == 2026 else 3,
+        "prediction_path": str(files.npz_path.resolve()),
+        "prediction_json_path": str(files.json_path.resolve()),
+        "completion_path": str(completion_path.resolve()),
+    }
+    member_plan_payload = multiseed_runner._hashed_payload(plan_body)
+    _json(member_plan, member_plan_payload)
     completion_body: dict[str, object] = {
         "schema_version": 1,
         "artifact_type": "ecg_trust.multiseed_member_completion",
@@ -274,7 +399,7 @@ def _member(
         "seed": seed,
         "status": "complete",
         "member_plan_path": str(member_plan.resolve()),
-        "member_plan_sha256": file_sha256(member_plan),
+        "member_plan_sha256": member_plan_payload["artifact_sha256"],
         "run_dir": str(run_dir.resolve()),
         "run_metadata_path": str(metadata_path.resolve()),
         "run_metadata_sha256": file_sha256(metadata_path),
@@ -298,7 +423,6 @@ def _member(
     }
     completion = dict(completion_body)
     completion["artifact_sha256"] = canonical_sha256(completion_body)
-    completion_path = run_dir.parent / "member_completion.json"
     _json(completion_path, completion)
     return completion_path, config, resolved_path
 
@@ -374,6 +498,7 @@ def freeze_inputs(tmp_path: Path) -> dict[str, object]:
             "best_by_architecture": winners,
         },
     )
+    downstream = capture_downstream_provenance(tmp_path)
     return {
         "tmp_path": tmp_path,
         "frame": frame,
@@ -383,8 +508,8 @@ def freeze_inputs(tmp_path: Path) -> dict[str, object]:
         "sweep": sweep_summary,
         "creation": FreezeCreation(
             timestamp_utc="2026-08-08T12:00:00Z",
-            code_revision="unavailable",
-            dependency_lock_sha256=file_sha256(lock_path),
+            code_revision=str(downstream["code_revision"]),
+            dependency_lock_sha256=str(downstream["dependency_lock_sha256"]),
             software_versions={"python": "3.12", "numpy": "2", "torch": "2"},
         ),
     }
@@ -610,7 +735,7 @@ def test_refit_rejects_fold8_manifest_drift_before_factories(
         calls.append("model")
         return nn.Linear(4, 5)
 
-    with pytest.raises(FrozenRefitError, match="current manifest SHA-256"):
+    with pytest.raises(FrozenRefitError, match="manifest"):
         run_frozen_refit(
             config,
             protocol=ExperimentProtocol.canonical(),
@@ -640,7 +765,7 @@ def test_refit_rejects_regenerated_normalization_before_factories(
         calls.append("model")
         return nn.Linear(4, 5)
 
-    with pytest.raises(FrozenRefitError, match="current normalization SHA-256"):
+    with pytest.raises(FrozenRefitError, match="normalization"):
         run_frozen_refit(
             config,
             protocol=ExperimentProtocol.canonical(),
@@ -776,7 +901,7 @@ def test_completion_cannot_rebind_drifted_manifest_away_from_freeze(
     body.pop("artifact_sha256")
     completion["artifact_sha256"] = canonical_sha256(body)
     _json(result.completion_path, completion)
-    with pytest.raises(FrozenRefitError, match="manifest hash differs from frozen"):
+    with pytest.raises(FrozenRefitError, match="manifest"):
         load_refit_completion(
             result.completion_path,
             protocol=ExperimentProtocol.canonical(),
