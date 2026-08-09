@@ -9,8 +9,10 @@ from ecg_trust.robustness import (
     CorruptionValidationError,
     amplitude_scale,
     baseline_wander,
+    dc_offset,
     drop_leads,
     gaussian_noise_at_snr,
+    mask_contiguous_time,
     permute_leads,
     powerline_interference,
     zero_padded_time_shift,
@@ -31,7 +33,9 @@ def test_corruptions_preserve_shape_dtype_finiteness_and_input() -> None:
         powerline_interference(original, amplitude_fraction=0.05),
         gaussian_noise_at_snr(original, snr_db=10.0, generator=generator),
         amplitude_scale(original, factor=1.2),
+        dc_offset(original, offset_fraction=-0.1),
         zero_padded_time_shift(original, samples=25),
+        mask_contiguous_time(original, start_sample=200, width_samples=50),
         drop_leads(original, lead_indices=(0, 5)),
         permute_leads(original, permutation=tuple(reversed(range(12)))),
     )
@@ -65,6 +69,37 @@ def test_time_shift_is_zero_padded_not_circular() -> None:
     assert torch.count_nonzero(left[..., -4:]) == 0
     torch.testing.assert_close(right[..., 3:], waveforms[..., :-3])
     torch.testing.assert_close(left[..., :-4], waveforms[..., 4:])
+
+
+def test_dc_offset_is_record_scaled_and_signed() -> None:
+    waveforms = _waveforms()
+    shifted = dc_offset(waveforms, offset_fraction=-0.25)
+    expected = -0.25 * waveforms.square().mean(dim=(1, 2), keepdim=True).sqrt()
+    torch.testing.assert_close(shifted - waveforms, expected.expand_as(waveforms))
+
+
+def test_contiguous_mask_is_explicit_and_lead_scoped() -> None:
+    waveforms = _waveforms()
+    masked = mask_contiguous_time(
+        waveforms,
+        start_sample=100,
+        width_samples=40,
+        lead_indices=(0, 5),
+    )
+    assert torch.count_nonzero(masked[:, [0, 5], 100:140]) == 0
+    torch.testing.assert_close(masked[:, 1], waveforms[:, 1])
+    torch.testing.assert_close(masked[:, 0, :100], waveforms[:, 0, :100])
+    torch.testing.assert_close(masked[:, 0, 140:], waveforms[:, 0, 140:])
+
+    with pytest.raises(CorruptionValidationError, match="within"):
+        mask_contiguous_time(waveforms, start_sample=990, width_samples=20)
+    with pytest.raises(CorruptionValidationError, match="unique"):
+        mask_contiguous_time(
+            waveforms,
+            start_sample=100,
+            width_samples=20,
+            lead_indices=(2, 2),
+        )
 
 
 def test_lead_operations_are_explicit_and_validated() -> None:

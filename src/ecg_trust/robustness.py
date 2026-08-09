@@ -29,7 +29,9 @@ class CorruptionKind(StrEnum):
     POWERLINE = "powerline"
     GAUSSIAN_NOISE = "gaussian_noise"
     AMPLITUDE_SCALE = "amplitude_scale"
+    DC_OFFSET = "dc_offset"
     TIME_SHIFT = "time_shift"
+    CONTIGUOUS_MASK = "contiguous_mask"
     LEAD_DROPOUT = "lead_dropout"
     LEAD_PERMUTATION = "lead_permutation"
 
@@ -160,6 +162,21 @@ def amplitude_scale(waveforms: Tensor, *, factor: float) -> Tensor:
     return waveforms * parsed
 
 
+def dc_offset(waveforms: Tensor, *, offset_fraction: float) -> Tensor:
+    """Add a constant offset scaled by each record's RMS.
+
+    ``offset_fraction`` is signed: positive values move the trace upward and
+    negative values move it downward.  Scaling by record RMS makes the audit
+    comparable across examples without fitting anything to fold 10.
+    """
+
+    _validate_waveforms(waveforms)
+    parsed = float(offset_fraction)
+    if not math.isfinite(parsed):
+        raise CorruptionValidationError("offset_fraction must be finite")
+    return waveforms + parsed * _example_rms(waveforms)
+
+
 def zero_padded_time_shift(waveforms: Tensor, *, samples: int) -> Tensor:
     """Shift in time without circularly wrapping physiological content."""
 
@@ -176,6 +193,44 @@ def zero_padded_time_shift(waveforms: Tensor, *, samples: int) -> Tensor:
     else:
         shifted.copy_(waveforms)
     return shifted
+
+
+def mask_contiguous_time(
+    waveforms: Tensor,
+    *,
+    start_sample: int,
+    width_samples: int,
+    lead_indices: Sequence[int] | None = None,
+) -> Tensor:
+    """Zero one explicit contiguous interval on selected or all leads.
+
+    The interval is half-open, ``[start_sample, start_sample + width_samples)``.
+    Requiring an explicit start avoids hidden randomness in the audit runner.
+    """
+
+    _validate_waveforms(waveforms)
+    if isinstance(start_sample, bool) or not isinstance(start_sample, int):
+        raise CorruptionValidationError("start_sample must be an integer")
+    if isinstance(width_samples, bool) or not isinstance(width_samples, int):
+        raise CorruptionValidationError("width_samples must be an integer")
+    if start_sample < 0 or start_sample >= waveforms.shape[2]:
+        raise CorruptionValidationError("start_sample is outside the signal")
+    if width_samples < 1 or start_sample + width_samples > waveforms.shape[2]:
+        raise CorruptionValidationError("masked interval must lie within the signal")
+
+    indices = tuple(range(len(LEADS))) if lead_indices is None else tuple(lead_indices)
+    if not indices:
+        raise CorruptionValidationError("lead_indices must not be empty")
+    if any(isinstance(index, bool) or not isinstance(index, int) for index in indices):
+        raise CorruptionValidationError("lead_indices must contain integers")
+    if len(set(indices)) != len(indices):
+        raise CorruptionValidationError("lead_indices must be unique")
+    if any(index < 0 or index >= len(LEADS) for index in indices):
+        raise CorruptionValidationError("lead index is outside the canonical lead range")
+
+    corrupted = waveforms.clone()
+    corrupted[:, list(indices), start_sample : start_sample + width_samples] = 0.0
+    return corrupted
 
 
 def drop_leads(waveforms: Tensor, *, lead_indices: Sequence[int]) -> Tensor:
