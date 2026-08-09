@@ -48,8 +48,8 @@ then exported and encountered the same representation-only check. This
 continued deterministically until all six members and aggregate reports were
 complete.
 
-One supervised shell invocation also reached its external two-minute command
-limit during report computation. It terminated before a new ledger event or
+One supervised shell invocation also reached its external two-minute command limit
+during report computation. It terminated before a new ledger event or
 artifact commit; the ledger and existing prediction pair were unchanged. The
 next exact resume repeated only unfinished deterministic computation.
 
@@ -73,8 +73,9 @@ without running inference, creating files, or mutating the complete ledger.
 
 Only after completion and read-only replay, commit `c75a12b` normalized the
 two SHA-256 representations in the redundant exporter-result validator and
-added a regression test. This later revision did not produce or alter any
-sealed evaluation artifact. All confirmatory results remain attributable to
+added a regression test. This later revision
+did not produce or alter any sealed evaluation artifact. All confirmatory results
+remain attributable to
 the code revision frozen in the evaluation specification.
 
 ## Interpretation boundary
