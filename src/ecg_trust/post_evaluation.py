@@ -178,18 +178,14 @@ def _hash(value: object, context: str) -> str:
         or len(digest) != 64
         or any(character not in "0123456789abcdef" for character in digest)
     ):
-        raise PostEvaluationIntegrityError(
-            f"{context} must be a prefixed lower-case SHA-256"
-        )
+        raise PostEvaluationIntegrityError(f"{context} must be a prefixed lower-case SHA-256")
     return text
 
 
 def _normalized_hash(value: object, context: str) -> str:
     text = _string(value, context)
     digest = text.removeprefix("sha256:")
-    if len(digest) != 64 or any(
-        character not in "0123456789abcdef" for character in digest
-    ):
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
         raise PostEvaluationIntegrityError(f"{context} must contain a lower-case SHA-256")
     return "sha256:" + digest
 
@@ -343,9 +339,7 @@ def _robustness_protocol() -> dict[str, object]:
             {
                 "case_id": "lead-permutation-swap-I-II",
                 "corruption": "lead_permutation",
-                "parameters": {
-                    "permutation": [1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-                },
+                "parameters": {"permutation": [1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]},
             },
             {
                 "case_id": "lead-permutation-reverse-all",
@@ -359,6 +353,28 @@ def _robustness_protocol() -> dict[str, object]:
     return {
         "sampling_frequency_hz": 100.0,
         "random_seed": ROBUSTNESS_RANDOM_SEED,
+        "corruption_domain": ("physical_millivolts_before_each_member_frozen_normalization"),
+        "execution": {
+            "physical_corruption_precision": "cpu_float32",
+            "model_inference_precision": "bf16_as_frozen_in_final_batch",
+            "metric_precision": "cpu_float64",
+            "inference_batching": "reuse_frozen_final_evaluation_settings",
+            "stochastic_transform_randomness": "stateless_per_ecg_sha256",
+        },
+        "transform_definitions": {
+            "record_scale": "whole_record_all_12_lead_rms_per_ecg_in_physical_mv",
+            "baseline_wander": "shared_across_leads_sinusoid_scaled_by_record_rms",
+            "powerline": ("shared_across_leads_sinusoid_scaled_by_record_rms;50hz_nyquist_allowed"),
+            "gaussian_noise": ("standard_normal_draw_rescaled_per_ecg_to_exact_realized_rms_snr"),
+            "amplitude_scale": "multiply_all_leads_and_samples_by_factor",
+            "dc_offset": "shared_constant_scaled_by_signed_fraction_of_record_rms",
+            "time_shift": "zero_padded_non_circular_shift",
+            "contiguous_mask": (
+                "zero_half_open_interval_on_all_listed_leads;stateless_valid_start_per_ecg"
+            ),
+            "lead_dropout": "zero_all_samples_of_listed_leads",
+            "lead_permutation": "explicit_full_canonical_lead_axis_permutation",
+        },
         "clean_baseline_gate": {
             "required_before_corruptions": True,
             "comparison": "np.array_equal_against_sealed_raw_logits",
@@ -374,6 +390,21 @@ def _robustness_protocol() -> dict[str, object]:
             "confidence": 0.95,
             "base_seed": 20_260_908,
             "pairing": "corrupted_minus_clean_within_member_and_patient",
+            "cluster_unit": "patient_id",
+            "cluster_sampling": (
+                "sample_n_unique_patients_with_replacement_then_include_all_cluster_records"
+            ),
+            "record_weighting": "resampled_patient_multiplicity_with_all_cluster_records",
+            "confidence_interval": "percentile",
+        },
+        "dense_risk_coverage": {
+            "ordering": "ascending_mean_normalized_binary_entropy_stable_index_tiebreak",
+            "coverage_prefixes": "one_through_all_records",
+            "hamming_risk": "mean_label_error_per_record_then_cumulative_prefix_mean",
+            "log_loss_risk": "mean_label_log_loss_per_record_then_cumulative_prefix_mean",
+            "area_method": "arithmetic_mean_over_all_prefix_coverages",
+            "oracle_reference": "ascending_per_record_loss_stable_index_tiebreak",
+            "random_reference": "analytical_constant_full_coverage_risk",
         },
         "metrics": [
             "macro_roc_auc",
@@ -398,23 +429,61 @@ def _explanation_settings() -> dict[str, object]:
     return {
         "target_labels": list(LABEL_ORDER),
         "target_assignment": "one_preregistered_label_status_cell_per_selected_ecg",
+        "target_score": {
+            "positive_cell": "+1_times_target_label_logit",
+            "negative_cell": "-1_times_target_label_logit",
+            "probability": "sigmoid(signed_correct_status_logit_over_frozen_temperature)",
+            "attribution_orientation": "multiply_target_label_map_by_cell_sign",
+        },
         "baseline": "all_zero_normalized_input",
+        "execution": {
+            "numeric_precision": "float32",
+            "sealed_clean_equivalence_precision": "bf16_as_frozen_in_final_batch",
+            "outer_attribution_batch_size": 4,
+            "faithfulness_scoring_batch_size": 60,
+            "torch_deterministic_algorithms": True,
+            "identical_rerun_requirement": "torch_equal",
+            "tf32_allowed": False,
+            "fp32_vs_sealed_cohort_logit_drift_required": True,
+        },
         "methods_by_architecture": {
             "resnet1d": ["grad_cam_1d", "integrated_gradients", "temporal_occlusion"],
             "ecg_transformer": ["integrated_gradients", "temporal_occlusion"],
         },
+        "grad_cam_1d": {
+            "feature_map": "resnet_final_temporal_feature_map_before_global_pool",
+            "channel_weights": "mean_target_gradient_over_time",
+            "signed": True,
+            "relu_applied": False,
+            "upsampling": "linear_to_1000_samples_align_corners_false",
+            "normalization": "per_ecg_unit_maximum_absolute_value",
+        },
         "integrated_gradients": {
             "n_steps": 32,
             "internal_batch_size": 8,
+            "multiply_by_inputs": True,
+            "integration_method": "gausslegendre",
             "normalize": True,
+            "completeness_delta_basis": "pre_normalization_signed_raw_ig",
         },
         "temporal_occlusion": {
             "window_samples": 50,
             "stride_samples": 25,
             "perturbations_per_eval": 16,
             "normalize": True,
+            "mask_unit": "one_temporal_window_across_all_12_leads",
+            "baseline": "zero_normalized_input",
+            "returned_lead_axis": "duplicated_not_lead_resolved",
         },
         "faithfulness": {
+            "temporal_importance": (
+                "mean_absolute_attribution_across_attribution_channels_per_sample"
+            ),
+            "temporal_perturbation_unit": ("one_ranked_sample_index_across_all_12_input_leads"),
+            "operation_rankings": {
+                "deletion": ["most_important", "least_important", "random"],
+                "insertion": ["most_important"],
+            },
             "temporal_deletion_fractions": [
                 0.0,
                 0.05,
@@ -427,10 +496,39 @@ def _explanation_settings() -> dict[str, object]:
             ],
             "random_ranking_replicates": 20,
             "random_ranking_seed": 20_261_008,
-            "lead_ablation": True,
+            "lead_ablation": {
+                "applicable_to_lead_specific_maps_only": True,
+                "applicable_methods": ["integrated_gradients"],
+                "rankings": ["most_important", "least_important", "random"],
+                "prefixes": "zero_through_all_12_leads",
+                "lead_importance": "mean_absolute_attribution_over_time_per_lead",
+            },
+            "area_under_curve": (
+                "trapezoidal_integral_of_calibrated_correct_status_probability_over_fraction"
+            ),
+            "guided_vs_random_advantage": "mean_random_auc_minus_guided_auc",
             "parameter_randomization_seeds": [2_026_801, 2_026_802, 2_026_803],
+            "parameter_randomization_scope": "full_model_reset_parameters_copy",
+            "parameter_randomization_similarity": (
+                "signed_cosine_of_flattened_attribution_tensors"
+            ),
             "stability_noise_snr_db": 40.0,
             "stability_replicates": 3,
+            "stability_seed_strategy": "sha256_of_replicate_and_ecg_id",
+            "stability_similarity": "signed_cosine_of_flattened_attribution_tensors",
+            "stability_noise": {
+                "domain": "after_frozen_normalization",
+                "distribution": "iid_zero_mean_gaussian",
+                "scale": "whole_record_all_lead_rms_per_ecg",
+                "snr_definition": (
+                    "nominal_expected_power_snr_from_gaussian_sigma;realized_draw_not_renormalized"
+                ),
+            },
+            "integrated_gradients_completeness_delta_required": True,
+            "cross_method_agreement": {
+                "aggregation": "absolute_attribution_mean_across_leads_to_time",
+                "metrics": ["cosine", "spearman"],
+            },
         },
         "selection_data_policy": {
             "targets": "allowed_only_for_preregistered_label_status_stratification",
@@ -460,13 +558,9 @@ def _output_contract(project_root: Path, comparison_id: str) -> dict[str, object
             "robustness_manifest": str(root / "robustness" / "manifest.json"),
             "explanations_manifest": str(root / "explanations" / "manifest.json"),
             "demo_directory": str(root / "demo"),
-            "demo_policy": str(
-                root / "demo" / "resnet1d-seed2026.coverage80.demo-policy.json"
-            ),
+            "demo_policy": str(root / "demo" / "resnet1d-seed2026.coverage80.demo-policy.json"),
             "demo_examples": str(root / "demo" / "fold8-label-free.examples.json"),
-            "demo_binding": str(
-                root / "demo" / "resnet1d-seed2026.coverage80.demo-binding.json"
-            ),
+            "demo_binding": str(root / "demo" / "resnet1d-seed2026.coverage80.demo-binding.json"),
             "publication_tables_directory": str(root / "publication" / "tables"),
             "publication_figures_directory": str(root / "publication" / "figures"),
         },
@@ -496,9 +590,7 @@ def _capture_clean_git(project_root: Path) -> dict[str, object]:
         raise PostEvaluationError("project root must be the Git worktree top level")
     status = _run_git(project_root, "status", "--porcelain", "--untracked-files=all")
     if status:
-        raise PostEvaluationError(
-            "post-evaluation freeze requires a clean committed Git worktree"
-        )
+        raise PostEvaluationError("post-evaluation freeze requires a clean committed Git worktree")
     revision = _run_git(project_root, "rev-parse", "HEAD").casefold()
     if len(revision) not in {40, 64} or any(
         character not in "0123456789abcdef" for character in revision
@@ -518,24 +610,17 @@ def _bundle_binding(
         "artifact_sha256": _hash(bundle.artifact_sha256, "bundle artifact_sha256"),
         "protocol_hash": _hash(bundle.protocol_hash, "bundle protocol_hash"),
         "manifest_sha256": _hash(bundle.manifest_sha256, "bundle manifest_sha256"),
-        "normalization_sha256": _hash(
-            bundle.normalization_sha256, "bundle normalization_sha256"
-        ),
+        "normalization_sha256": _hash(bundle.normalization_sha256, "bundle normalization_sha256"),
         "member_count": len(bundle.members),
     }
 
 
-def _infer_opening_ledger_path(
-    final_spec_path: Path, final_spec_sha256: str
-) -> Path:
+def _infer_opening_ledger_path(final_spec_path: Path, final_spec_sha256: str) -> Path:
     release_root = final_spec_path.resolve().parent.parent
     return (
         release_root
         / ".final-test-openings"
-        / (
-            final_spec_sha256.removeprefix("sha256:")
-            + ".opening-ledger.json"
-        )
+        / (final_spec_sha256.removeprefix("sha256:") + ".opening-ledger.json")
     ).resolve()
 
 
@@ -571,8 +656,7 @@ def _opening_ledger_binding(
     if set(members) != set(EXPECTED_MEMBER_IDS):
         raise PostEvaluationIntegrityError("opening ledger member grid is not exact-six")
     if any(
-        _mapping(members[member_id], f"ledger member {member_id}").get("state")
-        != "report_saved"
+        _mapping(members[member_id], f"ledger member {member_id}").get("state") != "report_saved"
         for member_id in EXPECTED_MEMBER_IDS
     ):
         raise PostEvaluationIntegrityError("opening ledger contains an incomplete member")
@@ -585,9 +669,7 @@ def _opening_ledger_binding(
     purpose = _string(opening.get("purpose"), "opening purpose")
     operator = _string(opening.get("operator"), "opening operator")
     batch_sha256 = _hash(plan.get("batch_sha256"), "opening ledger batch_sha256")
-    marker_path = Path(
-        _string(plan.get("opening_marker_path"), "opening marker path")
-    ).resolve()
+    marker_path = Path(_string(plan.get("opening_marker_path"), "opening marker path")).resolve()
     marker = _verified_hashed_json(
         marker_path,
         context="canonical final-test opening marker",
@@ -598,8 +680,7 @@ def _opening_ledger_binding(
     if (
         marker.get("batch_sha256") != batch_sha256
         or marker.get("refit_bundle_sha256") != refit_binding["artifact_sha256"]
-        or marker.get("calibration_bundle_sha256")
-        != calibration_binding["artifact_sha256"]
+        or marker.get("calibration_bundle_sha256") != calibration_binding["artifact_sha256"]
         or Path(_string(marker.get("ledger_path"), "marker ledger path")).resolve()
         != path.resolve()
         or marker.get("marker_precedes_fold10_access") is not True
@@ -615,9 +696,7 @@ def _opening_ledger_binding(
             "batch_sha256": batch_sha256,
             "opening_marker_path": str(marker_path),
             "opening_marker_file_sha256": _file_sha256(marker_path),
-            "opening_marker_sha256": _hash(
-                marker["marker_sha256"], "opening marker_sha256"
-            ),
+            "opening_marker_sha256": _hash(marker["marker_sha256"], "opening marker_sha256"),
             "terminal_event": "exact_six_member_final_batch_complete",
         },
         ledger,
@@ -640,9 +719,7 @@ def _final_spec_binding(
     binding = {
         **_file_binding(path),
         "artifact_sha256": spec.artifact_sha256,
-        "evaluation_git_revision": _string(
-            git["revision"], "final evaluation Git revision"
-        ),
+        "evaluation_git_revision": _string(git["revision"], "final evaluation Git revision"),
     }
     return binding, payload
 
@@ -652,9 +729,7 @@ def _protocol_deviation_binding(
     *,
     final_spec_payload: Mapping[str, object],
 ) -> dict[str, object]:
-    frozen = _mapping(
-        final_spec_payload["protocol_deviations"], "frozen protocol deviations"
-    )
+    frozen = _mapping(final_spec_payload["protocol_deviations"], "frozen protocol deviations")
     binding = {
         **_file_binding(path),
         "required_in_all_reporting": True,
@@ -722,10 +797,13 @@ def _identity_arrays(
         raise PostEvaluationIntegrityError(
             f"could not read prediction identity arrays {path}: {error}"
         ) from error
-    if any(
-        not np.issubdtype(values.dtype, np.integer)
-        for values in (raw_ecg_id, raw_patient_id, raw_strat_fold, raw_targets)
-    ) or not np.logical_or(raw_targets == 0, raw_targets == 1).all():
+    if (
+        any(
+            not np.issubdtype(values.dtype, np.integer)
+            for values in (raw_ecg_id, raw_patient_id, raw_strat_fold, raw_targets)
+        )
+        or not np.logical_or(raw_targets == 0, raw_targets == 1).all()
+    ):
         raise PostEvaluationIntegrityError(
             "prediction identity arrays must be integers and targets must be binary"
         )
@@ -789,17 +867,13 @@ def _build_member_bindings(
     reference_targets: NDArray[np.int8] | None = None
     reference_alignment: str | None = None
     expected_npz_names = {f"{member_id}.fold10.npz" for member_id in EXPECTED_MEMBER_IDS}
-    expected_sidecar_names = {
-        f"{member_id}.fold10.json" for member_id in EXPECTED_MEMBER_IDS
-    }
-    expected_report_names = {
-        f"{member_id}.final-report.json" for member_id in EXPECTED_MEMBER_IDS
-    }
-    if {path.name for path in final_root.glob("*.fold10.npz")} != expected_npz_names or {
-        path.name for path in final_root.glob("*.fold10.json")
-    } != expected_sidecar_names or {
-        path.name for path in final_root.glob("*.final-report.json")
-    } != expected_report_names:
+    expected_sidecar_names = {f"{member_id}.fold10.json" for member_id in EXPECTED_MEMBER_IDS}
+    expected_report_names = {f"{member_id}.final-report.json" for member_id in EXPECTED_MEMBER_IDS}
+    if (
+        {path.name for path in final_root.glob("*.fold10.npz")} != expected_npz_names
+        or {path.name for path in final_root.glob("*.fold10.json")} != expected_sidecar_names
+        or {path.name for path in final_root.glob("*.final-report.json")} != expected_report_names
+    ):
         raise PostEvaluationIntegrityError(
             "final output directory does not contain the exact six prediction/report pairs"
         )
@@ -814,8 +888,7 @@ def _build_member_bindings(
             or refit.lineage_sha256 != calibration.refit_lineage_sha256
             or refit.final_checkpoint_path.resolve() != calibration.checkpoint_path.resolve()
             or refit.final_checkpoint_sha256 != calibration.checkpoint_sha256
-            or refit.resolved_config_path.resolve()
-            != calibration.resolved_config_path.resolve()
+            or refit.resolved_config_path.resolve() != calibration.resolved_config_path.resolve()
             or refit.resolved_config_hash != calibration.resolved_config_hash
         ):
             raise PostEvaluationIntegrityError(f"release lineage differs for {member_id}")
@@ -858,12 +931,8 @@ def _build_member_bindings(
             raise PostEvaluationIntegrityError(f"fold-10 prediction differs for {member_id}")
         report_model = _mapping(report.get("model"), "final report model")
         sources = _mapping(report.get("sources"), "final report sources")
-        report_spec = _mapping(
-            report.get("final_evaluation_spec"), "report final evaluation spec"
-        )
-        report_deviation = _mapping(
-            report.get("protocol_deviations"), "report protocol deviations"
-        )
+        report_spec = _mapping(report.get("final_evaluation_spec"), "report final evaluation spec")
+        report_deviation = _mapping(report.get("protocol_deviations"), "report protocol deviations")
         if (
             report["report_sha256"] != summary_hashes[member_id]
             or report_model.get("name") != refit.run_name
@@ -872,8 +941,7 @@ def _build_member_bindings(
             or report.get("config_hash") != refit.resolved_config_hash
             or sources.get("final_prediction_sha256") != sidecar["artifact_sha256"]
             or sources.get("final_alignment_sha256") != alignment
-            or sources.get("calibration_artifact_sha256")
-            != calibration.decision_artifact_sha256
+            or sources.get("calibration_artifact_sha256") != calibration.decision_artifact_sha256
             or dict(report_spec) != dict(final_spec_binding)
             or Path(_string(report_deviation.get("path"), "report deviations path")).resolve()
             != Path(_string(deviation_binding["path"], "deviation path"))
@@ -890,8 +958,7 @@ def _build_member_bindings(
                 )
             ).resolve()
             != prediction_path
-            or ledger_member.get("final_prediction_artifact_sha256")
-            != sidecar["artifact_sha256"]
+            or ledger_member.get("final_prediction_artifact_sha256") != sidecar["artifact_sha256"]
             or _normalized_hash(
                 ledger_member.get("final_prediction_file_sha256"),
                 "ledger prediction file hash",
@@ -902,9 +969,7 @@ def _build_member_bindings(
                 "ledger prediction sidecar hash",
             )
             != _file_sha256(sidecar_path)
-            or Path(
-                _string(ledger_member.get("final_report_path"), "ledger report path")
-            ).resolve()
+            or Path(_string(ledger_member.get("final_report_path"), "ledger report path")).resolve()
             != report_path
             or ledger_member.get("final_report_sha256") != report["report_sha256"]
         ):
@@ -920,19 +985,13 @@ def _build_member_bindings(
         if (
             decision["artifact_sha256"] != calibration.decision_artifact_sha256
             or _file_sha256(calibration.decision_path)
-            != _normalized_hash(
-                calibration.decision_file_sha256, "calibration decision file hash"
-            )
+            != _normalized_hash(calibration.decision_file_sha256, "calibration decision file hash")
             or decision.get("config_hash") != refit.resolved_config_hash
             or decision.get("protocol_hash") != protocol.protocol_hash
         ):
-            raise PostEvaluationIntegrityError(
-                f"calibration decision differs for {member_id}"
-            )
+            raise PostEvaluationIntegrityError(f"calibration decision differs for {member_id}")
 
-        ecg_id, patient_id, targets = _identity_arrays(
-            prediction_path, expected_count=record_count
-        )
+        ecg_id, patient_id, targets = _identity_arrays(prediction_path, expected_count=record_count)
         if reference_ecg is None:
             reference_ecg = ecg_id
             reference_patient = patient_id
@@ -949,9 +1008,7 @@ def _build_member_bindings(
                 or not np.array_equal(patient_id, reference_patient)
                 or not np.array_equal(targets, reference_targets)
             ):
-                raise PostEvaluationIntegrityError(
-                    "fold-10 prediction identities are not aligned"
-                )
+                raise PostEvaluationIntegrityError("fold-10 prediction identities are not aligned")
 
         members.append(
             {
@@ -968,9 +1025,7 @@ def _build_member_bindings(
                     "alignment_sha256": alignment,
                     "record_count": record_count,
                 },
-                "final_report": _artifact_binding(
-                    report_path, report, hash_field="report_sha256"
-                ),
+                "final_report": _artifact_binding(report_path, report, hash_field="report_sha256"),
                 "checkpoint": {
                     "path": str(refit.final_checkpoint_path.resolve()),
                     "file_sha256": _file_sha256(refit.final_checkpoint_path),
@@ -1021,16 +1076,11 @@ def _summary_binding(
     if summary.get("retuning_performed") is not False:
         raise PostEvaluationIntegrityError("final batch summary records retuning")
     preregistration = _mapping(summary.get("preregistration"), "summary preregistration")
-    if dict(
-        _mapping(preregistration.get("final_evaluation_spec"), "summary final spec")
-    ) != {
-        key: final_spec_binding[key]
-        for key in ("path", "file_sha256", "artifact_sha256")
+    if dict(_mapping(preregistration.get("final_evaluation_spec"), "summary final spec")) != {
+        key: final_spec_binding[key] for key in ("path", "file_sha256", "artifact_sha256")
     }:
         raise PostEvaluationIntegrityError("final summary specification binding differs")
-    summary_deviation = _mapping(
-        preregistration.get("protocol_deviations"), "summary deviations"
-    )
+    summary_deviation = _mapping(preregistration.get("protocol_deviations"), "summary deviations")
     if (
         Path(_string(summary_deviation.get("path"), "summary deviation path")).resolve()
         != Path(_string(deviation_binding["path"], "deviation path"))
@@ -1087,9 +1137,7 @@ def _build_aggregate_bindings(
             or ledger_outputs.get(f"architecture_{architecture}_sha256")
             != report.get("artifact_sha256")
         ):
-            raise PostEvaluationIntegrityError(
-                f"{architecture} architecture summary differs"
-            )
+            raise PostEvaluationIntegrityError(f"{architecture} architecture summary differs")
         architecture_summaries.append(
             {
                 "architecture": architecture,
@@ -1097,12 +1145,8 @@ def _build_aggregate_bindings(
             }
         )
 
-    manifest_entry = _mapping(
-        summary.get("paired_bootstrap_manifest"), "summary paired manifest"
-    )
-    manifest_path = Path(
-        _string(manifest_entry.get("path"), "paired manifest path")
-    ).resolve()
+    manifest_entry = _mapping(summary.get("paired_bootstrap_manifest"), "summary paired manifest")
+    manifest_path = Path(_string(manifest_entry.get("path"), "paired manifest path")).resolve()
     manifest = _verified_hashed_json(
         manifest_path,
         context="paired patient-bootstrap manifest",
@@ -1113,12 +1157,9 @@ def _build_aggregate_bindings(
     if (
         manifest.get("batch_sha256") != batch_sha256
         or manifest.get("artifact_sha256") != manifest_entry.get("artifact_sha256")
-        or Path(
-            _string(ledger_outputs.get("paired_manifest_path"), "ledger paired path")
-        ).resolve()
+        or Path(_string(ledger_outputs.get("paired_manifest_path"), "ledger paired path")).resolve()
         != manifest_path
-        or ledger_outputs.get("paired_manifest_sha256")
-        != manifest.get("artifact_sha256")
+        or ledger_outputs.get("paired_manifest_sha256") != manifest.get("artifact_sha256")
     ):
         raise PostEvaluationIntegrityError("paired bootstrap manifest differs")
     entries = _sequence(manifest.get("entries"), "paired manifest entries")
@@ -1154,17 +1195,13 @@ def _build_aggregate_bindings(
         paired_reports.append(
             {
                 "seed": seed,
-                "alignment_sha256": _hash(
-                    entry.get("alignment_sha256"), "paired alignment_sha256"
-                ),
+                "alignment_sha256": _hash(entry.get("alignment_sha256"), "paired alignment_sha256"),
                 **_artifact_binding(path, report, hash_field="artifact_sha256"),
             }
         )
     return {
         "architecture_summaries": architecture_summaries,
-        "paired_manifest": _artifact_binding(
-            manifest_path, manifest, hash_field="artifact_sha256"
-        ),
+        "paired_manifest": _artifact_binding(manifest_path, manifest, hash_field="artifact_sha256"),
         "paired_reports": paired_reports,
     }
 
@@ -1191,9 +1228,7 @@ def _explanation_cohort(
                 f"{EXPLANATION_SELECTION_SEED}:{label}:{status}:{ecg}"
             )
             digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
-            candidates.append(
-                (digest, ecg, patient, label_index, target_value, bits)
-            )
+            candidates.append((digest, ecg, patient, label_index, target_value, bits))
     candidates.sort(key=lambda value: (value[0], value[1], value[3], value[4]))
     records: list[dict[str, object]] = []
     selected_patients: set[int] = set()
@@ -1261,15 +1296,9 @@ def _demo_protocol(
     members: Sequence[Mapping[str, object]],
     calibration_bundle: CalibrationBundle,
 ) -> dict[str, object]:
-    member = next(
-        (item for item in members if item.get("member_id") == DEMO_MEMBER_ID), None
-    )
+    member = next((item for item in members if item.get("member_id") == DEMO_MEMBER_ID), None)
     calibration = next(
-        (
-            item
-            for item in calibration_bundle.members
-            if item.member_id == DEMO_MEMBER_ID
-        ),
+        (item for item in calibration_bundle.members if item.member_id == DEMO_MEMBER_ID),
         None,
     )
     if member is None or calibration is None:
@@ -1295,9 +1324,7 @@ def _demo_protocol(
         "entropy_method": "mean_normalized_binary_entropy",
         "gate": gate,
         "checkpoint": dict(_mapping(member["checkpoint"], "demo checkpoint")),
-        "resolved_config": dict(
-            _mapping(member["resolved_config"], "demo resolved config")
-        ),
+        "resolved_config": dict(_mapping(member["resolved_config"], "demo resolved config")),
         "calibration_decision": dict(
             _mapping(member["calibration_decision"], "demo calibration decision")
         ),
@@ -1319,12 +1346,10 @@ def _build_body(
     output_root: Path | None,
     analysis_runtime: Mapping[str, object],
 ) -> dict[str, object]:
-    refit, calibration, refit_binding, calibration_binding = (
-        _validate_release_bundles(
-            refit_bundle_path,
-            calibration_bundle_path,
-            protocol=protocol,
-        )
+    refit, calibration, refit_binding, calibration_binding = _validate_release_bundles(
+        refit_bundle_path,
+        calibration_bundle_path,
+        protocol=protocol,
     )
     final_spec_binding, final_spec_payload = _final_spec_binding(
         final_evaluation_spec_path, protocol=protocol
@@ -1353,8 +1378,7 @@ def _build_body(
         ledger_path,
         protocol=protocol,
         final_spec_binding={
-            key: final_spec_binding[key]
-            for key in ("path", "file_sha256", "artifact_sha256")
+            key: final_spec_binding[key] for key in ("path", "file_sha256", "artifact_sha256")
         },
         refit_binding=refit_binding,
         calibration_binding=calibration_binding,
@@ -1369,12 +1393,9 @@ def _build_body(
         raise PostEvaluationIntegrityError("summary and opening ledger batches differ")
     ledger_outputs = _mapping(ledger["outputs"], "opening ledger outputs")
     if (
-        Path(
-            _string(ledger_outputs.get("batch_summary_path"), "ledger summary path")
-        ).resolve()
+        Path(_string(ledger_outputs.get("batch_summary_path"), "ledger summary path")).resolve()
         != final_batch_summary_path
-        or ledger_outputs.get("batch_summary_sha256")
-        != summary_binding["artifact_sha256"]
+        or ledger_outputs.get("batch_summary_sha256") != summary_binding["artifact_sha256"]
     ):
         raise PostEvaluationIntegrityError("opening ledger summary binding differs")
     final_root = final_batch_summary_path.parent.resolve()
@@ -1386,8 +1407,7 @@ def _build_body(
         calibration_bundle=calibration,
         protocol=protocol,
         final_spec_binding={
-            key: final_spec_binding[key]
-            for key in ("path", "file_sha256", "artifact_sha256")
+            key: final_spec_binding[key] for key in ("path", "file_sha256", "artifact_sha256")
         },
         deviation_binding=deviation_binding,
     )
@@ -1401,9 +1421,7 @@ def _build_body(
     outputs = _output_contract(project_root, comparison_id)
     canonical_root = Path(_string(outputs["root"], "canonical output root"))
     if output_root is not None and output_root.resolve() != canonical_root:
-        raise PostEvaluationError(
-            f"post-evaluation output root must be exactly {canonical_root}"
-        )
+        raise PostEvaluationError(f"post-evaluation output root must be exactly {canonical_root}")
     return {
         "schema_version": POST_EVALUATION_SPEC_SCHEMA_VERSION,
         "artifact_type": POST_EVALUATION_SPEC_TYPE,
@@ -1492,9 +1510,7 @@ def _validate_cohort(value: object) -> None:
     ]
     if list(_sequence(cohort["cell_order"], "cohort cell_order")) != expected_cells:
         raise PostEvaluationIntegrityError("explanation cohort cell order differs")
-    if dict(
-        _mapping(cohort["selection_data_policy"], "cohort selection data policy")
-    ) != {
+    if dict(_mapping(cohort["selection_data_policy"], "cohort selection data policy")) != {
         "targets": "used_only_for_label_status_cell_membership",
         "predictions": "not_used",
         "metrics": "not_used",
@@ -1507,9 +1523,7 @@ def _validate_cohort(value: object) -> None:
     ecg_ids: set[int] = set()
     patient_ids: set[int] = set()
     cell_counts = {
-        (label, status): 0
-        for label in LABEL_ORDER
-        for status in ("negative", "positive")
+        (label, status): 0 for label in LABEL_ORDER for status in ("negative", "positive")
     }
     for expected_rank, raw in enumerate(records):
         record = _mapping(raw, "cohort record")
@@ -1659,8 +1673,7 @@ def _validate_payload(root: Mapping[str, object]) -> None:
         _hash(ledger_binding[key], f"opening_ledger.{key}")
     if (
         ledger_binding["state"] != "complete"
-        or ledger_binding["terminal_event"]
-        != "exact_six_member_final_batch_complete"
+        or ledger_binding["terminal_event"] != "exact_six_member_final_batch_complete"
     ):
         raise PostEvaluationIntegrityError("opening ledger binding is not terminal")
     _string(ledger_binding["purpose"], "opening_ledger.purpose")
@@ -1676,9 +1689,7 @@ def _validate_payload(root: Mapping[str, object]) -> None:
             "evaluation_git_revision",
         },
     )
-    final_spec_binding = _mapping(
-        sealed["final_evaluation_spec"], "final_evaluation_spec"
-    )
+    final_spec_binding = _mapping(sealed["final_evaluation_spec"], "final_evaluation_spec")
     evaluation_revision = _string(
         final_spec_binding["evaluation_git_revision"], "evaluation Git revision"
     )
@@ -1703,9 +1714,7 @@ def _validate_payload(root: Mapping[str, object]) -> None:
         "member_count",
     }
     for name in ("refit_bundle", "calibration_bundle"):
-        binding = _validate_file_binding(
-            sealed[name], context=name, expected_keys=bundle_keys
-        )
+        binding = _validate_file_binding(sealed[name], context=name, expected_keys=bundle_keys)
         for key in (
             "protocol_hash",
             "manifest_sha256",
@@ -1799,9 +1808,7 @@ def _validate_payload(root: Mapping[str, object]) -> None:
         {"architecture_summaries", "paired_manifest", "paired_reports"},
         "aggregate_outputs",
     )
-    architectures = _sequence(
-        aggregate["architecture_summaries"], "architecture_summaries"
-    )
+    architectures = _sequence(aggregate["architecture_summaries"], "architecture_summaries")
     if len(architectures) != 2:
         raise PostEvaluationIntegrityError("two architecture summaries are required")
     observed_architectures: list[str] = []
@@ -1844,9 +1851,7 @@ def _validate_payload(root: Mapping[str, object]) -> None:
 
     protocols = _mapping(root["audit_protocols"], "audit_protocols")
     _exact_keys(protocols, {"robustness", "explanations", "demo"}, "audit_protocols")
-    if dict(_mapping(protocols["robustness"], "robustness protocol")) != (
-        _robustness_protocol()
-    ):
+    if dict(_mapping(protocols["robustness"], "robustness protocol")) != (_robustness_protocol()):
         raise PostEvaluationIntegrityError("robustness severity matrix is not canonical")
     explanations = _mapping(protocols["explanations"], "explanations protocol")
     _exact_keys(explanations, {"cohort", "settings"}, "explanations protocol")
@@ -1907,9 +1912,7 @@ def _validate_payload(root: Mapping[str, object]) -> None:
         raise PostEvaluationIntegrityError("post-evaluation specification self-hash mismatch")
 
 
-def _spec_from_payload(
-    payload: Mapping[str, object], *, path: Path | None
-) -> PostEvaluationSpec:
+def _spec_from_payload(payload: Mapping[str, object], *, path: Path | None) -> PostEvaluationSpec:
     _validate_payload(payload)
     try:
         canonical = json.dumps(
@@ -2002,9 +2005,7 @@ def _write_new_json(path: Path, payload: Mapping[str, object]) -> None:
             temporary.unlink()
 
 
-def save_post_evaluation_spec(
-    spec: PostEvaluationSpec, path: str | Path
-) -> PostEvaluationSpec:
+def save_post_evaluation_spec(spec: PostEvaluationSpec, path: str | Path) -> PostEvaluationSpec:
     """Atomically publish the spec at its sole canonical no-overwrite path."""
 
     if not isinstance(spec, PostEvaluationSpec):
@@ -2056,9 +2057,7 @@ def load_post_evaluation_spec(
             protocol=protocol,
             final_batch_summary_path=Path(
                 _string(
-                    _mapping(
-                        sealed["final_batch_summary"], "final_batch_summary"
-                    )["path"],
+                    _mapping(sealed["final_batch_summary"], "final_batch_summary")["path"],
                     "final batch summary path",
                 )
             ).resolve(),
@@ -2076,25 +2075,19 @@ def load_post_evaluation_spec(
             ).resolve(),
             calibration_bundle_path=Path(
                 _string(
-                    _mapping(
-                        sealed["calibration_bundle"], "calibration_bundle"
-                    )["path"],
+                    _mapping(sealed["calibration_bundle"], "calibration_bundle")["path"],
                     "calibration bundle path",
                 )
             ).resolve(),
             final_evaluation_spec_path=Path(
                 _string(
-                    _mapping(
-                        sealed["final_evaluation_spec"], "final_evaluation_spec"
-                    )["path"],
+                    _mapping(sealed["final_evaluation_spec"], "final_evaluation_spec")["path"],
                     "final evaluation spec path",
                 )
             ).resolve(),
             protocol_deviations_path=Path(
                 _string(
-                    _mapping(
-                        sealed["protocol_deviations"], "protocol_deviations"
-                    )["path"],
+                    _mapping(sealed["protocol_deviations"], "protocol_deviations")["path"],
                     "protocol deviations path",
                 )
             ).resolve(),
@@ -2138,7 +2131,15 @@ def freeze_post_evaluation_spec(
         output_root=output_root,
     )
     saved = save_post_evaluation_spec(created, output_path)
-    return saved
+    if saved.path is None:  # pragma: no cover - save invariant
+        raise PostEvaluationIntegrityError("saved specification has no path")
+    return load_post_evaluation_spec(
+        saved.path,
+        protocol=protocol,
+        verify_sources=False,
+        # Git cleanliness was captured immediately before the ignored runs/ write.
+        verify_git=False,
+    )
 
 
 __all__ = [

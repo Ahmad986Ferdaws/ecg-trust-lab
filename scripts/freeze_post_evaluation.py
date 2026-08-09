@@ -11,8 +11,7 @@ from pathlib import Path
 
 from ecg_trust.post_evaluation import (
     PostEvaluationError,
-    create_post_evaluation_spec,
-    save_post_evaluation_spec,
+    freeze_post_evaluation_spec,
 )
 from ecg_trust.protocol import ProtocolValidationError, load_protocol
 
@@ -77,7 +76,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         protocol = load_protocol(args.protocol)
-        created = create_post_evaluation_spec(
+        saved = freeze_post_evaluation_spec(
+            args.output,
             protocol=protocol,
             final_batch_summary_path=args.final_batch_summary,
             opening_ledger_path=args.opening_ledger,
@@ -88,7 +88,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             project_root=args.project_root,
             output_root=args.output_root,
         )
-        saved = save_post_evaluation_spec(created, args.output)
     except (OSError, PostEvaluationError, ProtocolValidationError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

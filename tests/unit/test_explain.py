@@ -241,6 +241,37 @@ def test_insertion_least_and_random_controls_are_reproducible() -> None:
         )
 
 
+def test_faithfulness_can_score_positive_and_negative_target_status() -> None:
+    model = LeadMeanModel()
+    inputs = torch.ones(2, 12, 1000)
+    attributions = torch.ones(2, 1, 1000)
+
+    result = temporal_faithfulness_curve(
+        model,
+        inputs,
+        attributions,
+        torch.tensor([0, 0]),
+        fractions=(0.0, 1.0),
+        target_signs=torch.tensor([1, -1]),
+    )
+
+    torch.testing.assert_close(result.target_logits[0], -result.target_logits[1])
+    torch.testing.assert_close(
+        result.target_probabilities[0] + result.target_probabilities[1],
+        torch.ones(2, dtype=torch.float64),
+    )
+
+    with pytest.raises(ValueError, match=r"-1 or \+1"):
+        temporal_faithfulness_curve(
+            model,
+            inputs,
+            attributions,
+            0,
+            fractions=(0.0, 1.0),
+            target_signs=torch.tensor([1, 0]),
+        )
+
+
 def test_lead_ablation_curve_uses_lead_specific_attribution() -> None:
     model = LeadMeanModel()
     inputs = torch.zeros(1, 12, 1000)
@@ -295,7 +326,15 @@ def test_cross_method_similarity_aggregates_leads_and_reports_rank_agreement() -
     assert identical.cosine.item() == pytest.approx(1.0)
     assert identical.spearman.item() == pytest.approx(1.0)
     assert reversed_map.spearman.item() == pytest.approx(-1.0)
+    assert identical.cosine_valid.item() is True
+    assert identical.spearman_valid.item() is True
     json.dumps(identical.summary())
+
+    constant = cross_method_temporal_similarity(torch.ones(1, 1, 1000), torch.ones(1, 12, 1000))
+    assert constant.cosine_valid.item() is True
+    assert constant.spearman_valid.item() is False
+    assert constant.spearman.item() == 0.0
+    assert constant.summary()["mean_spearman"] is None
 
 
 def test_parameter_randomization_is_reproducible_and_non_mutating() -> None:
@@ -350,13 +389,9 @@ def test_targets_and_faithfulness_fractions_fail_closed() -> None:
     with pytest.raises(ValueError, match="target indices"):
         integrated_gradients(model, inputs, 5, n_steps=2)
     with pytest.raises(ValueError, match="start at 0"):
-        deletion_faithfulness_curve(
-            model, inputs, attributions, 0, fractions=(0.1, 1.0)
-        )
+        deletion_faithfulness_curve(model, inputs, attributions, 0, fractions=(0.1, 1.0))
     with pytest.raises(ValueError, match="strictly increasing"):
-        deletion_faithfulness_curve(
-            model, inputs, attributions, 0, fractions=(0.0, 0.5, 0.5, 1.0)
-        )
+        deletion_faithfulness_curve(model, inputs, attributions, 0, fractions=(0.0, 0.5, 0.5, 1.0))
 
 
 def test_attribution_methods_validate_five_logit_output() -> None:

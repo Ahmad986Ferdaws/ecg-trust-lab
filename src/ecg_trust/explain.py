@@ -23,6 +23,7 @@ from ecg_trust.models import ResNet1D
 
 CANONICAL_SAMPLES = 1000
 TargetSpec = int | Tensor
+SignSpec = int | Tensor
 
 
 def validate_ecg_batch(inputs: Tensor) -> None:
@@ -60,6 +61,26 @@ def _target_indices(targets: TargetSpec, batch_size: int, device: torch.device) 
     return indices
 
 
+def _target_signs(signs: SignSpec | None, batch_size: int, device: torch.device) -> Tensor:
+    if signs is None:
+        return torch.ones(batch_size, dtype=torch.float32, device=device)
+    if isinstance(signs, bool):
+        raise ValueError("target sign cannot be boolean")
+    if isinstance(signs, int):
+        result = torch.full((batch_size,), signs, dtype=torch.float32, device=device)
+    elif isinstance(signs, Tensor):
+        result = signs.detach().to(device=device, dtype=torch.float32)
+        if result.ndim == 0:
+            result = result.expand(batch_size)
+        if result.shape != (batch_size,):
+            raise ValueError(f"target signs must have shape [{batch_size}]")
+    else:
+        raise TypeError("target signs must be an integer, tensor, or None")
+    if not torch.all((result == -1.0) | (result == 1.0)):
+        raise ValueError("target signs must contain only -1 or +1")
+    return result
+
+
 def _validate_logits(logits: object, batch_size: int) -> Tensor:
     if not isinstance(logits, Tensor):
         raise ValueError("model must return a tensor")
@@ -84,8 +105,7 @@ def _validate_attributions(attributions: Tensor, batch_size: int) -> Tensor:
         or tuple(attributions.shape[2:]) != expected_tail
     ):
         raise ValueError(
-            "attributions must have shape [batch, 1000], [batch, 1, 1000], "
-            "or [batch, 12, 1000]"
+            "attributions must have shape [batch, 1000], [batch, 1, 1000], or [batch, 12, 1000]"
         )
     if batch_size < 1:
         raise ValueError("attribution batch cannot be empty")
@@ -212,12 +232,13 @@ def integrated_gradients_with_delta(
     with _evaluating(model), torch.enable_grad():
         with torch.no_grad():
             _validate_logits(model(inputs), inputs.shape[0])
-        attribution_method = IntegratedGradients(model)
+        attribution_method = IntegratedGradients(model, multiply_by_inputs=True)
         raw_result = attribution_method.attribute(
             working_inputs,
             baselines=baselines,
             target=target_indices.tolist(),
             n_steps=n_steps,
+            method="gausslegendre",
             internal_batch_size=internal_batch_size,
             return_convergence_delta=True,
         )
@@ -296,9 +317,10 @@ def _target_scores(
     targets: Tensor,
     *,
     temperature: float,
+    target_signs: Tensor,
 ) -> tuple[Tensor, Tensor]:
     logits = _validate_logits(model(inputs), inputs.shape[0])
-    selected = logits.gather(1, targets.unsqueeze(1)).squeeze(1)
+    selected = logits.gather(1, targets.unsqueeze(1)).squeeze(1) * target_signs
     return selected, (selected / _temperature(temperature)).sigmoid()
 
 
@@ -347,6 +369,7 @@ def deletion_faithfulness_curve(
     baseline: Tensor | None = None,
     fractions: Iterable[float] = (0.0, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0),
     temperature: float = 1.0,
+    target_signs: SignSpec | None = None,
 ) -> FaithfulnessCurve:
     """Delete highest-magnitude time points across all leads and rescore."""
 
@@ -360,6 +383,7 @@ def deletion_faithfulness_curve(
         operation="deletion",
         ranking="most_important",
         temperature=temperature,
+        target_signs=target_signs,
     )
     return FaithfulnessCurve(
         method="temporal_deletion",
@@ -379,11 +403,10 @@ def temporal_faithfulness_curve(
     baseline: Tensor | None = None,
     fractions: Iterable[float] = (0.0, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0),
     operation: Literal["deletion", "insertion"] = "deletion",
-    ranking: Literal["most_important", "least_important", "random"] = (
-        "most_important"
-    ),
+    ranking: Literal["most_important", "least_important", "random"] = ("most_important"),
     random_seed: int | None = None,
     temperature: float = 1.0,
+    target_signs: SignSpec | None = None,
 ) -> FaithfulnessCurve:
     """Delete or insert time points under a fixed importance/random ranking."""
 
@@ -392,6 +415,7 @@ def temporal_faithfulness_curve(
         device=inputs.device
     )
     target_indices = _target_indices(targets, inputs.shape[0], inputs.device)
+    score_signs = _target_signs(target_signs, inputs.shape[0], inputs.device)
     baselines = _baseline_like(inputs, baseline)
     fraction_tensor = _validated_fractions(fractions)
     temporal_importance = validated_attributions.abs().mean(dim=1)
@@ -435,6 +459,7 @@ def temporal_faithfulness_curve(
                 perturbed,
                 target_indices,
                 temperature=temperature,
+                target_signs=score_signs,
             )
             logits.append(target_logits)
             probabilities.append(target_probabilities)
@@ -442,9 +467,7 @@ def temporal_faithfulness_curve(
         method=f"temporal_{operation}_{ranking}",
         fractions=fraction_tensor,
         target_logits=torch.stack(logits, dim=1).detach().cpu().to(torch.float64),
-        target_probabilities=(
-            torch.stack(probabilities, dim=1).detach().cpu().to(torch.float64)
-        ),
+        target_probabilities=(torch.stack(probabilities, dim=1).detach().cpu().to(torch.float64)),
         target_indices=target_indices.detach().cpu(),
     )
 
@@ -456,11 +479,10 @@ def lead_ablation_faithfulness_curve(
     targets: TargetSpec,
     *,
     baseline: Tensor | None = None,
-    ranking: Literal["most_important", "least_important", "random"] = (
-        "most_important"
-    ),
+    ranking: Literal["most_important", "least_important", "random"] = ("most_important"),
     random_seed: int | None = None,
     temperature: float = 1.0,
+    target_signs: SignSpec | None = None,
 ) -> FaithfulnessCurve:
     """Ablate leads from most to least attributed and rescore each prefix."""
 
@@ -470,16 +492,13 @@ def lead_ablation_faithfulness_curve(
         raise ValueError("lead ablation requires lead-specific [batch, 12, 1000] attributions")
     validated_attributions = validated_attributions.to(device=inputs.device)
     target_indices = _target_indices(targets, inputs.shape[0], inputs.device)
+    score_signs = _target_signs(target_signs, inputs.shape[0], inputs.device)
     baselines = _baseline_like(inputs, baseline)
     lead_importance = validated_attributions.abs().mean(dim=2)
     if ranking == "most_important":
-        ablation_order = torch.argsort(
-            lead_importance, dim=1, descending=True, stable=True
-        )
+        ablation_order = torch.argsort(lead_importance, dim=1, descending=True, stable=True)
     elif ranking == "least_important":
-        ablation_order = torch.argsort(
-            lead_importance, dim=1, descending=False, stable=True
-        )
+        ablation_order = torch.argsort(lead_importance, dim=1, descending=False, stable=True)
     elif ranking == "random":
         if isinstance(random_seed, bool) or not isinstance(random_seed, int):
             raise ValueError("random ranking requires an integer random_seed")
@@ -491,9 +510,7 @@ def lead_ablation_faithfulness_curve(
             dtype=inputs.dtype,
             generator=generator,
         )
-        ablation_order = torch.argsort(
-            random_scores, dim=1, descending=True, stable=True
-        )
+        ablation_order = torch.argsort(random_scores, dim=1, descending=True, stable=True)
     else:  # pragma: no cover - Literal protects typed callers
         raise ValueError("unsupported lead ranking")
     fractions = torch.arange(len(LEADS) + 1, dtype=torch.float64) / len(LEADS)
@@ -512,6 +529,7 @@ def lead_ablation_faithfulness_curve(
                 perturbed,
                 target_indices,
                 temperature=temperature,
+                target_signs=score_signs,
             )
             logits.append(target_logits)
             probabilities.append(target_probabilities)
@@ -519,9 +537,7 @@ def lead_ablation_faithfulness_curve(
         method=("lead_ablation" if ranking == "most_important" else f"lead_ablation_{ranking}"),
         fractions=fractions,
         target_logits=torch.stack(logits, dim=1).detach().cpu().to(torch.float64),
-        target_probabilities=(
-            torch.stack(probabilities, dim=1).detach().cpu().to(torch.float64)
-        ),
+        target_probabilities=(torch.stack(probabilities, dim=1).detach().cpu().to(torch.float64)),
         target_indices=target_indices.detach().cpu(),
     )
 
@@ -581,17 +597,25 @@ class CrossMethodSimilarity:
 
     cosine: Tensor
     spearman: Tensor
+    cosine_valid: Tensor
+    spearman_valid: Tensor
 
     def summary(self) -> dict[str, object]:
         cosine = self.cosine.detach().cpu().to(torch.float64)
         spearman = self.spearman.detach().cpu().to(torch.float64)
+        cosine_valid = self.cosine_valid.detach().cpu().to(torch.bool)
+        spearman_valid = self.spearman_valid.detach().cpu().to(torch.bool)
         return {
             "method": "absolute_temporal_cross_method_agreement",
             "examples": int(cosine.numel()),
             "cosine_values": _float_list(cosine),
             "spearman_values": _float_list(spearman),
-            "mean_cosine": float(cosine.mean()),
-            "mean_spearman": float(spearman.mean()),
+            "cosine_valid": [bool(value) for value in cosine_valid.tolist()],
+            "spearman_valid": [bool(value) for value in spearman_valid.tolist()],
+            "mean_cosine": (float(cosine[cosine_valid].mean()) if cosine_valid.any() else None),
+            "mean_spearman": (
+                float(spearman[spearman_valid].mean()) if spearman_valid.any() else None
+            ),
         }
 
 
@@ -630,17 +654,35 @@ def cross_method_temporal_similarity(
         raise ValueError("attribution methods must align by batch and time")
     centered_reference = reference_map - reference_map.mean(dim=1, keepdim=True)
     centered_candidate = candidate_map - candidate_map.mean(dim=1, keepdim=True)
-    cosine = _cosine_rows(reference_map, candidate_map, epsilon=epsilon)
+    cosine_valid = (torch.linalg.vector_norm(reference_map, dim=1) > epsilon) & (
+        torch.linalg.vector_norm(candidate_map, dim=1) > epsilon
+    )
+    cosine = torch.where(
+        cosine_valid,
+        _cosine_rows(reference_map, candidate_map, epsilon=epsilon),
+        torch.zeros(reference_map.shape[0], dtype=torch.float64, device=reference_map.device),
+    )
     reference_ranks = _average_ranks(centered_reference)
     candidate_ranks = _average_ranks(centered_candidate)
-    spearman = _cosine_rows(
-        reference_ranks - reference_ranks.mean(dim=1, keepdim=True),
-        candidate_ranks - candidate_ranks.mean(dim=1, keepdim=True),
-        epsilon=epsilon,
+    centered_reference_ranks = reference_ranks - reference_ranks.mean(dim=1, keepdim=True)
+    centered_candidate_ranks = candidate_ranks - candidate_ranks.mean(dim=1, keepdim=True)
+    spearman_valid = (torch.linalg.vector_norm(centered_reference_ranks, dim=1) > epsilon) & (
+        torch.linalg.vector_norm(centered_candidate_ranks, dim=1) > epsilon
+    )
+    spearman = torch.where(
+        spearman_valid,
+        _cosine_rows(
+            centered_reference_ranks,
+            centered_candidate_ranks,
+            epsilon=epsilon,
+        ),
+        torch.zeros(reference_map.shape[0], dtype=torch.float64, device=reference_map.device),
     )
     return CrossMethodSimilarity(
         cosine=cosine.detach().cpu(),
         spearman=spearman.detach().cpu(),
+        cosine_valid=cosine_valid.detach().cpu(),
+        spearman_valid=spearman_valid.detach().cpu(),
     )
 
 
@@ -700,9 +742,11 @@ def parameter_randomization_comparison(
 ) -> SimilarityResult:
     """Compare original and randomized-model attributions by signed similarity."""
 
-    values = _cosine_similarity(
-        reference_attributions, randomized_attributions, epsilon=epsilon
-    ).detach().cpu()
+    values = (
+        _cosine_similarity(reference_attributions, randomized_attributions, epsilon=epsilon)
+        .detach()
+        .cpu()
+    )
     return SimilarityResult(method=f"parameter_randomization_seed_{seed}", values=values)
 
 
