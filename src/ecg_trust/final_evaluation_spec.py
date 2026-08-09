@@ -1014,9 +1014,14 @@ def _validate_payload(root: Mapping[str, object]) -> None:
         observed_groups.append((attribute, name))
         totals[attribute] += records
         patient_totals[attribute] += patients
+    # A patient can legitimately contribute ECGs to more than one age band
+    # over time, so the sum of per-group unique-patient counts can exceed the
+    # global unique-patient count. Record groups remain a strict partition;
+    # patient totals must cover every patient and cannot exceed record totals.
     if observed_groups != expected_groups or any(
         totals[attribute] != record_count
-        or patient_totals[attribute] != patient_count
+        or patient_totals[attribute] < patient_count
+        or patient_totals[attribute] > record_count
         for attribute in totals
     ):
         raise FinalEvaluationSpecIntegrityError("subgroup count grid is not canonical")

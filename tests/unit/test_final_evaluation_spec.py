@@ -14,6 +14,7 @@ import ecg_trust.final_evaluation_spec as spec_module
 import ecg_trust.release_gates as release_gates
 from ecg_trust.final_evaluation_spec import (
     CANONICAL_COVERAGE_TARGETS,
+    FinalEvaluationSpec,
     FinalEvaluationSpecError,
     FinalEvaluationSpecIntegrityError,
     canonical_sha256,
@@ -93,6 +94,50 @@ def _subgroup(protocol: ExperimentProtocol, manifest_hash: str) -> SubgroupArtif
             {"attribute": "age_band", "group": "60-79", "records": 0, "patients": 0},
             {"attribute": "age_band", "group": "80+", "records": 1, "patients": 1},
             {"attribute": "age_band", "group": "unknown", "records": 0, "patients": 0},
+        ),
+    )
+    return artifact.with_integrity()
+
+
+def _longitudinal_subgroup(
+    protocol: ExperimentProtocol, manifest_hash: str
+) -> SubgroupArtifact:
+    """One patient legitimately spans two age bands across two ECGs."""
+
+    artifact = SubgroupArtifact(
+        dataset_name=protocol.dataset_name,
+        dataset_version=protocol.dataset_version,
+        protocol_hash=protocol.protocol_hash,
+        manifest_path=Path("synthetic-manifest.parquet").resolve(),
+        manifest_sha256=manifest_hash,
+        ecg_id=(101, 102),
+        patient_id=(201, 201),
+        sex=("male", "male"),
+        age_band=("<40", "40-59"),
+        group_counts=(
+            {"attribute": "sex", "group": "male", "records": 2, "patients": 1},
+            {"attribute": "sex", "group": "female", "records": 0, "patients": 0},
+            {"attribute": "sex", "group": "unknown", "records": 0, "patients": 0},
+            {"attribute": "age_band", "group": "<40", "records": 1, "patients": 1},
+            {
+                "attribute": "age_band",
+                "group": "40-59",
+                "records": 1,
+                "patients": 1,
+            },
+            {
+                "attribute": "age_band",
+                "group": "60-79",
+                "records": 0,
+                "patients": 0,
+            },
+            {"attribute": "age_band", "group": "80+", "records": 0, "patients": 0},
+            {
+                "attribute": "age_band",
+                "group": "unknown",
+                "records": 0,
+                "patients": 0,
+            },
         ),
     )
     return artifact.with_integrity()
@@ -233,7 +278,7 @@ def frozen_inputs(
     )
 
 
-def _create(inputs: _Fixture):
+def _create(inputs: _Fixture) -> FinalEvaluationSpec:
     return create_final_evaluation_spec(
         protocol=inputs.protocol,
         protocol_path=inputs.protocol_path,
@@ -289,6 +334,37 @@ def test_spec_is_deterministic_strict_and_reverifies_sources(
         call[1] == frozen_inputs.bundle.manifest_sha256
         for call in frozen_inputs.subgroup_calls
     )
+
+
+def test_spec_allows_longitudinal_patient_to_span_age_bands(
+    frozen_inputs: _Fixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    longitudinal = _longitudinal_subgroup(
+        frozen_inputs.protocol, frozen_inputs.bundle.manifest_sha256
+    )
+
+    def load_longitudinal_subgroups(
+        path: str | Path,
+        *,
+        protocol: ExperimentProtocol,
+        expected_manifest_sha256: str,
+        verify_source: bool,
+    ) -> SubgroupArtifact:
+        assert Path(path).resolve() == frozen_inputs.subgroup_path.resolve()
+        assert protocol.protocol_hash == frozen_inputs.protocol.protocol_hash
+        assert expected_manifest_sha256 == frozen_inputs.bundle.manifest_sha256
+        assert verify_source is True
+        return longitudinal
+
+    monkeypatch.setattr(
+        spec_module, "load_subgroup_artifact", load_longitudinal_subgroups
+    )
+    spec = _create(frozen_inputs)
+    subgroup = cast(dict[str, object], spec.payload["subgroup_artifact"])
+    counts = cast(dict[str, object], subgroup["counts"])
+    assert counts["record_count"] == 2
+    assert counts["patient_count"] == 1
 
 
 def test_save_rejects_overwrite(frozen_inputs: _Fixture, tmp_path: Path) -> None:
