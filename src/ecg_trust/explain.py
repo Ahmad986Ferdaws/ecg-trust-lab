@@ -11,7 +11,7 @@ import copy
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import cast
+from typing import Literal, cast
 
 import torch
 from captum.attr import IntegratedGradients, Occlusion  # type: ignore[import-untyped]
@@ -177,6 +177,30 @@ def integrated_gradients(
 ) -> Tensor:
     """Compute signed Integrated Gradients for either primary architecture."""
 
+    attributions, _ = integrated_gradients_with_delta(
+        model,
+        inputs,
+        targets,
+        baseline=baseline,
+        n_steps=n_steps,
+        internal_batch_size=internal_batch_size,
+        normalize=normalize,
+    )
+    return attributions
+
+
+def integrated_gradients_with_delta(
+    model: nn.Module,
+    inputs: Tensor,
+    targets: TargetSpec,
+    *,
+    baseline: Tensor | None = None,
+    n_steps: int = 32,
+    internal_batch_size: int | None = None,
+    normalize: bool = True,
+) -> tuple[Tensor, Tensor]:
+    """Compute Integrated Gradients and its per-example completeness delta."""
+
     validate_ecg_batch(inputs)
     if n_steps < 2:
         raise ValueError("n_steps must be at least 2")
@@ -189,16 +213,23 @@ def integrated_gradients(
         with torch.no_grad():
             _validate_logits(model(inputs), inputs.shape[0])
         attribution_method = IntegratedGradients(model)
-        attributed = attribution_method.attribute(
+        raw_result = attribution_method.attribute(
             working_inputs,
             baselines=baselines,
             target=target_indices.tolist(),
             n_steps=n_steps,
             internal_batch_size=internal_batch_size,
+            return_convergence_delta=True,
         )
-    result = cast(Tensor, attributed).detach()
+    if not isinstance(raw_result, tuple) or len(raw_result) != 2:
+        raise ValueError("Integrated Gradients did not return attributions and delta")
+    result = cast(Tensor, raw_result[0]).detach()
+    delta = cast(Tensor, raw_result[1]).detach()
     _validate_attributions(result, inputs.shape[0])
-    return normalize_attributions(result) if normalize else result
+    if delta.shape != (inputs.shape[0],) or not torch.isfinite(delta).all():
+        raise ValueError("Integrated Gradients convergence delta is invalid")
+    attributed = normalize_attributions(result) if normalize else result
+    return attributed, delta.cpu().to(torch.float64)
 
 
 def temporal_occlusion(
@@ -252,9 +283,23 @@ def _validated_fractions(fractions: Iterable[float]) -> Tensor:
     return torch.tensor(values, dtype=torch.float64)
 
 
-def _target_probabilities(model: nn.Module, inputs: Tensor, targets: Tensor) -> Tensor:
+def _temperature(value: float) -> float:
+    parsed = float(value)
+    if not 0.0 < parsed < float("inf"):
+        raise ValueError("temperature must be finite and positive")
+    return parsed
+
+
+def _target_scores(
+    model: nn.Module,
+    inputs: Tensor,
+    targets: Tensor,
+    *,
+    temperature: float,
+) -> tuple[Tensor, Tensor]:
     logits = _validate_logits(model(inputs), inputs.shape[0])
-    return logits.gather(1, targets.unsqueeze(1)).squeeze(1).sigmoid()
+    selected = logits.gather(1, targets.unsqueeze(1)).squeeze(1)
+    return selected, (selected / _temperature(temperature)).sigmoid()
 
 
 def _float_list(values: Tensor) -> list[float]:
@@ -267,12 +312,15 @@ class FaithfulnessCurve:
 
     method: str
     fractions: Tensor
+    target_logits: Tensor
     target_probabilities: Tensor
     target_indices: Tensor
 
     def summary(self) -> dict[str, object]:
         mean_curve = self.target_probabilities.mean(dim=0)
         mean_drop = (self.target_probabilities[:, :1] - self.target_probabilities).mean(dim=0)
+        mean_logits = self.target_logits.mean(dim=0)
+        mean_logit_drop = (self.target_logits[:, :1] - self.target_logits).mean(dim=0)
         span = float(self.fractions[-1] - self.fractions[0])
         area = float(torch.trapezoid(mean_curve, self.fractions) / span)
         return {
@@ -282,6 +330,8 @@ class FaithfulnessCurve:
             "fractions": _float_list(self.fractions),
             "mean_target_probabilities": _float_list(mean_curve),
             "mean_probability_drop": _float_list(mean_drop),
+            "mean_target_logits": _float_list(mean_logits),
+            "mean_logit_drop": _float_list(mean_logit_drop),
             "mean_area_under_curve": area,
             "mean_area_over_curve": float(mean_curve[0] - area),
             "mean_drop_after_full_ablation": float(mean_drop[-1]),
@@ -296,8 +346,46 @@ def deletion_faithfulness_curve(
     *,
     baseline: Tensor | None = None,
     fractions: Iterable[float] = (0.0, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0),
+    temperature: float = 1.0,
 ) -> FaithfulnessCurve:
     """Delete highest-magnitude time points across all leads and rescore."""
+
+    result = temporal_faithfulness_curve(
+        model,
+        inputs,
+        attributions,
+        targets,
+        baseline=baseline,
+        fractions=fractions,
+        operation="deletion",
+        ranking="most_important",
+        temperature=temperature,
+    )
+    return FaithfulnessCurve(
+        method="temporal_deletion",
+        fractions=result.fractions,
+        target_logits=result.target_logits,
+        target_probabilities=result.target_probabilities,
+        target_indices=result.target_indices,
+    )
+
+
+def temporal_faithfulness_curve(
+    model: nn.Module,
+    inputs: Tensor,
+    attributions: Tensor,
+    targets: TargetSpec,
+    *,
+    baseline: Tensor | None = None,
+    fractions: Iterable[float] = (0.0, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0),
+    operation: Literal["deletion", "insertion"] = "deletion",
+    ranking: Literal["most_important", "least_important", "random"] = (
+        "most_important"
+    ),
+    random_seed: int | None = None,
+    temperature: float = 1.0,
+) -> FaithfulnessCurve:
+    """Delete or insert time points under a fixed importance/random ranking."""
 
     validate_ecg_batch(inputs)
     validated_attributions = _validate_attributions(attributions, inputs.shape[0]).to(
@@ -307,22 +395,56 @@ def deletion_faithfulness_curve(
     baselines = _baseline_like(inputs, baseline)
     fraction_tensor = _validated_fractions(fractions)
     temporal_importance = validated_attributions.abs().mean(dim=1)
-    deletion_order = torch.argsort(temporal_importance, dim=1, descending=True, stable=True)
-    scores: list[Tensor] = []
+    if ranking == "most_important":
+        order = torch.argsort(temporal_importance, dim=1, descending=True, stable=True)
+    elif ranking == "least_important":
+        order = torch.argsort(temporal_importance, dim=1, descending=False, stable=True)
+    elif ranking == "random":
+        if isinstance(random_seed, bool) or not isinstance(random_seed, int):
+            raise ValueError("random ranking requires an integer random_seed")
+        generator = torch.Generator(device=inputs.device)
+        generator.manual_seed(random_seed)
+        random_scores = torch.rand(
+            temporal_importance.shape,
+            device=inputs.device,
+            dtype=inputs.dtype,
+            generator=generator,
+        )
+        order = torch.argsort(random_scores, dim=1, descending=True, stable=True)
+    else:  # pragma: no cover - Literal protects typed callers
+        raise ValueError("unsupported temporal ranking")
+    if operation not in {"deletion", "insertion"}:
+        raise ValueError("operation must be deletion or insertion")
+    logits: list[Tensor] = []
+    probabilities: list[Tensor] = []
     with _evaluating(model), torch.inference_mode():
         for fraction in fraction_tensor:
-            delete_count = round(float(fraction) * CANONICAL_SAMPLES)
+            change_count = round(float(fraction) * CANONICAL_SAMPLES)
             mask = torch.zeros(
                 (inputs.shape[0], CANONICAL_SAMPLES), dtype=torch.bool, device=inputs.device
             )
-            if delete_count:
-                mask.scatter_(1, deletion_order[:, :delete_count], True)
-            perturbed = torch.where(mask.unsqueeze(1), baselines, inputs)
-            scores.append(_target_probabilities(model, perturbed, target_indices))
+            if change_count:
+                mask.scatter_(1, order[:, :change_count], True)
+            perturbed = (
+                torch.where(mask.unsqueeze(1), baselines, inputs)
+                if operation == "deletion"
+                else torch.where(mask.unsqueeze(1), inputs, baselines)
+            )
+            target_logits, target_probabilities = _target_scores(
+                model,
+                perturbed,
+                target_indices,
+                temperature=temperature,
+            )
+            logits.append(target_logits)
+            probabilities.append(target_probabilities)
     return FaithfulnessCurve(
-        method="temporal_deletion",
+        method=f"temporal_{operation}_{ranking}",
         fractions=fraction_tensor,
-        target_probabilities=torch.stack(scores, dim=1).detach().cpu().to(torch.float64),
+        target_logits=torch.stack(logits, dim=1).detach().cpu().to(torch.float64),
+        target_probabilities=(
+            torch.stack(probabilities, dim=1).detach().cpu().to(torch.float64)
+        ),
         target_indices=target_indices.detach().cpu(),
     )
 
@@ -334,6 +456,11 @@ def lead_ablation_faithfulness_curve(
     targets: TargetSpec,
     *,
     baseline: Tensor | None = None,
+    ranking: Literal["most_important", "least_important", "random"] = (
+        "most_important"
+    ),
+    random_seed: int | None = None,
+    temperature: float = 1.0,
 ) -> FaithfulnessCurve:
     """Ablate leads from most to least attributed and rescore each prefix."""
 
@@ -345,9 +472,33 @@ def lead_ablation_faithfulness_curve(
     target_indices = _target_indices(targets, inputs.shape[0], inputs.device)
     baselines = _baseline_like(inputs, baseline)
     lead_importance = validated_attributions.abs().mean(dim=2)
-    ablation_order = torch.argsort(lead_importance, dim=1, descending=True, stable=True)
+    if ranking == "most_important":
+        ablation_order = torch.argsort(
+            lead_importance, dim=1, descending=True, stable=True
+        )
+    elif ranking == "least_important":
+        ablation_order = torch.argsort(
+            lead_importance, dim=1, descending=False, stable=True
+        )
+    elif ranking == "random":
+        if isinstance(random_seed, bool) or not isinstance(random_seed, int):
+            raise ValueError("random ranking requires an integer random_seed")
+        generator = torch.Generator(device=inputs.device)
+        generator.manual_seed(random_seed)
+        random_scores = torch.rand(
+            lead_importance.shape,
+            device=inputs.device,
+            dtype=inputs.dtype,
+            generator=generator,
+        )
+        ablation_order = torch.argsort(
+            random_scores, dim=1, descending=True, stable=True
+        )
+    else:  # pragma: no cover - Literal protects typed callers
+        raise ValueError("unsupported lead ranking")
     fractions = torch.arange(len(LEADS) + 1, dtype=torch.float64) / len(LEADS)
-    scores: list[Tensor] = []
+    logits: list[Tensor] = []
+    probabilities: list[Tensor] = []
     with _evaluating(model), torch.inference_mode():
         for lead_count in range(len(LEADS) + 1):
             mask = torch.zeros(
@@ -356,11 +507,21 @@ def lead_ablation_faithfulness_curve(
             if lead_count:
                 mask.scatter_(1, ablation_order[:, :lead_count], True)
             perturbed = torch.where(mask.unsqueeze(2), baselines, inputs)
-            scores.append(_target_probabilities(model, perturbed, target_indices))
+            target_logits, target_probabilities = _target_scores(
+                model,
+                perturbed,
+                target_indices,
+                temperature=temperature,
+            )
+            logits.append(target_logits)
+            probabilities.append(target_probabilities)
     return FaithfulnessCurve(
-        method="lead_ablation",
+        method=("lead_ablation" if ranking == "most_important" else f"lead_ablation_{ranking}"),
         fractions=fractions,
-        target_probabilities=torch.stack(scores, dim=1).detach().cpu().to(torch.float64),
+        target_logits=torch.stack(logits, dim=1).detach().cpu().to(torch.float64),
+        target_probabilities=(
+            torch.stack(probabilities, dim=1).detach().cpu().to(torch.float64)
+        ),
         target_indices=target_indices.detach().cpu(),
     )
 
@@ -412,6 +573,87 @@ def attribution_stability_similarity(
 
     values = _cosine_similarity(reference, candidate, epsilon=epsilon).detach().cpu()
     return SimilarityResult(method="signed_cosine_stability", values=values)
+
+
+@dataclass(frozen=True, slots=True)
+class CrossMethodSimilarity:
+    """Temporal absolute-map agreement for two attribution methods."""
+
+    cosine: Tensor
+    spearman: Tensor
+
+    def summary(self) -> dict[str, object]:
+        cosine = self.cosine.detach().cpu().to(torch.float64)
+        spearman = self.spearman.detach().cpu().to(torch.float64)
+        return {
+            "method": "absolute_temporal_cross_method_agreement",
+            "examples": int(cosine.numel()),
+            "cosine_values": _float_list(cosine),
+            "spearman_values": _float_list(spearman),
+            "mean_cosine": float(cosine.mean()),
+            "mean_spearman": float(spearman.mean()),
+        }
+
+
+def _temporal_absolute_map(attributions: Tensor) -> Tensor:
+    validated = _validate_attributions(attributions, attributions.shape[0]).to(torch.float64)
+    return validated.abs().mean(dim=1)
+
+
+def _average_ranks(values: Tensor) -> Tensor:
+    ranks = torch.empty_like(values, dtype=torch.float64)
+    for row_index in range(values.shape[0]):
+        row = values[row_index]
+        order = torch.argsort(row, stable=True)
+        sorted_values = row[order]
+        start = 0
+        while start < row.numel():
+            end = start + 1
+            while end < row.numel() and bool(sorted_values[end] == sorted_values[start]):
+                end += 1
+            ranks[row_index, order[start:end]] = (start + 1 + end) / 2.0
+            start = end
+    return ranks
+
+
+def cross_method_temporal_similarity(
+    reference: Tensor,
+    candidate: Tensor,
+    *,
+    epsilon: float = 1e-12,
+) -> CrossMethodSimilarity:
+    """Compare attribution methods after absolute lead-to-time aggregation."""
+
+    reference_map = _temporal_absolute_map(reference)
+    candidate_map = _temporal_absolute_map(candidate).to(reference_map.device)
+    if reference_map.shape != candidate_map.shape:
+        raise ValueError("attribution methods must align by batch and time")
+    centered_reference = reference_map - reference_map.mean(dim=1, keepdim=True)
+    centered_candidate = candidate_map - candidate_map.mean(dim=1, keepdim=True)
+    cosine = _cosine_rows(reference_map, candidate_map, epsilon=epsilon)
+    reference_ranks = _average_ranks(centered_reference)
+    candidate_ranks = _average_ranks(centered_candidate)
+    spearman = _cosine_rows(
+        reference_ranks - reference_ranks.mean(dim=1, keepdim=True),
+        candidate_ranks - candidate_ranks.mean(dim=1, keepdim=True),
+        epsilon=epsilon,
+    )
+    return CrossMethodSimilarity(
+        cosine=cosine.detach().cpu(),
+        spearman=spearman.detach().cpu(),
+    )
+
+
+def _cosine_rows(reference: Tensor, candidate: Tensor, *, epsilon: float) -> Tensor:
+    if epsilon <= 0:
+        raise ValueError("epsilon must be positive")
+    numerator = (reference * candidate).sum(dim=1)
+    reference_norm = torch.linalg.vector_norm(reference, dim=1)
+    candidate_norm = torch.linalg.vector_norm(candidate, dim=1)
+    denominator = reference_norm * candidate_norm
+    similarity = numerator / denominator.clamp_min(epsilon)
+    both_zero = torch.logical_and(reference_norm <= epsilon, candidate_norm <= epsilon)
+    return torch.where(both_zero, torch.ones_like(similarity), similarity).clamp(-1.0, 1.0)
 
 
 def randomized_model_copy[ModelT: nn.Module](model: ModelT, *, seed: int) -> ModelT:
@@ -467,15 +709,19 @@ def parameter_randomization_comparison(
 __all__ = [
     "CANONICAL_SAMPLES",
     "FaithfulnessCurve",
+    "CrossMethodSimilarity",
     "SimilarityResult",
     "attribution_stability_similarity",
     "deletion_faithfulness_curve",
+    "cross_method_temporal_similarity",
     "grad_cam_1d",
     "integrated_gradients",
+    "integrated_gradients_with_delta",
     "lead_ablation_faithfulness_curve",
     "normalize_attributions",
     "parameter_randomization_comparison",
     "randomized_model_copy",
     "temporal_occlusion",
+    "temporal_faithfulness_curve",
     "validate_ecg_batch",
 ]

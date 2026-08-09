@@ -9,13 +9,16 @@ from torch import Tensor, nn
 
 from ecg_trust.explain import (
     attribution_stability_similarity,
+    cross_method_temporal_similarity,
     deletion_faithfulness_curve,
     grad_cam_1d,
     integrated_gradients,
+    integrated_gradients_with_delta,
     lead_ablation_faithfulness_curve,
     normalize_attributions,
     parameter_randomization_comparison,
     randomized_model_copy,
+    temporal_faithfulness_curve,
     temporal_occlusion,
     validate_ecg_batch,
 )
@@ -105,6 +108,23 @@ def test_integrated_gradients_supports_both_architectures(
     assert attributions.abs().amax() <= 1.0
 
 
+def test_integrated_gradients_returns_finite_completeness_delta() -> None:
+    model = LeadMeanModel().eval()
+    inputs = torch.randn(2, 12, 1000)
+
+    attributions, delta = integrated_gradients_with_delta(
+        model,
+        inputs,
+        torch.tensor([0, 1]),
+        n_steps=8,
+        internal_batch_size=4,
+    )
+
+    assert attributions.shape == inputs.shape
+    assert delta.shape == (2,)
+    assert torch.isfinite(delta).all()
+
+
 def test_temporal_occlusion_returns_lead_time_tensor() -> None:
     model = LeadMeanModel()
     inputs = torch.randn(1, 12, 1000)
@@ -142,6 +162,7 @@ def test_temporal_deletion_curve_and_summary_are_well_formed() -> None:
     summary = result.summary()
 
     assert result.target_probabilities.shape == (2, 3)
+    assert result.target_logits.shape == (2, 3)
     assert torch.all(result.target_probabilities[:, :-1] >= result.target_probabilities[:, 1:])
     assert torch.allclose(
         result.target_probabilities[:, -1],
@@ -149,6 +170,75 @@ def test_temporal_deletion_curve_and_summary_are_well_formed() -> None:
     )
     assert summary["method"] == "temporal_deletion"
     json.dumps(summary)
+
+
+def test_insertion_least_and_random_controls_are_reproducible() -> None:
+    model = LeadMeanModel()
+    inputs = torch.zeros(1, 12, 1000)
+    inputs[:, :, :500] = 2.0
+    inputs[:, :, 500:] = 0.25
+    attributions = torch.zeros(1, 1, 1000)
+    attributions[:, :, :500] = 2.0
+    attributions[:, :, 500:] = 0.1
+
+    insertion = temporal_faithfulness_curve(
+        model,
+        inputs,
+        attributions,
+        0,
+        operation="insertion",
+        ranking="most_important",
+        fractions=(0.0, 0.5, 1.0),
+        temperature=2.0,
+    )
+    least = temporal_faithfulness_curve(
+        model,
+        inputs,
+        attributions,
+        0,
+        operation="deletion",
+        ranking="least_important",
+        fractions=(0.0, 0.5, 1.0),
+    )
+    random_first = temporal_faithfulness_curve(
+        model,
+        inputs,
+        attributions,
+        0,
+        operation="deletion",
+        ranking="random",
+        random_seed=41,
+        fractions=(0.0, 0.5, 1.0),
+    )
+    random_second = temporal_faithfulness_curve(
+        model,
+        inputs,
+        attributions,
+        0,
+        operation="deletion",
+        ranking="random",
+        random_seed=41,
+        fractions=(0.0, 0.5, 1.0),
+    )
+
+    assert insertion.target_probabilities[0, 0].item() == pytest.approx(0.5)
+    assert insertion.target_probabilities[0, -1] > insertion.target_probabilities[0, 0]
+    assert least.target_probabilities[0, 1] > insertion.target_probabilities[0, 1]
+    torch.testing.assert_close(
+        random_first.target_probabilities, random_second.target_probabilities
+    )
+    torch.testing.assert_close(random_first.target_logits, random_second.target_logits)
+    assert random_first.summary()["mean_target_logits"]
+
+    with pytest.raises(ValueError, match="random_seed"):
+        temporal_faithfulness_curve(
+            model,
+            inputs,
+            attributions,
+            0,
+            operation="deletion",
+            ranking="random",
+        )
 
 
 def test_lead_ablation_curve_uses_lead_specific_attribution() -> None:
@@ -171,6 +261,16 @@ def test_lead_ablation_curve_uses_lead_specific_attribution() -> None:
     with pytest.raises(ValueError, match="lead-specific"):
         lead_ablation_faithfulness_curve(model, inputs, attributions[:, :1], 0)
 
+    random_first = lead_ablation_faithfulness_curve(
+        model, inputs, attributions, 0, ranking="random", random_seed=17
+    )
+    random_second = lead_ablation_faithfulness_curve(
+        model, inputs, attributions, 0, ranking="random", random_seed=17
+    )
+    torch.testing.assert_close(
+        random_first.target_probabilities, random_second.target_probabilities
+    )
+
 
 def test_stability_similarity_preserves_direction_and_is_json_safe() -> None:
     reference = torch.randn(2, 12, 1000)
@@ -183,6 +283,18 @@ def test_stability_similarity_preserves_direction_and_is_json_safe() -> None:
     assert torch.allclose(identical.values, torch.ones_like(identical.values))
     assert torch.allclose(opposite.values, -torch.ones_like(opposite.values))
     assert torch.allclose(zero.values, torch.ones_like(zero.values))
+    json.dumps(identical.summary())
+
+
+def test_cross_method_similarity_aggregates_leads_and_reports_rank_agreement() -> None:
+    temporal = torch.arange(1000, dtype=torch.float32).view(1, 1, 1000)
+    lead_specific = temporal.expand(1, 12, 1000).clone()
+    identical = cross_method_temporal_similarity(temporal, lead_specific)
+    reversed_map = cross_method_temporal_similarity(temporal, lead_specific.flip(-1))
+
+    assert identical.cosine.item() == pytest.approx(1.0)
+    assert identical.spearman.item() == pytest.approx(1.0)
+    assert reversed_map.spearman.item() == pytest.approx(-1.0)
     json.dumps(identical.summary())
 
 
