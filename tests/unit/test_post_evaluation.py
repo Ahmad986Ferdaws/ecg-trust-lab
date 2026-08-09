@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import cast
 
@@ -214,6 +215,8 @@ def _v2_payload(
     old: post.PostEvaluationSpec,
     *,
     replacement_revision: int = 2,
+    reason: str = post.SUPERSESSION_REASON_DECIMAL_CASE_PATH_COLLISION,
+    git_revision: str = "e" * 40,
 ) -> dict[str, object]:
     if old.path is None:
         raise AssertionError("saved v1 fixture must have a path")
@@ -222,7 +225,7 @@ def _v2_payload(
     del body["artifact_sha256"]
     body["schema_version"] = post.POST_EVALUATION_SUPERSESSION_SCHEMA_VERSION
     runtime = cast(dict[str, object], body["analysis_runtime"])
-    runtime["git_revision"] = "e" * 40
+    runtime["git_revision"] = git_revision
     protocol = cast(dict[str, object], body["protocol"])
     project_root = Path(cast(str, runtime["project_root"]))
     body["output_contract"] = post._output_contract(
@@ -232,10 +235,50 @@ def _v2_payload(
     )
     _, supersession = post._build_supersession_binding(
         old.path,
-        reason=post.SUPERSESSION_REASON_DECIMAL_CASE_PATH_COLLISION,
+        reason=reason,
     )
     body["supersession"] = supersession
     return {**body, "artifact_sha256": post.canonical_sha256(body)}
+
+
+def _artifact_path(spec: post.PostEvaluationSpec, name: str) -> Path:
+    output = cast(dict[str, object], spec.payload["output_contract"])
+    artifacts = cast(dict[str, object], output["artifacts"])
+    return Path(cast(str, artifacts[name]))
+
+
+def _write_branch_manifest(
+    spec: post.PostEvaluationSpec,
+    name: str,
+) -> Path:
+    artifact_types = {
+        "robustness_manifest": "ecg_trust.robustness_audit_manifest",
+        "explanations_manifest": "ecg_trust.explanation_audit_manifest",
+    }
+    body: dict[str, object] = {
+        "schema_version": 1,
+        "artifact_type": artifact_types[name],
+        "post_evaluation_spec_sha256": spec.artifact_sha256,
+    }
+    payload = {**body, "artifact_sha256": post.canonical_sha256(body)}
+    manifest = _artifact_path(spec, name)
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    post._write_new_json(manifest, payload)
+    return manifest
+
+
+def _saved_r2_with_branch_manifests(
+    project_root: Path,
+) -> tuple[post.PostEvaluationSpec, post.PostEvaluationSpec]:
+    v1 = _saved_v1_spec(project_root)
+    r2 = post._spec_from_payload(_v2_payload(v1), path=None)
+    r2 = post.save_post_evaluation_spec(
+        r2,
+        r2.output_root / post.POST_EVALUATION_FILENAME,
+    )
+    for name in ("robustness_manifest", "explanations_manifest"):
+        _write_branch_manifest(r2, name)
+    return v1, r2
 
 
 def test_canonical_robustness_matrix_has_exact_41_cases() -> None:
@@ -323,6 +366,189 @@ def test_v2_supersession_coexists_and_preserves_release_bindings(tmp_path: Path)
         assert loaded.payload[key] == old.payload[key]
     with pytest.raises(FileExistsError, match="already exists"):
         post.save_post_evaluation_spec(replacement, destination)
+
+
+def test_r3_supersession_binds_completed_branches_without_reuse(tmp_path: Path) -> None:
+    project_root = (tmp_path / "repo").resolve()
+    project_root.mkdir()
+    v1, r2 = _saved_r2_with_branch_manifests(project_root)
+    if r2.path is None or v1.path is None:
+        raise AssertionError("saved supersession fixtures must have paths")
+    r2_bytes = r2.path.read_bytes()
+    payload = _v2_payload(
+        r2,
+        replacement_revision=3,
+        reason=post.SUPERSESSION_REASON_ATTRIBUTION_RUNTIME_MAPPING_ORDER,
+        git_revision="d" * 40,
+    )
+    replacement = post._spec_from_payload(payload, path=None)
+    destination = replacement.output_root / post.POST_EVALUATION_FILENAME
+    post.save_post_evaluation_spec(replacement, destination)
+    loaded = post.load_post_evaluation_spec(
+        destination,
+        protocol=ExperimentProtocol.canonical(),
+        verify_sources=False,
+        verify_git=False,
+    )
+
+    assert v1.path.is_file()
+    assert r2.path.read_bytes() == r2_bytes
+    assert loaded.output_root.name == "ptbxl_matched_equal_budget_v1__audit-r3"
+    assert cast(dict[str, object], loaded.payload["analysis_runtime"])["git_revision"] == ("d" * 40)
+    supersession = cast(dict[str, object], loaded.payload["supersession"])
+    assert supersession["reason"] == (post.SUPERSESSION_REASON_ATTRIBUTION_RUNTIME_MAPPING_ORDER)
+    assert supersession["status"] == post.SUPERSESSION_STATUS_BRANCH_MANIFESTS
+    assert supersession["derived_artifact_reuse_allowed"] is False
+    snapshot = cast(dict[str, object], supersession["output_tree"])
+    files = cast(list[dict[str, object]], snapshot["files"])
+    assert [entry["path"] for entry in files] == [
+        post.POST_EVALUATION_FILENAME,
+        "explanations/manifest.json",
+        "robustness/manifest.json",
+    ]
+    assert snapshot["file_count"] == 3
+    for key in (
+        "protocol",
+        "sealed_evaluation",
+        "members",
+        "aggregate_outputs",
+        "audit_protocols",
+    ):
+        assert loaded.payload[key] == r2.payload[key]
+
+
+@pytest.mark.parametrize("name", ["robustness_manifest", "explanations_manifest"])
+def test_r3_requires_both_branch_manifests(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    project_root = (tmp_path / "repo").resolve()
+    project_root.mkdir()
+    _, r2 = _saved_r2_with_branch_manifests(project_root)
+    _artifact_path(r2, name).unlink()
+
+    with pytest.raises(post.PostEvaluationIntegrityError, match="must be present"):
+        post._build_supersession_binding(
+            cast(Path, r2.path),
+            reason=post.SUPERSESSION_REASON_ATTRIBUTION_RUNTIME_MAPPING_ORDER,
+        )
+
+
+@pytest.mark.parametrize("name", ["derived_manifest", "final_results_markdown"])
+def test_r3_requires_finalization_outputs_to_be_absent(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    project_root = (tmp_path / "repo").resolve()
+    project_root.mkdir()
+    _, r2 = _saved_r2_with_branch_manifests(project_root)
+    forbidden = _artifact_path(r2, name)
+    forbidden.parent.mkdir(parents=True, exist_ok=True)
+    forbidden.write_text("premature\n", encoding="utf-8")
+
+    with pytest.raises(post.PostEvaluationIntegrityError, match="must be absent"):
+        post._build_supersession_binding(
+            cast(Path, r2.path),
+            reason=post.SUPERSESSION_REASON_ATTRIBUTION_RUNTIME_MAPPING_ORDER,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("artifact_type", "artifact type differs"),
+        ("spec_hash", "post-evaluation spec hash differs"),
+        ("self_hash", "self-hash mismatch"),
+    ],
+)
+@pytest.mark.parametrize("name", ["robustness_manifest", "explanations_manifest"])
+def test_r3_rejects_invalid_required_branch_manifest_identity(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+    name: str,
+) -> None:
+    project_root = (tmp_path / "repo").resolve()
+    project_root.mkdir()
+    _, r2 = _saved_r2_with_branch_manifests(project_root)
+    manifest_path = _artifact_path(r2, name)
+    manifest = dict(post._read_json(manifest_path, "test branch manifest"))
+    if mutation == "artifact_type":
+        manifest["artifact_type"] = "ecg_trust.wrong_manifest"
+    elif mutation == "spec_hash":
+        manifest["post_evaluation_spec_sha256"] = _hash("0")
+    else:
+        manifest["schema_version"] = 2
+    if mutation != "self_hash":
+        body = dict(manifest)
+        del body["artifact_sha256"]
+        manifest["artifact_sha256"] = post.canonical_sha256(body)
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(post.PostEvaluationIntegrityError, match=message):
+        post._build_supersession_binding(
+            cast(Path, r2.path),
+            reason=post.SUPERSESSION_REASON_ATTRIBUTION_RUNTIME_MAPPING_ORDER,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [("missing", "must be present"), ("tampered", "output tree changed")],
+)
+def test_r3_rejects_missing_or_tampered_bound_branch_manifest(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    project_root = (tmp_path / "repo").resolve()
+    project_root.mkdir()
+    _, r2 = _saved_r2_with_branch_manifests(project_root)
+    payload = _v2_payload(
+        r2,
+        replacement_revision=3,
+        reason=post.SUPERSESSION_REASON_ATTRIBUTION_RUNTIME_MAPPING_ORDER,
+        git_revision="d" * 40,
+    )
+    manifest = _artifact_path(r2, "robustness_manifest")
+    if mutation == "missing":
+        manifest.unlink()
+    else:
+        decoded = dict(post._read_json(manifest, "test robustness manifest"))
+        decoded["new_self_hashed_field"] = True
+        body = dict(decoded)
+        del body["artifact_sha256"]
+        decoded["artifact_sha256"] = post.canonical_sha256(body)
+        manifest.write_text(
+            json.dumps(decoded, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    with pytest.raises(post.PostEvaluationIntegrityError, match=message):
+        post._spec_from_payload(payload, path=None)
+
+
+def test_r3_rejects_reason_status_mismatch(tmp_path: Path) -> None:
+    project_root = (tmp_path / "repo").resolve()
+    project_root.mkdir()
+    _, r2 = _saved_r2_with_branch_manifests(project_root)
+    payload = _v2_payload(
+        r2,
+        replacement_revision=3,
+        reason=post.SUPERSESSION_REASON_ATTRIBUTION_RUNTIME_MAPPING_ORDER,
+        git_revision="d" * 40,
+    )
+    supersession = cast(dict[str, object], payload["supersession"])
+    supersession["status"] = post.SUPERSESSION_STATUS_ABORTED
+    unhashed = dict(payload)
+    del unhashed["artifact_sha256"]
+    payload["artifact_sha256"] = post.canonical_sha256(unhashed)
+
+    with pytest.raises(post.PostEvaluationIntegrityError, match="policy differs"):
+        post._spec_from_payload(payload, path=None)
 
 
 @pytest.mark.parametrize("mutation", ["missing", "tampered"])

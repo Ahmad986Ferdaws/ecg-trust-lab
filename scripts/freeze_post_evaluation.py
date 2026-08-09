@@ -83,8 +83,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--supersession-reason",
         default=None,
         help=(
-            "Required with --supersedes-spec; currently only "
-            "decimal_case_id_suffix_collision is canonical."
+            "Required with --supersedes-spec; must be one of the fixed canonical "
+            "supersession reasons."
         ),
     )
     return parser

@@ -466,7 +466,7 @@ def _manifest(tmp_path: Path) -> tuple[Path, PostEvaluationSpec]:
     }
     payload = {**body, "artifact_sha256": canonical_sha256(body)}
     path = tmp_path / "manifest.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    audit._write_new_json(path, payload)
     return path, spec
 
 
@@ -499,6 +499,39 @@ def test_stability_noise_is_stateless_per_ecg_and_replicate() -> None:
     torch.testing.assert_close(
         inputs, torch.arange(inputs.numel(), dtype=torch.float32).reshape_as(inputs)
     )
+
+
+def test_cross_method_comparison_copies_nonwritable_artifact_arrays(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    left = np.zeros((2, 1, 4), dtype=np.float32)
+    right = np.ones((2, 1, 4), dtype=np.float32)
+    left.setflags(write=False)
+    right.setflags(write=False)
+
+    class ComparisonObserved(RuntimeError):
+        pass
+
+    def observe_copies(left_tensor: torch.Tensor, right_tensor: torch.Tensor) -> None:
+        assert not np.shares_memory(left_tensor.numpy(), left)
+        assert not np.shares_memory(right_tensor.numpy(), right)
+        raise ComparisonObserved
+
+    monkeypatch.setattr(audit, "cross_method_temporal_similarity", observe_copies)
+    methods = {
+        "left": SimpleNamespace(arrays={"attributions": left}),
+        "right": SimpleNamespace(arrays={"attributions": right}),
+    }
+
+    with pytest.raises(ComparisonObserved):
+        audit._cross_method_artifact(
+            output_directory=tmp_path,
+            spec=cast(Any, SimpleNamespace()),
+            cohort=cast(Any, SimpleNamespace()),
+            member=cast(Any, SimpleNamespace()),
+            methods=cast(Any, methods),
+        )
 
 
 def test_auc_and_guided_advantage_use_each_example_axis() -> None:

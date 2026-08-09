@@ -1603,8 +1603,8 @@ def _cross_method_artifact(
         for right in method_names[left_index + 1 :]:
             pair_names.append(f"{left}__vs__{right}")
             result = cross_method_temporal_similarity(
-                torch.from_numpy(np.asarray(methods[left].arrays["attributions"])),
-                torch.from_numpy(np.asarray(methods[right].arrays["attributions"])),
+                torch.from_numpy(np.array(methods[left].arrays["attributions"], copy=True)),
+                torch.from_numpy(np.array(methods[right].arrays["attributions"], copy=True)),
             )
             cosine.append(result.cosine.numpy().astype(np.float64, copy=False))
             spearman.append(result.spearman.numpy().astype(np.float64, copy=False))
@@ -2066,7 +2066,7 @@ def load_explanation_manifest(
     if observed_member_ids != expected_member_ids:
         raise ExplanationAuditIntegrityError("explanation manifest member grid differs")
     runtime_blocks = _mapping(payload["attribution_runtime"], "attribution runtime")
-    if tuple(runtime_blocks) != expected_member_ids:
+    if set(runtime_blocks) != set(expected_member_ids):
         raise ExplanationAuditIntegrityError("attribution runtime member grid differs")
     runtime_keys = {
         "python",

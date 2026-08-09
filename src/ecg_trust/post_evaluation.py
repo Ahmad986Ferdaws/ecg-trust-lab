@@ -47,7 +47,15 @@ EXPLANATION_CELL_SIZE = 6
 EXPLANATION_SELECTION_SEED = 20_260_808
 ROBUSTNESS_RANDOM_SEED = 20_260_808
 SUPERSESSION_REASON_DECIMAL_CASE_PATH_COLLISION = "decimal_case_id_suffix_collision"
+SUPERSESSION_REASON_ATTRIBUTION_RUNTIME_MAPPING_ORDER = (
+    "attribution_runtime_mapping_order_validation"
+)
 SUPERSESSION_STATUS_ABORTED = "aborted_incomplete_no_final_manifest"
+SUPERSESSION_STATUS_BRANCH_MANIFESTS = "aborted_after_branch_manifests_before_finalization"
+_SUPERSESSION_BRANCH_MANIFEST_TYPES: Mapping[str, str] = {
+    "robustness_manifest": "ecg_trust.robustness_audit_manifest",
+    "explanations_manifest": "ecg_trust.explanation_audit_manifest",
+}
 DEMO_MEMBER_ID = "resnet1d-seed2026"
 DEMO_TARGET_COVERAGE = 0.8
 EXPECTED_MEMBER_IDS: tuple[str, ...] = tuple(
@@ -2123,14 +2131,67 @@ def _load_canonical_superseded_spec(path: Path) -> PostEvaluationSpec:
     return spec
 
 
-def _assert_superseded_manifests_absent(spec: PostEvaluationSpec) -> None:
+def _supersession_status(reason: str) -> str:
+    if reason == SUPERSESSION_REASON_DECIMAL_CASE_PATH_COLLISION:
+        return SUPERSESSION_STATUS_ABORTED
+    if reason == SUPERSESSION_REASON_ATTRIBUTION_RUNTIME_MAPPING_ORDER:
+        return SUPERSESSION_STATUS_BRANCH_MANIFESTS
+    raise PostEvaluationError("supersession reason is not canonical")
+
+
+def _verify_superseded_branch_manifest(
+    spec: PostEvaluationSpec,
+    artifacts: Mapping[str, object],
+    *,
+    name: str,
+) -> None:
+    path_text = _string(artifacts[name], f"superseded {name}")
+    path = Path(path_text).resolve()
+    if path_text != str(path):  # pragma: no cover - canonical spec validation precedes this
+        raise PostEvaluationIntegrityError(
+            f"superseded {name} path must use canonical absolute spelling"
+        )
+    if not path.is_file():
+        raise PostEvaluationIntegrityError(
+            f"superseded {name} must be present for this supersession reason"
+        )
+    manifest = _read_json(path, f"superseded {name}")
+    if manifest.get("artifact_type") != _SUPERSESSION_BRANCH_MANIFEST_TYPES[name]:
+        raise PostEvaluationIntegrityError(f"superseded {name} artifact type differs")
+    if manifest.get("post_evaluation_spec_sha256") != spec.artifact_sha256:
+        raise PostEvaluationIntegrityError(f"superseded {name} post-evaluation spec hash differs")
+    stored_hash = _hash(
+        manifest.get("artifact_sha256"),
+        f"superseded {name} artifact_sha256",
+    )
+    body = dict(manifest)
+    del body["artifact_sha256"]
+    if canonical_sha256(body) != stored_hash:
+        raise PostEvaluationIntegrityError(f"superseded {name} self-hash mismatch")
+
+
+def _assert_superseded_output_state(
+    spec: PostEvaluationSpec,
+    *,
+    reason: str,
+) -> None:
     output = _mapping(spec.payload["output_contract"], "superseded output contract")
     artifacts = _mapping(output["artifacts"], "superseded output artifacts")
-    for name in ("robustness_manifest", "derived_manifest"):
+    if reason == SUPERSESSION_REASON_DECIMAL_CASE_PATH_COLLISION:
+        required: tuple[str, ...] = ()
+        forbidden = ("robustness_manifest", "derived_manifest")
+    elif reason == SUPERSESSION_REASON_ATTRIBUTION_RUNTIME_MAPPING_ORDER:
+        required = tuple(_SUPERSESSION_BRANCH_MANIFEST_TYPES)
+        forbidden = ("derived_manifest", "final_results_markdown")
+    else:  # pragma: no cover - callers validate the reason first
+        raise PostEvaluationError("supersession reason is not canonical")
+    for name in required:
+        _verify_superseded_branch_manifest(spec, artifacts, name=name)
+    for name in forbidden:
         path = Path(_string(artifacts[name], f"superseded {name}")).resolve()
         if path.exists():
             raise PostEvaluationIntegrityError(
-                f"superseded {name} must be absent for an incomplete audit"
+                f"superseded {name} must be absent for this supersession reason"
             )
 
 
@@ -2139,12 +2200,11 @@ def _build_supersession_binding(
     *,
     reason: str,
 ) -> tuple[PostEvaluationSpec, dict[str, object]]:
-    if reason != SUPERSESSION_REASON_DECIMAL_CASE_PATH_COLLISION:
-        raise PostEvaluationError("supersession reason must be decimal_case_id_suffix_collision")
+    status = _supersession_status(reason)
     old = _load_canonical_superseded_spec(path)
     if old.path is None:  # pragma: no cover - loader invariant
         raise PostEvaluationIntegrityError("superseded specification has no path")
-    _assert_superseded_manifests_absent(old)
+    _assert_superseded_output_state(old, reason=reason)
     runtime = _mapping(old.payload["analysis_runtime"], "superseded analysis runtime")
     binding = {
         "superseded_spec": {
@@ -2156,7 +2216,7 @@ def _build_supersession_binding(
         },
         "output_tree": _output_tree_snapshot(old.output_root),
         "reason": reason,
-        "status": SUPERSESSION_STATUS_ABORTED,
+        "status": status,
         "derived_artifact_reuse_allowed": False,
     }
     return old, binding
@@ -2175,11 +2235,13 @@ def _verify_supersession(root: Mapping[str, object]) -> None:
         },
         "supersession",
     )
-    if (
-        supersession["reason"] != SUPERSESSION_REASON_DECIMAL_CASE_PATH_COLLISION
-        or supersession["status"] != SUPERSESSION_STATUS_ABORTED
-        or supersession["derived_artifact_reuse_allowed"] is not False
-    ):
+    reason = _string(supersession["reason"], "supersession reason")
+    status = _string(supersession["status"], "supersession status")
+    try:
+        expected_status = _supersession_status(reason)
+    except PostEvaluationError as error:
+        raise PostEvaluationIntegrityError("supersession policy differs") from error
+    if status != expected_status or supersession["derived_artifact_reuse_allowed"] is not False:
         raise PostEvaluationIntegrityError("supersession policy differs")
     binding = _mapping(supersession["superseded_spec"], "superseded spec binding")
     _exact_keys(
@@ -2234,7 +2296,7 @@ def _verify_supersession(root: Mapping[str, object]) -> None:
         raise PostEvaluationIntegrityError(
             "superseding audit must bind a different committed Git revision"
         )
-    _assert_superseded_manifests_absent(old)
+    _assert_superseded_output_state(old, reason=reason)
     snapshot = _mapping(supersession["output_tree"], "superseded output tree")
     _exact_keys(
         snapshot,
