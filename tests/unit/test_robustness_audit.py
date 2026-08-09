@@ -11,6 +11,7 @@ import torch
 
 import ecg_trust.post_evaluation as post
 import ecg_trust.robustness_audit as audit
+import scripts.audit_robustness as robustness_cli
 from ecg_trust.audit_runtime import AlignedAuditInference, AuditMemberRuntime, CompletedAuditRuntime
 from ecg_trust.post_evaluation import PostEvaluationSpec
 
@@ -101,7 +102,8 @@ def _inference(member: AuditMemberRuntime, *, logit_delta: float = 0.0) -> Align
 
 
 def test_case_expansion_is_the_exact_frozen_41_case_grid(tmp_path: Path) -> None:
-    cases = audit.expand_robustness_cases(_spec(tmp_path))
+    spec = _spec(tmp_path)
+    cases = audit.expand_robustness_cases(spec)
 
     assert len(cases) == 41
     assert cases[0].to_dict() == {
@@ -112,6 +114,156 @@ def test_case_expansion_is_the_exact_frozen_41_case_grid(tmp_path: Path) -> None
     assert len({case.case_id for case in cases}) == 41
     assert sum(case.corruption == "lead_dropout" for case in cases) == 14
     assert cases[-1].case_id == "lead-permutation-reverse-all"
+    _, robustness_root = audit._audit_paths(spec)
+    assert audit.preflight_robustness_artifact_paths(spec) == cases
+    npz_paths = {
+        audit._case_npz_path(robustness_root, "resnet1d-seed2026", case.case_id)
+        for case in cases
+    }
+    sidecar_paths = {path.with_suffix(".json") for path in npz_paths}
+    assert len(npz_paths) == 41
+    assert len(sidecar_paths) == 41
+    assert len(npz_paths | sidecar_paths) == 82
+    assert all(robustness_root in path.parents for path in npz_paths | sidecar_paths)
+    assert any(path.name == "baseline-wander-0.05.npz" for path in npz_paths)
+
+
+def test_path_collision_fails_before_runtime_access_or_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = _spec(tmp_path)
+    _, robustness_root = audit._audit_paths(spec)
+    original = audit._case_npz_path
+
+    def colliding_path(root: Path, member_id: str, case_id: str) -> Path:
+        if case_id in {"baseline-wander-0.05", "baseline-wander-0.10"}:
+            return root / "member_cases" / member_id / "decimal-collision.npz"
+        return original(root, member_id, case_id)
+
+    monkeypatch.setattr(audit, "_case_npz_path", colliding_path)
+    runtime_accessed = False
+
+    class UntouchedRuntime:
+        @property
+        def members(self) -> tuple[object, ...]:
+            nonlocal runtime_accessed
+            runtime_accessed = True
+            raise AssertionError("runtime must not be accessed before path preflight")
+
+    with pytest.raises(
+        audit.RobustnessAuditIntegrityError,
+        match=(
+            r"artifact path collision: .*baseline-wander-0\.05/npz and "
+            r".*baseline-wander-0\.10/npz"
+        ),
+    ):
+        audit.run_robustness_audit(
+            spec=spec,
+            runtime=cast(CompletedAuditRuntime, UntouchedRuntime()),
+        )
+
+    assert runtime_accessed is False
+    assert not robustness_root.exists()
+
+
+def test_cli_path_preflight_precedes_runtime_loading(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    events: list[str] = []
+    spec = cast(PostEvaluationSpec, SimpleNamespace())
+    monkeypatch.setattr(robustness_cli, "load_protocol", lambda unused: object())
+    monkeypatch.setattr(
+        robustness_cli,
+        "load_post_evaluation_spec",
+        lambda *args, **kwargs: spec,
+    )
+
+    def reject_paths(unused: PostEvaluationSpec) -> tuple[object, ...]:
+        events.append("path_preflight")
+        raise audit.RobustnessAuditIntegrityError("synthetic path collision")
+
+    def forbidden_runtime_load(**kwargs: object) -> object:
+        events.append("runtime_load")
+        raise AssertionError("runtime loading must follow path preflight")
+
+    monkeypatch.setattr(
+        robustness_cli, "preflight_robustness_artifact_paths", reject_paths
+    )
+    monkeypatch.setattr(
+        robustness_cli, "load_completed_audit_runtime", forbidden_runtime_load
+    )
+
+    assert robustness_cli.main([]) == 1
+    assert events == ["path_preflight"]
+    assert "synthetic path collision" in capsys.readouterr().err
+
+
+def test_decimal_case_artifacts_are_distinct_and_resumable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    member_id = "member-1"
+    spec = _spec(tmp_path, member_ids=(member_id,))
+    cases = {case.case_id: case for case in audit.expand_robustness_cases(spec)}
+    member = _member(member_id)
+    cast(Any, member).infer_logits = (
+        lambda *, transform=None: _inference(member, logit_delta=0.1)
+    )
+    _, robustness_root = audit._audit_paths(spec)
+    monkeypatch.setattr(
+        audit, "_robustness_settings", lambda unused: (1, 3, 0.95, 2)
+    )
+    clean, _ = audit._load_or_create_case(
+        spec=spec,
+        member=member,
+        case=cases["clean"],
+        clean=None,
+        robustness_root=robustness_root,
+        base_seed=1,
+        bootstrap_resamples=3,
+        bootstrap_confidence=0.95,
+        bootstrap_base_seed=2,
+    )
+    first, first_created = audit._load_or_create_case(
+        spec=spec,
+        member=member,
+        case=cases["baseline-wander-0.05"],
+        clean=clean,
+        robustness_root=robustness_root,
+        base_seed=1,
+        bootstrap_resamples=3,
+        bootstrap_confidence=0.95,
+        bootstrap_base_seed=2,
+    )
+    second, second_created = audit._load_or_create_case(
+        spec=spec,
+        member=member,
+        case=cases["baseline-wander-0.10"],
+        clean=clean,
+        robustness_root=robustness_root,
+        base_seed=1,
+        bootstrap_resamples=3,
+        bootstrap_confidence=0.95,
+        bootstrap_base_seed=2,
+    )
+    resumed, resumed_created = audit._load_or_create_case(
+        spec=spec,
+        member=member,
+        case=cases["baseline-wander-0.05"],
+        clean=clean,
+        robustness_root=robustness_root,
+        base_seed=1,
+        bootstrap_resamples=3,
+        bootstrap_confidence=0.95,
+        bootstrap_base_seed=2,
+    )
+
+    assert first_created is True
+    assert second_created is True
+    assert resumed_created is False
+    assert first.artifact.npz_path.name == "baseline-wander-0.05.npz"
+    assert second.artifact.npz_path.name == "baseline-wander-0.10.npz"
+    assert first.artifact.npz_path != second.artifact.npz_path
+    assert resumed.artifact.artifact_sha256 == first.artifact.artifact_sha256
 
 
 def test_case_expansion_rejects_a_rehashed_severity_change(tmp_path: Path) -> None:

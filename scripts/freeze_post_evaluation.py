@@ -20,16 +20,13 @@ def build_parser() -> argparse.ArgumentParser:
     project_root = Path(__file__).resolve().parents[1]
     comparison_id = "ptbxl_matched_equal_budget_v1"
     release_root = project_root / "runs" / "release" / comparison_id
-    output_root = project_root / "runs" / "post_evaluation" / comparison_id
     parser = argparse.ArgumentParser(
         description=(
             "Verify and bind the completed exact-six fold-10 release, then atomically "
             "freeze robustness, explanation, probability-audit, and demo choices."
         )
     )
-    parser.add_argument(
-        "--protocol", type=Path, default=project_root / "configs" / "protocol.yaml"
-    )
+    parser.add_argument("--protocol", type=Path, default=project_root / "configs" / "protocol.yaml")
     parser.add_argument(
         "--final-batch-summary",
         type=Path,
@@ -41,9 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional explicit canonical ledger path; otherwise inferred from the sealed spec.",
     )
-    parser.add_argument(
-        "--refit-bundle", type=Path, default=release_root / "refit_bundle.json"
-    )
+    parser.add_argument("--refit-bundle", type=Path, default=release_root / "refit_bundle.json")
     parser.add_argument(
         "--calibration-bundle",
         type=Path,
@@ -63,11 +58,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=output_root,
-        help="Must equal runs/post_evaluation/<comparison-id> under the project root.",
+        default=None,
+        help=(
+            "Optional exact output root. Defaults to the legacy comparison root, or to "
+            "the next __audit-rN sibling when --supersedes-spec is supplied."
+        ),
     )
     parser.add_argument(
-        "--output", type=Path, default=output_root / "audit_spec.json"
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional canonical audit_spec.json path under the resolved output root.",
+    )
+    parser.add_argument(
+        "--supersedes-spec",
+        type=Path,
+        default=None,
+        help=(
+            "Explicit immutable prior post-evaluation spec binding for a versioned "
+            "replacement freeze."
+        ),
+    )
+    parser.add_argument(
+        "--supersession-reason",
+        default=None,
+        help=(
+            "Required with --supersedes-spec; currently only "
+            "decimal_case_id_suffix_collision is canonical."
+        ),
     )
     return parser
 
@@ -87,6 +105,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             protocol_deviations_path=args.protocol_deviations,
             project_root=args.project_root,
             output_root=args.output_root,
+            supersedes_spec_path=args.supersedes_spec,
+            supersession_reason=args.supersession_reason,
         )
     except (OSError, PostEvaluationError, ProtocolValidationError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -99,6 +119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "output_root": str(saved.output_root),
                 "member_ids": list(saved.member_ids),
                 "release_inputs_modified": False,
+                "schema_version": saved.payload["schema_version"],
             },
             sort_keys=True,
         )

@@ -17,7 +17,11 @@ from ecg_trust.post_evaluation import (
     load_post_evaluation_spec,
 )
 from ecg_trust.protocol import ProtocolValidationError, load_protocol
-from ecg_trust.robustness_audit import RobustnessAuditError, run_robustness_audit
+from ecg_trust.robustness_audit import (
+    RobustnessAuditError,
+    preflight_robustness_artifact_paths,
+    run_robustness_audit,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,6 +88,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             verify_sources=True,
             verify_git=True,
         )
+        preflight_robustness_artifact_paths(spec)
         sealed = _mapping(spec.payload["sealed_evaluation"], "sealed_evaluation")
         final_spec = _mapping(
             sealed["final_evaluation_spec"], "final_evaluation_spec"

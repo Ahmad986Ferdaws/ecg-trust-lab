@@ -38,6 +38,7 @@ from ecg_trust.release_gates import (
 )
 
 POST_EVALUATION_SPEC_SCHEMA_VERSION = 1
+POST_EVALUATION_SUPERSESSION_SCHEMA_VERSION = 2
 POST_EVALUATION_SPEC_TYPE = "ecg_trust.post_evaluation_audit_specification"
 POST_EVALUATION_DIRECTORY = "post_evaluation"
 POST_EVALUATION_FILENAME = "audit_spec.json"
@@ -45,6 +46,8 @@ EXPLANATION_COHORT_SIZE = 60
 EXPLANATION_CELL_SIZE = 6
 EXPLANATION_SELECTION_SEED = 20_260_808
 ROBUSTNESS_RANDOM_SEED = 20_260_808
+SUPERSESSION_REASON_DECIMAL_CASE_PATH_COLLISION = "decimal_case_id_suffix_collision"
+SUPERSESSION_STATUS_ABORTED = "aborted_incomplete_no_final_manifest"
 DEMO_MEMBER_ID = "resnet1d-seed2026"
 DEMO_TARGET_COVERAGE = 0.8
 EXPECTED_MEMBER_IDS: tuple[str, ...] = tuple(
@@ -539,9 +542,22 @@ def _explanation_settings() -> dict[str, object]:
     }
 
 
-def _output_contract(project_root: Path, comparison_id: str) -> dict[str, object]:
+def _output_contract(
+    project_root: Path,
+    comparison_id: str,
+    *,
+    audit_revision: int = 1,
+) -> dict[str, object]:
     allowed_parent = (project_root / "runs" / POST_EVALUATION_DIRECTORY).resolve()
-    root = (allowed_parent / comparison_id).resolve()
+    if isinstance(audit_revision, bool) or not isinstance(audit_revision, int):
+        raise PostEvaluationError("audit revision must be an integer")
+    if audit_revision == 1:
+        directory_name = comparison_id
+    elif audit_revision >= 2:
+        directory_name = f"{comparison_id}__audit-r{audit_revision}"
+    else:
+        raise PostEvaluationError("audit revision must be 1 or >= 2")
+    root = (allowed_parent / directory_name).resolve()
     return {
         "root": str(root),
         "allowed_parent": str(allowed_parent),
@@ -565,6 +581,32 @@ def _output_contract(project_root: Path, comparison_id: str) -> dict[str, object
             "publication_figures_directory": str(root / "publication" / "figures"),
         },
     }
+
+
+def _audit_revision_from_output_root(
+    project_root: Path,
+    comparison_id: str,
+    output_root: Path,
+) -> int:
+    allowed_parent = (project_root / "runs" / POST_EVALUATION_DIRECTORY).resolve()
+    root = output_root.resolve()
+    if root.parent != allowed_parent:
+        raise PostEvaluationIntegrityError("output root escapes runs/post_evaluation")
+    if root.name == comparison_id:
+        return 1
+    prefix = f"{comparison_id}__audit-r"
+    suffix = root.name.removeprefix(prefix)
+    if (
+        not root.name.startswith(prefix)
+        or not suffix.isascii()
+        or not suffix.isdigit()
+        or suffix.startswith("0")
+    ):
+        raise PostEvaluationIntegrityError("versioned output root name is not canonical")
+    revision = int(suffix)
+    if revision < 2 or suffix != str(revision):
+        raise PostEvaluationIntegrityError("versioned output root revision must be >= 2")
+    return revision
 
 
 def _run_git(project_root: Path, *arguments: str) -> str:
@@ -1345,6 +1387,8 @@ def _build_body(
     project_root: Path,
     output_root: Path | None,
     analysis_runtime: Mapping[str, object],
+    supersedes_spec_path: Path | None = None,
+    supersession_reason: str | None = None,
 ) -> dict[str, object]:
     refit, calibration, refit_binding, calibration_binding = _validate_release_bundles(
         refit_bundle_path,
@@ -1418,12 +1462,42 @@ def _build_body(
     if len(comparison_ids) != 1:
         raise PostEvaluationIntegrityError("refit comparison identity is inconsistent")
     comparison_id = next(iter(comparison_ids))
-    outputs = _output_contract(project_root, comparison_id)
+    if (supersedes_spec_path is None) != (supersession_reason is None):
+        raise PostEvaluationError(
+            "superseded spec and supersession reason must be supplied together"
+        )
+    superseded: PostEvaluationSpec | None = None
+    supersession: dict[str, object] | None = None
+    if supersedes_spec_path is None:
+        schema_version = POST_EVALUATION_SPEC_SCHEMA_VERSION
+        audit_revision = 1
+    else:
+        superseded, supersession = _build_supersession_binding(
+            supersedes_spec_path,
+            reason=cast(str, supersession_reason),
+        )
+        old_protocol = _mapping(superseded.payload["protocol"], "superseded protocol")
+        if old_protocol["comparison_id"] != comparison_id:
+            raise PostEvaluationIntegrityError(
+                "superseded specification comparison identity differs"
+            )
+        old_revision = _audit_revision_from_output_root(
+            project_root,
+            comparison_id,
+            superseded.output_root,
+        )
+        schema_version = POST_EVALUATION_SUPERSESSION_SCHEMA_VERSION
+        audit_revision = old_revision + 1
+    outputs = _output_contract(
+        project_root,
+        comparison_id,
+        audit_revision=audit_revision,
+    )
     canonical_root = Path(_string(outputs["root"], "canonical output root"))
     if output_root is not None and output_root.resolve() != canonical_root:
         raise PostEvaluationError(f"post-evaluation output root must be exactly {canonical_root}")
-    return {
-        "schema_version": POST_EVALUATION_SPEC_SCHEMA_VERSION,
+    body: dict[str, object] = {
+        "schema_version": schema_version,
         "artifact_type": POST_EVALUATION_SPEC_TYPE,
         "protocol": {
             "protocol_hash": protocol.protocol_hash,
@@ -1459,6 +1533,23 @@ def _build_body(
         },
         "output_contract": outputs,
     }
+    if supersession is not None:
+        body["supersession"] = supersession
+        if superseded is None:  # pragma: no cover - construction invariant
+            raise PostEvaluationIntegrityError("superseded specification is unavailable")
+        old_payload = superseded.payload
+        for key in (
+            "protocol",
+            "sealed_evaluation",
+            "members",
+            "aggregate_outputs",
+            "audit_protocols",
+        ):
+            if body[key] != old_payload[key]:
+                raise PostEvaluationIntegrityError(
+                    f"superseding audit {key} differs from the superseded specification"
+                )
+    return body
 
 
 def _validate_file_binding(
@@ -1577,24 +1668,31 @@ def _validate_cohort(value: object) -> None:
 
 
 def _validate_payload(root: Mapping[str, object]) -> None:
+    schema_version = _integer(root.get("schema_version"), "schema_version", minimum=1)
+    if schema_version not in {
+        POST_EVALUATION_SPEC_SCHEMA_VERSION,
+        POST_EVALUATION_SUPERSESSION_SCHEMA_VERSION,
+    }:
+        raise PostEvaluationIntegrityError("unsupported post-evaluation schema")
+    expected_root_keys = {
+        "schema_version",
+        "artifact_type",
+        "protocol",
+        "analysis_runtime",
+        "sealed_evaluation",
+        "members",
+        "aggregate_outputs",
+        "audit_protocols",
+        "output_contract",
+        "artifact_sha256",
+    }
+    if schema_version == POST_EVALUATION_SUPERSESSION_SCHEMA_VERSION:
+        expected_root_keys.add("supersession")
     _exact_keys(
         root,
-        {
-            "schema_version",
-            "artifact_type",
-            "protocol",
-            "analysis_runtime",
-            "sealed_evaluation",
-            "members",
-            "aggregate_outputs",
-            "audit_protocols",
-            "output_contract",
-            "artifact_sha256",
-        },
+        expected_root_keys,
         "post-evaluation specification",
     )
-    if root["schema_version"] != POST_EVALUATION_SPEC_SCHEMA_VERSION:
-        raise PostEvaluationIntegrityError("unsupported post-evaluation schema")
     if root["artifact_type"] != POST_EVALUATION_SPEC_TYPE:
         raise PostEvaluationIntegrityError("unexpected post-evaluation artifact type")
     protocol = _mapping(root["protocol"], "protocol")
@@ -1892,13 +1990,26 @@ def _validate_payload(root: Mapping[str, object]) -> None:
         raise PostEvaluationIntegrityError("demo gate target coverage differs")
 
     output = _mapping(root["output_contract"], "output_contract")
-    expected_output = _output_contract(project_root, comparison_id)
+    output_root = Path(_string(output["root"], "output root")).resolve()
+    try:
+        audit_revision = _audit_revision_from_output_root(
+            project_root,
+            comparison_id,
+            output_root,
+        )
+    except PostEvaluationIntegrityError as error:
+        raise PostEvaluationIntegrityError("output contract root is not canonical") from error
+    if (schema_version == POST_EVALUATION_SPEC_SCHEMA_VERSION and audit_revision != 1) or (
+        schema_version == POST_EVALUATION_SUPERSESSION_SCHEMA_VERSION and audit_revision < 2
+    ):
+        raise PostEvaluationIntegrityError("schema and output-root revision differ")
+    expected_output = _output_contract(
+        project_root,
+        comparison_id,
+        audit_revision=audit_revision,
+    )
     if dict(output) != expected_output:
         raise PostEvaluationIntegrityError("output contract is not canonical")
-    output_root = Path(_string(output["root"], "output root")).resolve()
-    allowed_parent = (project_root / "runs" / POST_EVALUATION_DIRECTORY).resolve()
-    if output_root.parent != allowed_parent:
-        raise PostEvaluationIntegrityError("output root escapes runs/post_evaluation")
     artifacts = _mapping(output["artifacts"], "output artifacts")
     for value in artifacts.values():
         candidate = Path(_string(value, "planned output path")).resolve()
@@ -1910,6 +2021,8 @@ def _validate_payload(root: Mapping[str, object]) -> None:
     del unhashed["artifact_sha256"]
     if canonical_sha256(unhashed) != stored_hash:
         raise PostEvaluationIntegrityError("post-evaluation specification self-hash mismatch")
+    if schema_version == POST_EVALUATION_SUPERSESSION_SCHEMA_VERSION:
+        _verify_supersession(root)
 
 
 def _spec_from_payload(payload: Mapping[str, object], *, path: Path | None) -> PostEvaluationSpec:
@@ -1931,6 +2044,252 @@ def _spec_from_payload(payload: Mapping[str, object], *, path: Path | None) -> P
     )
 
 
+def _is_junction(path: Path) -> bool:
+    checker = getattr(path, "is_junction", None)
+    return bool(checker()) if checker is not None else False
+
+
+def _output_tree_snapshot(root: Path) -> dict[str, object]:
+    """Hash a closed, regular-file-only snapshot of a superseded output tree."""
+
+    source_root = root.absolute()
+    if not source_root.is_dir() or source_root.is_symlink() or _is_junction(source_root):
+        raise PostEvaluationIntegrityError("superseded output root must be a regular directory")
+    resolved_root = source_root.resolve()
+    files: list[dict[str, object]] = []
+    pending = [resolved_root]
+    while pending:
+        directory = pending.pop()
+        try:
+            entries = list(os.scandir(directory))
+        except OSError as error:
+            raise PostEvaluationIntegrityError(
+                f"could not enumerate superseded output root: {error}"
+            ) from error
+        for entry in entries:
+            path = Path(entry.path)
+            if entry.is_symlink() or _is_junction(path):
+                raise PostEvaluationIntegrityError(
+                    "superseded output tree contains a link or junction"
+                )
+            if entry.is_dir(follow_symlinks=False):
+                pending.append(path)
+                continue
+            if not entry.is_file(follow_symlinks=False):
+                raise PostEvaluationIntegrityError(
+                    "superseded output tree contains a non-regular entry"
+                )
+            resolved = path.resolve()
+            try:
+                relative = resolved.relative_to(resolved_root)
+            except ValueError as error:  # pragma: no cover - guarded by link rejection
+                raise PostEvaluationIntegrityError(
+                    "superseded output tree entry escapes its root"
+                ) from error
+            try:
+                size = resolved.stat().st_size
+            except OSError as error:
+                raise PostEvaluationIntegrityError(
+                    f"could not stat superseded output file: {error}"
+                ) from error
+            files.append(
+                {
+                    "path": relative.as_posix(),
+                    "file_sha256": _file_sha256(resolved),
+                    "size_bytes": size,
+                }
+            )
+    files.sort(key=lambda item: cast(str, item["path"]))
+    if not files:
+        raise PostEvaluationIntegrityError("superseded output tree is empty")
+    return {
+        "files": files,
+        "file_count": len(files),
+        "tree_sha256": canonical_sha256({"files": files}),
+    }
+
+
+def _load_canonical_superseded_spec(path: Path) -> PostEvaluationSpec:
+    source = path.resolve()
+    spec = _spec_from_payload(
+        _read_json(source, "superseded post-evaluation specification"),
+        path=source,
+    )
+    expected = (spec.output_root / POST_EVALUATION_FILENAME).resolve()
+    if source != expected:
+        raise PostEvaluationIntegrityError(
+            "superseded post-evaluation specification path is not canonical"
+        )
+    return spec
+
+
+def _assert_superseded_manifests_absent(spec: PostEvaluationSpec) -> None:
+    output = _mapping(spec.payload["output_contract"], "superseded output contract")
+    artifacts = _mapping(output["artifacts"], "superseded output artifacts")
+    for name in ("robustness_manifest", "derived_manifest"):
+        path = Path(_string(artifacts[name], f"superseded {name}")).resolve()
+        if path.exists():
+            raise PostEvaluationIntegrityError(
+                f"superseded {name} must be absent for an incomplete audit"
+            )
+
+
+def _build_supersession_binding(
+    path: Path,
+    *,
+    reason: str,
+) -> tuple[PostEvaluationSpec, dict[str, object]]:
+    if reason != SUPERSESSION_REASON_DECIMAL_CASE_PATH_COLLISION:
+        raise PostEvaluationError("supersession reason must be decimal_case_id_suffix_collision")
+    old = _load_canonical_superseded_spec(path)
+    if old.path is None:  # pragma: no cover - loader invariant
+        raise PostEvaluationIntegrityError("superseded specification has no path")
+    _assert_superseded_manifests_absent(old)
+    runtime = _mapping(old.payload["analysis_runtime"], "superseded analysis runtime")
+    binding = {
+        "superseded_spec": {
+            "path": str(old.path),
+            "file_sha256": _file_sha256(old.path),
+            "artifact_sha256": old.artifact_sha256,
+            "git_revision": _string(runtime["git_revision"], "superseded analysis Git revision"),
+            "output_root": str(old.output_root.resolve()),
+        },
+        "output_tree": _output_tree_snapshot(old.output_root),
+        "reason": reason,
+        "status": SUPERSESSION_STATUS_ABORTED,
+        "derived_artifact_reuse_allowed": False,
+    }
+    return old, binding
+
+
+def _verify_supersession(root: Mapping[str, object]) -> None:
+    supersession = _mapping(root.get("supersession"), "supersession")
+    _exact_keys(
+        supersession,
+        {
+            "superseded_spec",
+            "output_tree",
+            "reason",
+            "status",
+            "derived_artifact_reuse_allowed",
+        },
+        "supersession",
+    )
+    if (
+        supersession["reason"] != SUPERSESSION_REASON_DECIMAL_CASE_PATH_COLLISION
+        or supersession["status"] != SUPERSESSION_STATUS_ABORTED
+        or supersession["derived_artifact_reuse_allowed"] is not False
+    ):
+        raise PostEvaluationIntegrityError("supersession policy differs")
+    binding = _mapping(supersession["superseded_spec"], "superseded spec binding")
+    _exact_keys(
+        binding,
+        {"path", "file_sha256", "artifact_sha256", "git_revision", "output_root"},
+        "superseded spec binding",
+    )
+    old_path_text = _string(binding["path"], "superseded spec path")
+    old_root_text = _string(binding["output_root"], "superseded output root")
+    old_path = Path(old_path_text).resolve()
+    old_root = Path(old_root_text).resolve()
+    if old_path_text != str(old_path) or old_root_text != str(old_root):
+        raise PostEvaluationIntegrityError(
+            "superseded spec path and output root must use canonical absolute spelling"
+        )
+    old_file_sha256 = _hash(binding["file_sha256"], "superseded spec file hash")
+    _hash(binding["artifact_sha256"], "superseded spec artifact hash")
+    old_git_revision = _string(binding["git_revision"], "superseded Git revision")
+    if len(old_git_revision) not in {40, 64} or any(
+        character not in "0123456789abcdef" for character in old_git_revision
+    ):
+        raise PostEvaluationIntegrityError("superseded Git revision is invalid")
+
+    protocol = _mapping(root["protocol"], "protocol")
+    comparison_id = _string(protocol["comparison_id"], "protocol comparison_id")
+    runtime = _mapping(root["analysis_runtime"], "analysis runtime")
+    project_root = Path(_string(runtime["project_root"], "analysis project_root")).resolve()
+    new_output = _mapping(root["output_contract"], "output contract")
+    new_root = Path(_string(new_output["root"], "output root")).resolve()
+    old_revision = _audit_revision_from_output_root(project_root, comparison_id, old_root)
+    new_revision = _audit_revision_from_output_root(project_root, comparison_id, new_root)
+    if old_root == new_root or new_revision != old_revision + 1:
+        raise PostEvaluationIntegrityError(
+            "superseding audit must use the next distinct sibling output root"
+        )
+    if old_path != (old_root / POST_EVALUATION_FILENAME).resolve():
+        raise PostEvaluationIntegrityError("superseded spec path and root differ")
+    if _file_sha256(old_path) != old_file_sha256:
+        raise PostEvaluationIntegrityError("superseded spec file changed")
+    old = _load_canonical_superseded_spec(old_path)
+    old_payload = old.payload
+    old_runtime = _mapping(old_payload["analysis_runtime"], "superseded analysis runtime")
+    if (
+        old.artifact_sha256 != binding["artifact_sha256"]
+        or old_runtime["git_revision"] != old_git_revision
+        or old.output_root.resolve() != old_root
+        or Path(_string(old_runtime["project_root"], "superseded project root")).resolve()
+        != project_root
+    ):
+        raise PostEvaluationIntegrityError("superseded spec identity differs")
+    if runtime["git_revision"] == old_git_revision:
+        raise PostEvaluationIntegrityError(
+            "superseding audit must bind a different committed Git revision"
+        )
+    _assert_superseded_manifests_absent(old)
+    snapshot = _mapping(supersession["output_tree"], "superseded output tree")
+    _exact_keys(
+        snapshot,
+        {"files", "file_count", "tree_sha256"},
+        "superseded output tree",
+    )
+    raw_files = _sequence(snapshot["files"], "superseded output files")
+    paths: list[str] = []
+    normalized_files: list[dict[str, object]] = []
+    for raw_file in raw_files:
+        entry = _mapping(raw_file, "superseded output file")
+        _exact_keys(
+            entry,
+            {"path", "file_sha256", "size_bytes"},
+            "superseded output file",
+        )
+        relative = _string(entry["path"], "superseded relative path")
+        relative_path = Path(relative)
+        if (
+            relative_path.is_absolute()
+            or relative_path.as_posix() != relative
+            or ".." in relative_path.parts
+        ):
+            raise PostEvaluationIntegrityError("superseded output relative path is not canonical")
+        paths.append(relative)
+        normalized_files.append(
+            {
+                "path": relative,
+                "file_sha256": _hash(entry["file_sha256"], "superseded output file hash"),
+                "size_bytes": _integer(entry["size_bytes"], "superseded output file size"),
+            }
+        )
+    if paths != sorted(paths) or len(set(paths)) != len(paths):
+        raise PostEvaluationIntegrityError("superseded output file snapshot is not uniquely sorted")
+    file_count = _integer(snapshot["file_count"], "superseded file_count", minimum=1)
+    if file_count != len(normalized_files):
+        raise PostEvaluationIntegrityError("superseded output file count differs")
+    tree_sha256 = _hash(snapshot["tree_sha256"], "superseded tree hash")
+    if tree_sha256 != canonical_sha256({"files": normalized_files}):
+        raise PostEvaluationIntegrityError("superseded output tree hash differs")
+    if dict(snapshot) != _output_tree_snapshot(old_root):
+        raise PostEvaluationIntegrityError("superseded output tree changed")
+    for key in (
+        "protocol",
+        "sealed_evaluation",
+        "members",
+        "aggregate_outputs",
+        "audit_protocols",
+    ):
+        if root[key] != old_payload[key]:
+            raise PostEvaluationIntegrityError(
+                f"superseding audit {key} differs from the superseded specification"
+            )
+
+
 def create_post_evaluation_spec(
     *,
     protocol: ExperimentProtocol,
@@ -1942,6 +2301,8 @@ def create_post_evaluation_spec(
     project_root: str | Path,
     opening_ledger_path: str | Path | None = None,
     output_root: str | Path | None = None,
+    supersedes_spec_path: str | Path | None = None,
+    supersession_reason: str | None = None,
 ) -> PostEvaluationSpec:
     """Verify the completed release and create a deterministic audit freeze."""
 
@@ -1962,6 +2323,10 @@ def create_post_evaluation_spec(
         project_root=resolved_project,
         output_root=None if output_root is None else Path(output_root).resolve(),
         analysis_runtime=runtime,
+        supersedes_spec_path=(
+            None if supersedes_spec_path is None else Path(supersedes_spec_path).resolve()
+        ),
+        supersession_reason=supersession_reason,
     )
     payload = dict(body)
     payload["artifact_sha256"] = canonical_sha256(body)
@@ -2053,6 +2418,17 @@ def load_post_evaluation_spec(
         )
     if verify_sources:
         sealed = _mapping(payload["sealed_evaluation"], "sealed_evaluation")
+        supersedes_spec_path: Path | None = None
+        supersession_reason: str | None = None
+        if payload["schema_version"] == POST_EVALUATION_SUPERSESSION_SCHEMA_VERSION:
+            supersession = _mapping(payload["supersession"], "supersession")
+            superseded_binding = _mapping(
+                supersession["superseded_spec"], "superseded spec binding"
+            )
+            supersedes_spec_path = Path(
+                _string(superseded_binding["path"], "superseded spec path")
+            ).resolve()
+            supersession_reason = _string(supersession["reason"], "supersession reason")
         recreated_body = _build_body(
             protocol=protocol,
             final_batch_summary_path=Path(
@@ -2094,6 +2470,8 @@ def load_post_evaluation_spec(
             project_root=project_root,
             output_root=Path(_string(output["root"], "output root")).resolve(),
             analysis_runtime=runtime,
+            supersedes_spec_path=supersedes_spec_path,
+            supersession_reason=supersession_reason,
         )
         expected_body = dict(payload)
         del expected_body["artifact_sha256"]
@@ -2105,7 +2483,7 @@ def load_post_evaluation_spec(
 
 
 def freeze_post_evaluation_spec(
-    output_path: str | Path,
+    output_path: str | Path | None,
     *,
     protocol: ExperimentProtocol,
     final_batch_summary_path: str | Path,
@@ -2116,6 +2494,8 @@ def freeze_post_evaluation_spec(
     project_root: str | Path,
     opening_ledger_path: str | Path | None = None,
     output_root: str | Path | None = None,
+    supersedes_spec_path: str | Path | None = None,
+    supersession_reason: str | None = None,
 ) -> PostEvaluationSpec:
     """Create and atomically save one post-evaluation specification."""
 
@@ -2129,8 +2509,15 @@ def freeze_post_evaluation_spec(
         protocol_deviations_path=protocol_deviations_path,
         project_root=project_root,
         output_root=output_root,
+        supersedes_spec_path=supersedes_spec_path,
+        supersession_reason=supersession_reason,
     )
-    saved = save_post_evaluation_spec(created, output_path)
+    destination = (
+        created.output_root / POST_EVALUATION_FILENAME
+        if output_path is None
+        else Path(output_path).resolve()
+    )
+    saved = save_post_evaluation_spec(created, destination)
     if saved.path is None:  # pragma: no cover - save invariant
         raise PostEvaluationIntegrityError("saved specification has no path")
     return load_post_evaluation_spec(

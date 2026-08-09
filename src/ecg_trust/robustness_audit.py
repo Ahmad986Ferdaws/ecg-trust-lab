@@ -688,7 +688,7 @@ def run_robustness_audit(
 ) -> RobustnessAuditProgress:
     """Run or safely resume member/case artifacts and conditionally finalize."""
 
-    cases = expand_robustness_cases(spec)
+    cases = preflight_robustness_artifact_paths(spec)
     all_member_ids = spec.member_ids
     runtime_ids = tuple(member.member_id for member in runtime.members)
     if (
@@ -821,6 +821,44 @@ def run_robustness_audit(
         resumed_member_cases=resumed,
         manifest=manifest,
     )
+
+
+def preflight_robustness_artifact_paths(
+    spec: PostEvaluationSpec,
+) -> tuple[RobustnessCase, ...]:
+    """Prove the complete frozen member/case path mapping is injective and contained."""
+
+    cases = expand_robustness_cases(spec)
+    _, robustness_root = _audit_paths(spec)
+    root = robustness_root.resolve()
+    owners: dict[Path, str] = {}
+    for member_id in spec.member_ids:
+        for case in cases:
+            npz_path = _case_npz_path(root, member_id, case.case_id).resolve()
+            bindings = (
+                (npz_path, "npz"),
+                (npz_path.with_suffix(".json").resolve(), "sidecar"),
+            )
+            for path, kind in bindings:
+                owner = f"{member_id}/{case.case_id}/{kind}"
+                if root not in path.parents:
+                    raise RobustnessAuditIntegrityError(
+                        f"robustness artifact path escapes root: {owner} -> {path}"
+                    )
+                previous = owners.get(path)
+                if previous is not None:
+                    raise RobustnessAuditIntegrityError(
+                        "robustness artifact path collision: "
+                        f"{previous} and {owner} both resolve to {path}"
+                    )
+                owners[path] = owner
+    expected = len(spec.member_ids) * EXPECTED_CASE_COUNT * 2
+    if len(owners) != expected:  # pragma: no cover - loop/collision invariant
+        raise RobustnessAuditIntegrityError(
+            f"robustness artifact preflight expected {expected} unique paths, "
+            f"observed {len(owners)}"
+        )
+    return cases
 
 
 def save_robustness_manifest(
@@ -1206,9 +1244,8 @@ def _load_or_create_case(
     bootstrap_confidence: float,
     bootstrap_base_seed: int,
 ) -> tuple[RobustnessArtifactRecord, bool]:
-    base_path = _case_path(robustness_root, member.member_id, case.case_id)
-    npz_path = base_path.with_suffix(".npz")
-    json_path = base_path.with_suffix(".json")
+    npz_path = _case_npz_path(robustness_root, member.member_id, case.case_id)
+    json_path = npz_path.with_suffix(".json")
     member_hash = _member_binding_sha256(spec, member.member_id)
     if npz_path.exists() or json_path.exists():
         if not (npz_path.is_file() and json_path.is_file()):
@@ -1297,7 +1334,7 @@ def _load_or_create_case(
         **analysis,
     }
     save_audit_array_artifact(
-        base_path,
+        npz_path,
         artifact_type=ROBUSTNESS_MEMBER_CASE_TYPE,
         arrays=arrays,
         metadata=metadata,
@@ -1701,7 +1738,7 @@ def _discover_all_records(
         member_hash = _member_binding_sha256(spec, member_id)
         clean_hash: str | None = None
         for case in cases:
-            path = _case_path(robustness_root, member_id, case.case_id).with_suffix(".npz")
+            path = _case_npz_path(robustness_root, member_id, case.case_id)
             sidecar = path.with_suffix(".json")
             if not path.exists() and not sidecar.exists():
                 continue
@@ -1743,7 +1780,7 @@ def _load_expected_artifact(
     member_binding_sha256: str,
     robustness_root: Path,
 ) -> AuditArrayArtifact:
-    expected = _case_path(robustness_root, member_id, case.case_id).with_suffix(".npz")
+    expected = _case_npz_path(robustness_root, member_id, case.case_id)
     if path.resolve() != expected:
         raise RobustnessAuditIntegrityError("member/case artifact path differs")
     try:
@@ -2012,6 +2049,13 @@ def _case_path(root: Path, member_id: str, case_id: str) -> Path:
     if root.resolve() not in result.parents:
         raise RobustnessAuditIntegrityError("member/case path escapes robustness root")
     return result
+
+
+def _case_npz_path(root: Path, member_id: str, case_id: str) -> Path:
+    """Append ``.npz`` without interpreting decimal case IDs as suffixes."""
+
+    base = _case_path(root, member_id, case_id)
+    return base.parent / f"{base.name}.npz"
 
 
 def _member_binding_sha256(spec: PostEvaluationSpec, member_id: str) -> str:
