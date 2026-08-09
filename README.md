@@ -2,13 +2,15 @@
 
 This project compares a 1D residual network with a patch-based ECG transformer on PTB-XL, then evaluates what matters beyond headline discrimination: probability calibration, selective abstention, subgroup behavior, robustness, and explanation faithfulness.
 
-The canonical task is **multi-label prediction of the five PTB-XL diagnostic superclasses** (NORM, MI, STTC, CD, and HYP). The intended demo is a research-only interface that loads a compatible 12-lead ECG, shows calibrated probabilities and an abstention decision, and highlights waveform regions associated with each output.
+The canonical task is **multi-label prediction of the five PTB-XL diagnostic superclasses** (NORM, MI, STTC, CD, and HYP). The local demo is a research-only interface that loads a compatible 12-lead ECG, shows calibrated probabilities and an abstention decision, and highlights waveform regions associated with each output.
 
 Start with the concise [build order](docs/BUILD_ORDER.md) or the full
 [research and implementation blueprint](docs/RESEARCH_BLUEPRINT.md). The
 [data card](docs/DATA_CARD.md) records the verified dataset contract, and the
-[preliminary development report](reports/DEVELOPMENT_RESULTS.md) separates
-current fold-8 evidence from future final-test claims.
+[completed r3 model card](docs/MODEL_CARD_PTBXL_SUPERCLASS_R3.md) separates the
+sealed fold-10 result from post-evaluation descriptive audits. The
+[development report](reports/DEVELOPMENT_RESULTS.md) is retained as a
+historical pre-evaluation snapshot.
 
 ## Current status
 
@@ -21,31 +23,38 @@ current fold-8 evidence from future final-test claims.
   provenance hash `55dd86001dee2006cb241ff8b4f3970d8fcbb1ae9ecd430f5dd61478673ce235`.
 - Project-local Python 3.12.13, PyTorch 2.13.0 + CUDA 13.0, cuDNN 9.2, and BF16
   pass the real RTX 5070 Ti forward/backward check.
-- The matched equal-budget sweep is complete: both architectures ran the same
-  12-candidate plan. The fold-8 leaders were 0.931852 macro-AUROC for ResNet
-  candidate 11 and 0.923927 for transformer candidate 6. These are
-  model-selection results, not fold-10 test results.
-- Calibration, abstention, patient-bootstrap, subgroup, corruption,
-  attribution, immutable prediction, refit, final-report, and demo-backend
-  layers are implemented and tested.
-- The fixed seeds 2026/2027/2028 confirmation is complete: ResNet averaged
-  0.932173 versus 0.917785 for the transformer on aligned fold-8 predictions,
-  so the preregistered margin rule selected ResNet as the development primary.
-- All six fresh folds-1–8 refits are complete and their source-verifying release
-  bundle is sealed. The fold-9 gate and one-time fold-10 ledger are implemented
-  with end-to-end provenance and adversarial integrity checks.
-- A local FastAPI/Plotly research viewer is implemented for compatible WFDB
-  uploads and curated examples; it will be bound to the final frozen model and
-  calibration artifacts after the one-time evaluation.
-- Repository gate on August 8, 2026: 318 tests pass; Ruff and strict mypy are
-  clean across 37 source modules.
-- Fold 9 and fold 10 have not been used for the reported development results.
-  A disclosed pre-evaluation audit incident exposed a bounded sample of raw
-  metadata rows including some fold-10 SCP codes, but no waveforms, predictions,
-  aggregate labels, or metrics; see the
-  [protocol-deviation log](reports/PROTOCOL_DEVIATIONS.md). The formal one-time
-  model evaluation remains unopened, but it will not be described as a fully
-  operator-blind test.
+- The matched 12-candidate sweep, paired seeds 2026/2027/2028 confirmation,
+  architecture freeze, and all six fresh folds-1–8 refits are complete. Fold 8
+  selected the ResNet as the development primary; those selection results
+  remain distinct from the final test.
+- Fold-9 calibration and decision fitting are sealed. The one-time exact-six
+  fold-10 batch completed on August 9, 2026 UTC under its global ledger. Across
+  seeds, mean +/- sample SD macro AUROC was `0.921921 +/- 0.000913` for the
+  ResNet versus `0.897420 +/- 0.003270` for the transformer.
+- Within every seed, paired patient-bootstrap intervals favored the ResNet for
+  macro AUROC, average precision, and Brier score. All paired ECE intervals
+  crossed zero, and fixed-bin bootstrap ECE requires an additional binning
+  caveat; no ECE advantage is claimed.
+- The immutable r3 post-evaluation package is complete: calibrated reliability,
+  dense risk-coverage, subgroup coverage, 246 controlled-corruption
+  member-cases, and 900 explanation-control evaluations. Age 80+ was notably
+  under-covered by the global abstention gates; corruptions and saliency remain
+  descriptive sensitivity tests, not clinical validation.
+- The local FastAPI/Plotly research viewer is bound to the frozen ResNet seed
+  2026 checkpoint, fold-9 policy, and r3 label-free examples. An isolated
+  Chromium replay verified ordinary inference and Grad-CAM across the rendered
+  12-lead waveform with no console error or failed request; details are in the
+  [post-evaluation run log](reports/POST_EVALUATION_RUN_LOG.md).
+- The final August 9 repository gate passed all 434 tests, Ruff, and strict
+  mypy. Pytest emitted one upstream Starlette/httpx deprecation warning.
+- [DEV-001](reports/PROTOCOL_DEVIATIONS.md) records bounded pre-evaluation
+  exposure of raw fold-10 label-bearing metadata rows. No waveform,
+  prediction, model metric, or exposed value informed a choice, but strict
+  operator-level outcome-label blindness was breached. This project does not
+  claim a completely blind test.
+- The failed r1 and r2 post-evaluation trees remain immutable. r3 binds both
+  supersessions and regenerated every derived artifact without reuse; see the
+  [post-evaluation run log](reports/POST_EVALUATION_RUN_LOG.md).
 
 ## Development commands
 

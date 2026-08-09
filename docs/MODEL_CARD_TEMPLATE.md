@@ -4,6 +4,10 @@
 > replace bracketed fields only from integrity-checked artifacts. Leave a field
 > as `Not evaluated` when evidence does not exist. Never convert a fold-8
 > development metric into a fold-10 result.
+>
+> The completed comparison card is
+> `docs/MODEL_CARD_PTBXL_SUPERCLASS_R3.md`. Keep this template generic; do not
+> back-port final values into placeholders intended for a different release.
 
 ## 1. Card and evidence status
 
@@ -18,7 +22,7 @@
 | Protocol ID | `ptbxl-superclass-trust-v1` |
 | Protocol hash | `sha256:ebfdb588615bfa22eedc6d936d7b0155a33702878cbe0258ebb84aaa88567e09` |
 | Dataset | `PTB-XL 1.0.3, canonical 100 Hz five-superclass manifest` |
-| Evidence status | `[DEVELOPMENT ONLY / CALIBRATED, NOT TESTED / FINAL TEST COMPLETE / EXPLORATORY]` |
+| Evidence status | `[DEVELOPMENT ONLY / CALIBRATED, NOT TESTED / FINAL TEST COMPLETE / FINAL TEST + POST-EVALUATION AUDITS COMPLETE / EXPLORATORY]` |
 | Preregistered seeds | `[SEED_LIST]` |
 | Completed final seeds | `[SEED_LIST_OR_NONE]` |
 | Final-report hashes | `[ONE_PER_MODEL_AND_SEED_OR_NOT_EVALUATED]` |
@@ -182,9 +186,10 @@ The checked matched configs use:
 |---|---:|---|---|---|---|
 | `[MODEL]` | `[SEED]` | `[RUN_NAME]` | `[complete/failed/running]` | `[included/excluded]` | `[REASON]` |
 
-The checked repository currently provides configs only for seed 2026.
-Additional seeds require explicit config copies with unique run names. A
-single seed must never be described as a multi-seed study.
+List every seed declared by the frozen comparison plan and trace it to its
+completion receipt or exclusion record. Additional seeds require explicit,
+uniquely named configurations or recipes; a single seed must never be
+described as a multi-seed study.
 
 ## 8. Calibration and decision policy
 
@@ -319,9 +324,10 @@ fairness claim.
 
 ## 13. Robustness and explanation evidence
 
-The locked final batch does not generate robustness or
-explanation-faithfulness artifacts. Do not mark these as complete based on a
-waveform visualization alone.
+The locked final batch does not itself generate robustness or
+explanation-faithfulness artifacts. Populate this section only from separately
+frozen, source-verified post-evaluation manifests. Do not mark an audit as
+complete based on a waveform visualization alone.
 
 ### Robustness
 
@@ -336,14 +342,16 @@ waveform visualization alone.
 
 ### Attributions
 
-The implemented explanation methods are 1D Grad-CAM for the ResNet and
-Integrated Gradients for both model families. Attributions show model
-sensitivity, not physiological causality or clinician reasoning.
+The implemented explanation methods are 1D Grad-CAM for the ResNet plus
+Integrated Gradients and temporal occlusion for both model families.
+Attributions show model sensitivity, not physiological causality or clinician
+reasoning.
 
 | Method | Architecture | Target labels | Faithfulness/sanity tests | Result artifact | Status |
 |---|---|---|---|---|---|
 | Grad-CAM | ResNet | `[LABELS]` | `[DELETION/RANDOMIZATION/STABILITY]` | `[PATH/HASH]` | `[NOT EVALUATED OR RESULT]` |
 | Integrated Gradients | Both | `[LABELS]` | `[DELETION/RANDOMIZATION/STABILITY]` | `[PATH/HASH]` | `[NOT EVALUATED OR RESULT]` |
+| Temporal occlusion | Both | `[LABELS]` | `[DELETION/RANDOMIZATION/STABILITY]` | `[PATH/HASH]` | `[NOT EVALUATED OR RESULT]` |
 
 ## 14. Compute and efficiency
 
@@ -382,9 +390,9 @@ There is no current minimum-throughput or maximum-VRAM quality threshold.
   real-world distribution-shift robustness.
 - Attribution maps are model-specific sensitivity maps, not causal evidence or
   proof of clinically meaningful reasoning.
-- The repository currently lacks cross-seed aggregation and paired-comparison
-  CLIs. Any added analysis must preserve and document the same fold and hash
-  contracts.
+- Cross-seed aggregation and paired patient-cluster comparison must come only
+  from the sealed exact-six artifacts. Any extension must preserve and
+  document the same alignment, fold, direction, and hash contracts.
 - Public fold 10 can become another validation set if inspected repeatedly.
   Any change motivated by final results must be labeled exploratory rather
   than replacing the confirmatory result.
@@ -410,6 +418,8 @@ diagnostic.
   `configs/refit_transformer_frozen.yaml`
 - Full operational record: `docs/REPRODUCIBILITY.md`
 - Research framing and literature context: `docs/RESEARCH_BLUEPRINT.md`
+- Completed comparison-card example: `docs/MODEL_CARD_PTBXL_SUPERCLASS_R3.md`
+- Post-evaluation run-log example: `reports/POST_EVALUATION_RUN_LOG.md`
 
 ### Sign-off
 

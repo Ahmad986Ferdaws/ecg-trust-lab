@@ -1,15 +1,15 @@
 # ECG trust project: build order
 
-This is the operational order for the PTB-XL five-superclass project. A stage
-does not advance until its exit gate passes; fold 10 remains sealed until the
-final configuration is frozen.
+This is the completed operational order for the PTB-XL five-superclass
+project. Each stage advanced only after its exit gate passed; fold 10 remained
+sealed until the final configuration and one-time ledger were frozen.
 
 ## Infrastructure
 
 - **Machine:** Ryzen 9 8940HX, 16 cores / 32 threads, about 31 GB RAM.
 - **GPU:** NVIDIA RTX 5070 Ti Laptop GPU, 12 GB VRAM, Blackwell `sm_120`.
-- **Storage:** PTB-XL 100 Hz plus environments and artifacts require only a few
-  gigabytes; keep at least 20 GB free for checkpoints, sweeps, and reports.
+- **Storage:** the completed data, environment, artifact, and run trees occupy
+  about 12 GB; keep at least 20 GB free for checkpoints, sweeps, and reports.
 - **Runtime:** project-local Python 3.12.13 managed by `uv`.
 - **Training stack:** PyTorch 2.13.0 + CUDA 13.0, cuDNN 9.2, BF16 enabled after
   the verified GPU forward/backward test.
@@ -52,58 +52,51 @@ iteration and equal-budget sweeps, not fitting an otherwise oversized model.
    wall time, and fold-8 metrics. The paired 12-candidate sweep completed with
    fold-8 leaders of 0.931852 for ResNet and 0.923927 for the transformer.
 
-7. **Freeze choices, then calibrate — active.** Paired seeds 2026, 2027, and
-   2028, the architecture decision, robust median epoch budgets, and all six
-   folds-1–8 refits are complete. The current work is to commit the sealed
-   release code, freeze label-free subgroups and the exact CUDA/runtime/report
-   specification, export all six fold-9 predictions, and fit the independent
-   temperature, threshold, and abstention policies.
+7. **Freeze choices, then calibrate — complete.** Paired seeds 2026, 2027, and
+   2028, the architecture decision, median epoch budgets, all six folds-1–8
+   refits, label-free subgroups, the CUDA/runtime/report specification, six
+   fold-9 prediction pairs, and six independent temperature/threshold/gate
+   policies are frozen and sealed.
 
-8. **Open fold 10 once.** Run the global spec-keyed exact-six ledgered batch.
-   Generate immutable logits/probabilities and report per-label and macro
-   AUROC/AUPRC, Brier score, ECE, thresholded metrics, risk–coverage curves,
-   subgroup results, cross-seed summaries, and paired patient-cluster bootstrap
-   intervals. Do not tune after inspecting these results.
+8. **Open fold 10 once — complete.** The global spec-keyed exact-six ledgered
+   batch completed on August 9, 2026 UTC. It published six immutable prediction
+   pairs, six member reports, two architecture summaries, and three paired
+   patient-cluster bootstrap comparisons. Exact resumes recovered operational
+   hash-representation failures without overwriting predictions or repeating a
+   scientific query. No post-test tuning was performed.
 
-9. **Audit trustworthiness.** Measure subgroup performance and gate coverage;
-   run baseline-wander, noise, amplitude, time-shift, and lead corruptions;
-   compare Grad-CAM, Integrated Gradients, and occlusion with deletion,
-   ablation, stability, and parameter-randomization checks.
+9. **Audit trustworthiness — complete.** The immutable r3 audit includes raw
+   and calibrated reliability, dense risk-coverage, error detection, subgroup
+   performance and coverage, 246 controlled-corruption member-cases, and 900
+   explanation-control evaluations using Grad-CAM, Integrated Gradients, and
+   temporal occlusion. These are post-evaluation descriptive analyses.
 
-10. **Package the result.** Build the local research viewer, add data/model
-    cards and limitations, export reproducible tables/figures, and present the
-    system as research software—not a diagnostic or medical device.
+10. **Package the result — complete.** Reproducible tables and figures, the r3
+    report, post-evaluation run log, model card, frozen demo binding, and local
+    research viewer are present. The browser-level CSP nonce, SVG waveform
+    portability correction, and successful isolated-Chromium retest are
+    tracked in
+    `reports/POST_EVALUATION_RUN_LOG.md`; this operational retest does not
+    change the scientific package.
 
-## Immediate command sequence
+## Completion record
 
-The sweep, paired confirmation, architecture freeze, and all six refits are
-already complete. The next sequence is:
+Do not rerun or modify the sealed fold-10 release to reproduce a prettier
+result. The authoritative identities are:
 
-```powershell
-uv run ecg-verify
-uv run pytest
-uv run ruff check src tests scripts
-uv run mypy
-git status --short
-git add README.md docs reports scripts src tests pyproject.toml uv.lock
-git commit -m "Seal final evaluation release pipeline"
-uv run python scripts/build_subgroups.py `
-  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
-  --output runs\release\ptbxl_matched_equal_budget_v1\fold10_subgroups.json
-uv run python scripts/freeze_final_evaluation.py `
-  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
-  --subgroups runs\release\ptbxl_matched_equal_budget_v1\fold10_subgroups.json `
-  --device cuda:0 `
-  --output runs\release\ptbxl_matched_equal_budget_v1\final_evaluation_spec.json
-uv run python scripts/release_pipeline.py export-fold9 `
-  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
-  --evaluation-spec runs\release\ptbxl_matched_equal_budget_v1\final_evaluation_spec.json
-uv run python scripts/release_pipeline.py fit-calibration `
-  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
-  --evaluation-spec runs\release\ptbxl_matched_equal_budget_v1\final_evaluation_spec.json
-```
+- final-evaluation specification:
+  `sha256:1f73c021a544ffeb119ffe8e490a16e32ec84247e30bce1ffd895fcffed6c762`;
+- final batch:
+  `sha256:a4da85d5272b1634baaf953496c3d9efd8917777ad8de13b1b0c6dc754699e62`;
+- completed opening ledger:
+  `sha256:3bb83554a08832212989ea8f3ea212f6af42c08460edbde9ba130065b1115a57`;
+- r3 post-evaluation specification:
+  `sha256:5727858f0c22b6311152749e0d9a3d20b3c14f4ee1c72ef9d1cf6e1943434200`;
+  and
+- r3 derived manifest:
+  `sha256:fae6df30090ee59425a347034a7f4272cac5b799582a5742fff9c62b92a092f8`.
 
-Inspect and archive the sealed fold-9/calibration artifact hashes before the
-single `run-final` invocation. Only an interrupted hash-identical final batch
-may use `--resume`; completed resume is verification-only and performs no new
-export or ledger mutation.
+Use `docs/REPRODUCIBILITY.md` for the executable workflow and
+`reports/POST_EVALUATION_RUN_LOG.md` for the immutable r1/r2/r3 recovery
+history. A completed `run-final --resume` is verification-only; it must never
+be used as an invitation to regenerate or tune the sealed evaluation.

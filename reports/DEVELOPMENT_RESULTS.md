@@ -1,5 +1,15 @@
 # Development results
 
+> **Historical pre-evaluation snapshot — not the current project status.**
+> This file is preserved without rewriting its original fold-8 numbers or
+> then-current stage language. Statements below that fold-9 calibration or
+> fold-10 evaluation is pending describe the time when this snapshot was
+> written. The sealed final result is in
+> `runs/post_evaluation/ptbxl_matched_equal_budget_v1__audit-r3/reports/FINAL_RESULTS.md`,
+> the completed interpretation is in
+> `docs/MODEL_CARD_PTBXL_SUPERCLASS_R3.md`, and the immutable post-evaluation
+> history is in `reports/POST_EVALUATION_RUN_LOG.md`.
+
 **Status:** paired three-seed model-selection evidence and frozen refits complete;
 fold-9 calibration pending
 

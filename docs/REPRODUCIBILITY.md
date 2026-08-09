@@ -3,9 +3,11 @@
 This document is the executable record for the current PTB-XL five-superclass
 pipeline. Run commands from the repository root in PowerShell. The matched
 12-by-2 sweep is complete; the fixed multi-seed confirmation and downstream
-confirmation, architecture freeze, and six folds-1–8 refits are complete. The
-fold-9 calibration and formal fold-10 model-evaluation stages remain pending
-until each gated command actually completes.
+confirmation, architecture freeze, six folds-1–8 refits, fold-9 calibration,
+one-time fold-10 batch, and r3 post-evaluation audit are complete. Commands
+below preserve the executable protocol and historical order; completion is
+established by the immutable hashes recorded in Sections 10 and 11, not by
+rerunning the sealed final batch.
 
 The authoritative deviation record is `reports/PROTOCOL_DEVIATIONS.md`.
 DEV-001 documents a bounded accidental display of raw rows that included some
@@ -108,6 +110,14 @@ uv run ecg-verify
 
 All four commands must exit zero. Test count is not a stable contract; record
 the count and date rather than hard-coding it into a result claim.
+
+The pre-release repository gate completed before the one-time evaluation.
+After r3 and the browser corrections, the August 9, 2026 final gate passed all
+434 tests in 156.41 seconds, Ruff, and strict mypy. Pytest reported one
+upstream Starlette/httpx deprecation warning. The suite used a fresh explicit
+workspace `--basetemp` because the managed sandbox could not traverse the
+default installed-package or temporary-directory paths; the unrestricted test
+process itself completed normally.
 
 ## 4. Acquire and verify PTB-XL
 
@@ -293,6 +303,9 @@ Both configs use batch 128, AdamW, BCE-with-logits loss, learning rate 0.001,
 weight decay 0.01, five warmup epochs, warmup-cosine scheduling, gradient norm
 1.0, at most 50 epochs, and fold-8 macro AUROC early stopping with patience 10
 and minimum delta 0.0001. Both checked configs currently contain seed 2026.
+The frozen multi-seed planner described below added seeds 2027 and 2028 with
+unique run identities; all three declared seeds completed for both
+architectures.
 
 The primary equal-budget search is one paired schema-v2 comparison. Inspect its
 completed state without writing study data:
@@ -472,6 +485,23 @@ final-specification freeze are derived by code; the CLI intentionally exposes
 no batch-size, worker, device, precision, coverage, bootstrap, subgroup, or
 ledger-path overrides.
 
+All stages in this section completed on August 9, 2026 UTC. The immutable
+anchors are:
+
+| Release artifact | Canonical SHA-256 |
+|---|---|
+| Final-evaluation specification | `sha256:1f73c021a544ffeb119ffe8e490a16e32ec84247e30bce1ffd895fcffed6c762` |
+| Refit bundle | `sha256:7a0bbd07bfeec1cfb68599829921fee0ad4a3d97968520c43c952f1ea3bb59dd` |
+| Calibration bundle | `sha256:12b63f0ca20c0c8a901166ff3fa3bc8ed707cecb467413326e057d69c588b0ec` |
+| Final batch | `sha256:a4da85d5272b1634baaf953496c3d9efd8917777ad8de13b1b0c6dc754699e62` |
+| Completed opening ledger | `sha256:3bb83554a08832212989ea8f3ea212f6af42c08460edbde9ba130065b1115a57` |
+| Final batch summary | `sha256:f075d45f03ae43127c22546c95b1c9f4dd2357dbe6b2c4c9d948d159c8ce1cbf` |
+
+The execution and exact-resume history is recorded in
+`reports/FINAL_EVALUATION_RUN_LOG.md`. DEV-001 in
+`reports/PROTOCOL_DEVIATIONS.md` still prevents a claim of complete
+operator-level outcome-label blindness.
+
 ### 10.1 Freeze subgroup metadata before fold 9
 
 Create the versioned subgroup artifact from the sealed refit bundle before the
@@ -574,6 +604,38 @@ post-evaluation artifacts. They may inspect only the already frozen final
 batch and may not change model selection, calibration, thresholds, gates, or
 headline evaluation settings.
 
+### 10.6 Freeze and complete post-evaluation r3
+
+The completed post-evaluation root is
+`runs/post_evaluation/ptbxl_matched_equal_budget_v1__audit-r3`. Its clean
+analysis revision is `731753796e3c26d68bfff072583c5ea54851e8c1`, and its
+specification hash is
+`sha256:5727858f0c22b6311152749e0d9a3d20b3c14f4ee1c72ef9d1cf6e1943434200`.
+The specification freezes probability, reliability, selective-prediction,
+subgroup, corruption, explanation, publication, and demo protocols before
+their r3 artifacts are materialized.
+
+Two earlier roots remain immutable. r1 failed because decimal case IDs
+collided during suffix replacement. r2 fixed path construction and regenerated
+all branch artifacts, but final loading incorrectly treated the key order of
+the `attribution_runtime` JSON mapping as semantic. r3 binds the complete r2
+tree, corrects order-insensitive validation, and regenerates all derived
+artifacts. Every supersession sets `derived_artifact_reuse_allowed: false`.
+
+| r3 artifact | Canonical SHA-256 |
+|---|---|
+| Probability audit | `sha256:e5f5261b2ff95dfe11596e544227effad5d5e98a4e547251fa5246d32ad26528` |
+| Robustness manifest | `sha256:be9ff204f85f2ca11ed78ed93d4bf066029fd5c68f7c61fcfb0e1d9cfa6d906a` |
+| Explanation manifest | `sha256:0803fe333b8f736d8c61babc2c50fe26194d3a75a7e06d123640ee2e1fc9733d` |
+| Demo binding | `sha256:c8f7417875f646d1cabe4af4cb420813b2bde6cf6c201a0e1f1442ce133edb31` |
+| Derived-artifact manifest | `sha256:fae6df30090ee59425a347034a7f4272cac5b799582a5742fff9c62b92a092f8` |
+
+The derived manifest inventories 554 generated files and separately binds its
+verified prerequisites. The r3 final report file hash is
+`c4363d89a43c59b7e7185a01b13a22377a90e35eb356e8a640bf7517fe721d0c`.
+Use `reports/POST_EVALUATION_RUN_LOG.md` for exact r1/r2/r3 tree hashes,
+failure states, findings, and the browser-verification status.
+
 ## 11. Artifact layout and provenance ledger
 
 Defaults and recommended generated paths are:
@@ -589,6 +651,9 @@ artifacts/subgroups/               preregistered aligned subgroup JSON
 artifacts/final/                   immutable fold-10 final reports
 runs/development/<run_name>/       development checkpoints and metadata
 runs/refit/<run_name>/             frozen-refit checkpoints and metadata
+runs/release/ptbxl_matched_equal_budget_v1/  sealed fold-9/fold-10 release
+runs/release/.final-test-openings/  immutable spec-keyed opening marker/ledger
+runs/post_evaluation/<audit_root>/  immutable post-evaluation specs and outputs
 reports/figures/data/              generated descriptive figures
 ```
 
@@ -611,6 +676,9 @@ Git revision / dirty-state record
   -> calibration-decision artifact hash
   -> fold-10 prediction artifact hash
   -> final-report hash
+  -> post-evaluation specification and supersession chain
+  -> probability/robustness/explanation/demo manifest hashes
+  -> derived-artifact manifest
 ```
 
 Do not mix prefixed and unprefixed hashes silently. Protocol and canonical
@@ -619,20 +687,21 @@ manifest and file hashes in run metadata are stored as the 64-character digest.
 
 ## 12. Stage gates
 
-| Stage | Pass condition |
-|---|---|
-| Environment | Locked sync succeeds and `ecg-verify` reports PASS on CUDA |
-| Source data | `download_ptbxl.py --verify-only` exits zero against official SHA-256 values |
-| Manifest | Strict canonical counts, waveform existence, and patient-fold isolation pass; hash inventory matches |
-| Signal contract | Real folds 1/8/9 load as finite float32 `[12, 1000]` in canonical lead order |
-| Normalization | Provenance says folds 1-7, 14,955 records, and the selected-row hash matches |
-| Code quality | pytest, Ruff, strict mypy, and CUDA verification all exit zero |
-| Capacity benchmark | Finite train steps; exact matched parameter counts; descriptive compute JSON saved |
-| Smoke training | Unique run completes and writes valid best/last checkpoints; no scientific claim attached |
-| Development | `status: complete`; fold-8 selection only; all seeds/configs use equal declared budgets |
-| Frozen refit | Selected epoch + 1 verified; no early stopping; `final.ckpt` is authoritative |
-| Calibration | Integrity-bound fold-9-only prediction and decision artifacts |
-| Final | Frozen choices, explicit token, fold-10-only prediction, non-overwriting report, hashes archived |
+| Stage | Pass condition | Recorded status |
+|---|---|---|
+| Environment | Locked sync succeeds and `ecg-verify` reports PASS on CUDA | Complete |
+| Source data | `download_ptbxl.py --verify-only` exits zero against official SHA-256 values | Complete |
+| Manifest | Strict canonical counts, waveform existence, and patient-fold isolation pass; hash inventory matches | Complete |
+| Signal contract | Real folds 1/8/9 load as finite float32 `[12, 1000]` in canonical lead order | Complete |
+| Normalization | Provenance says folds 1-7, 14,955 records, and the selected-row hash matches | Complete |
+| Code quality | pytest, Ruff, strict mypy, and CUDA verification all exit zero | Complete; final gate: 434 tests, Ruff, and strict mypy passed; CUDA verification passed in the recorded environment gate |
+| Capacity benchmark | Finite train steps; exact matched parameter counts; descriptive compute JSON saved | Complete |
+| Smoke training | Unique run completes and writes valid best/last checkpoints; no scientific claim attached | Complete |
+| Development | `status: complete`; fold-8 selection only; all seeds/configs use equal declared budgets | Complete |
+| Frozen refit | Selected epoch + 1 verified; no early stopping; `final.ckpt` is authoritative | Complete |
+| Calibration | Integrity-bound fold-9-only prediction and decision artifacts | Complete |
+| Final | Frozen choices, explicit token, fold-10-only prediction, non-overwriting report, hashes archived | Complete |
+| Post-evaluation | New immutable root for each defect; exact source verification; no reuse; final derived manifest | Complete in r3 |
 
 The literature-scale macro-AUROC near 0.92-0.93 is a contextual sanity check,
 not an automated quality gate in the current code. A discrepancy should trigger
@@ -640,7 +709,11 @@ an investigation; it must not trigger repeated fold-10 tuning.
 
 ## 13. Reproduction record checklist
 
-Before publishing or filling the model card, capture:
+The completed record is summarized in
+`docs/MODEL_CARD_PTBXL_SUPERCLASS_R3.md`,
+`reports/FINAL_EVALUATION_RUN_LOG.md`, and
+`reports/POST_EVALUATION_RUN_LOG.md`. Before any republication, independently
+verify that it retains:
 
 - date, operator, machine, and Git revision/dirty state;
 - `uv.lock` hash and full `ecg-verify` JSON;
@@ -650,6 +723,8 @@ Before publishing or filling the model card, capture:
 - immutable fold-9/fold-10 prediction sidecars;
 - calibration-decision and final-report hashes;
 - exact bootstrap settings and subgroup JSON hash;
+- the immutable r1/r2/r3 supersession chain and the r3 probability,
+  robustness, explanation, demo, and derived-manifest hashes;
 - all code-quality command outputs;
 - a statement that fold 10 was opened only after freezing choices, or an
   explicit exploratory label if that condition was violated.
