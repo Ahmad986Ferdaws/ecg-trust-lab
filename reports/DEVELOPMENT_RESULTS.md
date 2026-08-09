@@ -1,14 +1,62 @@
 # Development results
 
-**Status:** equal-budget single-seed model-selection evidence; multi-seed confirmation pending
+**Status:** paired three-seed model-selection evidence and frozen refits complete;
+fold-9 calibration pending
 
 **Protocol:** PTB-XL 1.0.3, 100 Hz, folds 1–7 train, fold 8 model selection  
-**Seed:** 2026  
+**Confirmation seeds:** 2026, 2027, 2028
 **Labels:** NORM, MI, STTC, CD, HYP
 
 These numbers are not fold-10 test results and are not final research claims.
-They establish that the pipeline is credible enough to proceed to paired
-multi-seed confirmation. Fold 9 and fold 10 were not accessed by any run.
+They establish the frozen architecture decision and refit budgets used for the
+next stage. Fold 9 and fold 10 were not accessed by any reported run. A bounded
+sample of raw metadata rows containing some fold-10 SCP codes was accidentally
+displayed during a later pre-evaluation audit; no model output or aggregate
+metric was exposed or used. This operator-blinding deviation is recorded in
+`reports/PROTOCOL_DEVIATIONS.md` and must accompany the final claims.
+
+## Paired multi-seed confirmation and architecture freeze
+
+All six preregistered architecture/seed members completed on the same aligned
+fold-8 records. Scores below were independently recomputed from immutable
+prediction artifacts; the one nonzero training-receipt difference was
+`0.0000001242`, inside the predeclared absolute tolerance of `0.000001`.
+
+| Model | Seed 2026 | Seed 2027 | Seed 2028 | Mean fold-8 macro AUROC | Frozen refit epochs |
+|---|---:|---:|---:|---:|---:|
+| 1D ResNet | 0.931852 | 0.932127 | 0.932540 | 0.932173 | 12 |
+| ECG transformer | 0.923927 | 0.916589 | 0.912838 | 0.917785 | 22 |
+
+The paired mean difference, transformer minus ResNet, was `-0.014388`.
+Under the preregistered practical-margin rule of `0.005`, the immutable
+development decision is `resnet1d_selected`. ResNet is therefore the primary
+architecture for headline ordering and the research demo, while both
+architectures and all three seeds remain frozen comparators. Fold-9 or fold-10
+results cannot change this selection.
+
+The authoritative freeze artifact is
+`runs/confirmation/ptbxl_matched_equal_budget_v1/multiseed_freeze.json`, with
+artifact SHA-256
+`49a64102d3461bdeb0b932f23b6b8dd8f80e4a5b6c7947ae4da4f3c8c6ab4690`.
+Its paired seed differences were `-0.007925`, `-0.015538`, and `-0.019702`
+for seeds 2026, 2027, and 2028, respectively.
+
+## Frozen folds-1–8 refits
+
+Six fresh-weight refits completed from the immutable freeze: three ResNets for
+12 epochs and three transformers for 22 epochs. Each used exactly folds 1–8,
+retained normalization fitted only on folds 1–7, and performed no validation,
+early stopping, or checkpoint selection. Every completion receipt re-verifies
+its source confirmation member, recipe, freeze, code revision, dependency
+lock, resolved configuration, checkpoint, manifest, and normalization.
+
+The six-member release bundle is
+`runs/release/ptbxl_matched_equal_budget_v1/refit_bundle.json`, with artifact
+SHA-256
+`7a0bbd07bfeec1cfb68599829921fee0ad4a3d97968520c43c952f1ea3bb59dd`.
+It passed full source re-verification and is the only authorized input to the
+future fold-9 export. No refit metric is reported because the refits deliberately
+had no model-selection fold.
 
 ## Equal-budget paired sweep
 
@@ -26,10 +74,8 @@ history exactly and did not consume the candidate budget.
 | ECG transformer | 6 | 21 | 30 | 0.923927 | 1,204.6 MiB | 793.6 s | 192 | 0.00123597 | 0.00141241 |
 
 The seed-2026 development difference is 0.007925 macro-AUROC in favor of the
-ResNet. This is not yet the architecture decision: the preregistered rule uses
-the mean over paired seeds 2026, 2027, and 2028 with a practical margin of
-0.005. Both architectures proceed through all later stages regardless of that
-decision.
+ResNet. It was only one input to the paired three-seed architecture decision
+reported above; it was not used to select a best seed.
 
 The final sweep summary is identified by SHA-256
 `04574c17773dea894efd84bf2ed5fa5be685ce3a6687deb3524a373ea6d8df6b`.
@@ -76,10 +122,9 @@ records/s for the transformer; first-epoch initialization is included.
 Rounded per-label values are for orientation; machine-readable histories and
 checkpoints under `runs/development/` retain full precision and complete
 provenance. The initial comparison motivated the matched sweep above. The
-apparent ResNet advantage is still not a final conclusion: the next gate
-requires all three paired seeds, and the final architecture comparison
-requires paired patient-cluster confidence intervals on the single authorized
-fold-10 batch.
+final architecture comparison still requires paired patient-cluster
+confidence intervals on the single authorized fold-10 batch. The fold-8
+decision above selects the development primary but is not a final-test claim.
 
 ## Selected checkpoint SHA-256
 

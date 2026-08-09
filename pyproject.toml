@@ -12,6 +12,7 @@ authors = [{ name = "PTB-XL ECG Research Project" }]
 dependencies = [
   "captum>=0.8.0",
   "fastapi>=0.141.1",
+  "filelock>=3.32",
   "jinja2>=3.1.6",
   "matplotlib>=3.10",
   "numpy>=2.0",
@@ -52,6 +53,7 @@ packages = ["src/ecg_trust"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]
+pythonpath = [".", "src"]
 
 [tool.ruff]
 line-length = 100
@@ -65,6 +67,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.12"
 strict = true
 packages = ["ecg_trust"]
+mypy_path = ["src", "."]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu130" }

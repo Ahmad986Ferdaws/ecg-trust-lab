@@ -14,20 +14,33 @@ import hashlib
 import json
 import math
 import os
+import socket
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import suppress
+import uuid
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from ecg_trust.constants import PTBXL_VERSION
+import numpy as np
+import pandas as pd  # type: ignore[import-untyped]
+import psutil  # type: ignore[import-untyped]
+from filelock import FileLock
+from filelock import Timeout as FileLockTimeout
+
+from ecg_trust.constants import PTBXL_VERSION, TARGET_COLUMNS
 from ecg_trust.decisioning import (
     CalibrationDecisionArtifact,
     fit_calibration_decisions,
     load_calibration_decisions,
     save_calibration_decisions,
+)
+from ecg_trust.final_evaluation_spec import (
+    FinalEvaluationSpec,
+    FinalEvaluationSpecError,
+    load_final_evaluation_spec,
 )
 from ecg_trust.multiseed_freeze import (
     load_multiseed_freeze,
@@ -54,13 +67,21 @@ from ecg_trust.refit_runner import load_refit_completion
 
 REFIT_BUNDLE_SCHEMA_VERSION = 1
 REFIT_BUNDLE_TYPE = "ecg_trust.refit_release_bundle"
-CALIBRATION_BUNDLE_SCHEMA_VERSION = 1
+CALIBRATION_BUNDLE_SCHEMA_VERSION = 2
 CALIBRATION_BUNDLE_TYPE = "ecg_trust.calibration_release_bundle"
 FOLD9_EXPORT_PLAN_TYPE = "ecg_trust.fold9_export_batch_plan"
 CALIBRATION_FIT_PLAN_TYPE = "ecg_trust.calibration_fit_batch_plan"
+FOLD9_EXPORT_COMPLETION_TYPE = "ecg_trust.fold9_export_batch_completion"
+CALIBRATION_FIT_COMPLETION_TYPE = "ecg_trust.calibration_fit_batch_completion"
+FOLD9_EXPORT_STAGE_SCHEMA_VERSION = 2
+CALIBRATION_FIT_STAGE_SCHEMA_VERSION = 2
 EXPECTED_ARCHITECTURES: tuple[str, ...] = ("resnet1d", "ecg_transformer")
 EXPECTED_SEEDS: tuple[int, ...] = (2026, 2027, 2028)
 REFIT_FOLDS: tuple[int, ...] = tuple(range(1, 9))
+CANONICAL_COVERAGE_TARGETS: tuple[float, ...] = (1.0, 0.9, 0.8, 0.7, 0.5)
+_STAGE_LOCK_NAME = ".ecg-trust-release-stage.lock"
+_STAGE_LOCK_OWNER_NAME = _STAGE_LOCK_NAME + ".owner.json"
+_FOLD9_ORPHAN_DIRECTORY = ".fold9-prediction-orphans"
 
 JsonValue = object
 PredictionExporter = Callable[..., PredictionExportResult]
@@ -147,6 +168,105 @@ def write_new_hashed_json(
     committed[hash_field] = digest
     _write_json(destination, committed, replace=False)
     return destination, digest
+
+
+def _stage_lock_owner_payload(*, nonce: str) -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "artifact_type": "ecg_trust.release_stage_lock_owner",
+        "host": socket.gethostname(),
+        "pid": os.getpid(),
+        "process_create_time": float(psutil.Process(os.getpid()).create_time()),
+        "nonce": nonce,
+        "acquired_at_utc": datetime.now(UTC).isoformat(),
+    }
+
+
+def _validated_stage_lock_owner(path: Path) -> Mapping[str, object]:
+    owner = read_json_mapping(path, context="release stage lock owner")
+    expected = {
+        "schema_version",
+        "artifact_type",
+        "host",
+        "pid",
+        "process_create_time",
+        "nonce",
+        "acquired_at_utc",
+    }
+    if set(owner) != expected:
+        raise ReleaseIntegrityError("release stage lock owner has an invalid schema")
+    if owner["schema_version"] != 2:
+        raise ReleaseIntegrityError("release stage lock owner has an unsupported schema")
+    if owner["artifact_type"] != "ecg_trust.release_stage_lock_owner":
+        raise ReleaseIntegrityError("release stage lock owner has an invalid artifact type")
+    _string(owner["host"], "release stage lock owner host")
+    _integer(owner["pid"], "release stage lock owner pid", minimum=1)
+    create_time = owner["process_create_time"]
+    if (
+        isinstance(create_time, bool)
+        or not isinstance(create_time, (int, float))
+        or not math.isfinite(float(create_time))
+        or float(create_time) <= 0.0
+    ):
+        raise ReleaseIntegrityError(
+            "release stage lock owner process_create_time must be a positive finite number"
+        )
+    _string(owner["nonce"], "release stage lock owner nonce")
+    _timestamp(_string(owner["acquired_at_utc"], "release stage lock owner timestamp"))
+    return owner
+
+
+@contextmanager
+def _exclusive_stage_lock(directory: Path) -> Iterator[None]:
+    """Hold one crash-safe OS lock with separately committed owner metadata."""
+
+    directory.mkdir(parents=True, exist_ok=True)
+    lock_path = directory / _STAGE_LOCK_NAME
+    owner_path = directory / _STAGE_LOCK_OWNER_NAME
+    nonce = uuid.uuid4().hex
+    lock = FileLock(lock_path, timeout=0)
+    try:
+        lock.acquire()
+    except FileLockTimeout as error:
+        try:
+            existing = _validated_stage_lock_owner(owner_path)
+            owner = f"host={existing['host']}, pid={existing['pid']}"
+        except ReleaseGateError as metadata_error:
+            owner = f"owner metadata unavailable or invalid ({metadata_error})"
+        raise ReleaseStateError(
+            f"another release stage owns {directory}: {owner}"
+        ) from error
+    try:
+        try:
+            _write_json(owner_path, _stage_lock_owner_payload(nonce=nonce), replace=True)
+        except (OSError, ReleaseGateError) as error:
+            raise ReleaseStateError(
+                f"could not commit release stage lock owner metadata: {error}"
+            ) from error
+        try:
+            yield
+        finally:
+            with suppress(OSError, ReleaseGateError):
+                current = _validated_stage_lock_owner(owner_path)
+                if current["nonce"] == nonce:
+                    owner_path.unlink(missing_ok=True)
+    finally:
+        lock.release()
+
+
+def _canonical_coverage_targets(values: Sequence[float]) -> tuple[float, ...]:
+    try:
+        normalized = tuple(float(value) for value in values)
+    except (TypeError, ValueError) as error:
+        raise ReleaseGateError("coverage targets must be finite numbers") from error
+    if any(not math.isfinite(value) for value in normalized):
+        raise ReleaseGateError("coverage targets must be finite numbers")
+    if normalized != CANONICAL_COVERAGE_TARGETS:
+        raise ReleaseGateError(
+            "coverage targets must equal the preregistered grid "
+            f"{CANONICAL_COVERAGE_TARGETS}"
+        )
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -372,6 +492,7 @@ class CalibrationBundle:
     members: tuple[CalibrationMember, ...]
     created_at_utc: str
     artifact_sha256: str | None
+    stage_provenance: Mapping[str, object] | None = None
 
     def to_payload(self, *, include_integrity: bool = True) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -391,10 +512,13 @@ class CalibrationBundle:
                 "thresholds_per_fit": len(LABEL_ORDER),
                 "temperature_scope": "one_global_temperature_per_member",
                 "retuning_after_freeze": False,
+                "coverage_targets": list(CANONICAL_COVERAGE_TARGETS),
             },
             "members": [member.to_payload() for member in self.members],
             "created_at_utc": self.created_at_utc,
         }
+        if self.stage_provenance is not None:
+            payload["stage_provenance"] = dict(self.stage_provenance)
         if include_integrity and self.artifact_sha256 is not None:
             payload["artifact_sha256"] = self.artifact_sha256
         return payload
@@ -483,38 +607,213 @@ def load_refit_bundle(
     return bundle
 
 
+def _member_inference_settings(
+    member: RefitMember,
+    *,
+    batch_size: int | None,
+    num_workers: int | None,
+) -> tuple[int, int]:
+    wrapper = read_json_mapping(
+        member.resolved_config_path, context="resolved refit config"
+    )
+    config = _mapping(wrapper.get("config"), "resolved refit config body")
+    loader = _mapping(config.get("loader"), "resolved refit loader")
+    resolved_batch = (
+        _integer(loader.get("batch_size"), "loader.batch_size", minimum=1)
+        if batch_size is None
+        else _integer(batch_size, "batch_size", minimum=1)
+    )
+    resolved_workers = (
+        _integer(loader.get("num_workers"), "loader.num_workers", minimum=0)
+        if num_workers is None
+        else _integer(num_workers, "num_workers", minimum=0)
+    )
+    return resolved_batch, resolved_workers
+
+
+def _validate_export_settings(
+    prediction: PredictionArtifact,
+    member: RefitMember,
+    *,
+    batch_size: int,
+    num_workers: int,
+    requested_device: str,
+    requested_bf16: bool,
+) -> None:
+    extra = prediction.extra_metadata
+    expected: dict[str, object] = {
+        "inference_batch_size": batch_size,
+        "inference_num_workers": num_workers,
+        "checkpoint_epoch": member.frozen_epochs - 1,
+        "resolved_config_path": str(member.resolved_config_path.resolve()),
+    }
+    drift = [field for field, value in expected.items() if extra.get(field) != value]
+    if drift:
+        raise ReleaseIntegrityError(
+            "fold-9 prediction differs from its export plan: " + ", ".join(drift)
+        )
+    actual_device = _string(extra.get("inference_device"), "inference_device")
+    normalized_device = requested_device.casefold()
+    if actual_device.casefold() != normalized_device:
+        raise ReleaseIntegrityError("fold-9 prediction device differs from export plan")
+    actual_bf16 = extra.get("inference_bf16")
+    if not isinstance(actual_bf16, bool):
+        raise ReleaseIntegrityError("fold-9 prediction bf16 setting is invalid")
+    if actual_bf16 is not requested_bf16:
+        raise ReleaseIntegrityError("fold-9 prediction bf16 differs from export plan")
+
+
+def _seal_or_verify_completion(
+    path: Path,
+    body: Mapping[str, object],
+) -> tuple[Path, str]:
+    if path.exists():
+        existing = read_json_mapping(path, context=f"stage completion {path.name}")
+        stored = _hash_string(existing.get("artifact_sha256"), "artifact_sha256")
+        unhashed = dict(existing)
+        del unhashed["artifact_sha256"]
+        if canonical_sha256(unhashed) != stored:
+            raise ReleaseIntegrityError(f"stage completion hash mismatch: {path}")
+        if unhashed != dict(body):
+            raise ReleaseIntegrityError(
+                f"stage completion differs from current verified artifacts: {path}"
+            )
+        return path.resolve(), stored
+    return write_new_hashed_json(path, body, hash_field="artifact_sha256")
+
+
+def _prediction_completion_member(
+    member: RefitMember, prediction_path: Path, prediction: PredictionArtifact
+) -> dict[str, object]:
+    sidecar = prediction_path.with_suffix(".json")
+    return {
+        "member_id": member.member_id,
+        "refit_lineage_sha256": member.lineage_sha256,
+        "checkpoint_sha256": member.final_checkpoint_sha256,
+        "resolved_config_hash": member.resolved_config_hash,
+        "prediction_path": str(prediction_path.resolve()),
+        "prediction_npz_sha256": _prefixed_file_sha256(prediction_path),
+        "prediction_sidecar_path": str(sidecar.resolve()),
+        "prediction_sidecar_sha256": _prefixed_file_sha256(sidecar),
+        "prediction_artifact_sha256": prediction.integrity_sha256,
+        "prediction_alignment_sha256": prediction.alignment_sha256,
+        "inference_device": prediction.extra_metadata.get("inference_device"),
+        "inference_bf16": prediction.extra_metadata.get("inference_bf16"),
+        "inference_batch_size": prediction.extra_metadata.get("inference_batch_size"),
+        "inference_num_workers": prediction.extra_metadata.get("inference_num_workers"),
+    }
+
+
+def _quarantine_partial_fold9_pair(
+    destination: Path,
+    *,
+    member_id: str,
+    prediction_path: Path,
+    sidecar_path: Path,
+) -> None:
+    """Move an uncommitted one-file prediction pair aside for safe re-export."""
+
+    orphan_root = (destination / _FOLD9_ORPHAN_DIRECTORY / member_id).resolve()
+    if not orphan_root.is_relative_to(destination.resolve()):  # pragma: no cover
+        raise ReleaseStateError("fold-9 orphan directory escaped the stage root")
+    orphan_root.mkdir(parents=True, exist_ok=True)
+    for source in (prediction_path, sidecar_path):
+        if not source.exists():
+            continue
+        if not source.is_file():
+            raise ReleaseStateError(
+                f"partial fold-9 artifact is not a file: {source}"
+            )
+        target = orphan_root / f"{source.name}.{uuid.uuid4().hex}.orphan"
+        try:
+            os.replace(source, target)
+        except OSError as error:
+            raise ReleaseStateError(
+                f"could not quarantine partial fold-9 artifact {source}: {error}"
+            ) from error
+
+
 def export_fold9_predictions(
     refit_bundle_path: str | Path,
     output_directory: str | Path,
     *,
     protocol: ExperimentProtocol,
+    final_evaluation_spec_path: str | Path,
     batch_size: int | None = None,
     num_workers: int | None = None,
-    device: str = "auto",
-    bf16: bool = True,
+    device: str | None = None,
+    bf16: bool | None = None,
     exporter: PredictionExporter = export_checkpoint_predictions,
 ) -> Mapping[str, Path]:
     """Export all six fold-9 artifacts only after the refit bundle re-verifies."""
 
-    bundle = load_refit_bundle(refit_bundle_path, protocol=protocol, verify_sources=True)
+    resolved_refit_path = Path(refit_bundle_path).resolve()
+    bundle = load_refit_bundle(
+        resolved_refit_path, protocol=protocol, verify_sources=True
+    )
+    evaluation_spec, evaluation_spec_binding = (
+        _load_final_evaluation_spec_binding(
+            final_evaluation_spec_path,
+            protocol=protocol,
+            refit_bundle_path=resolved_refit_path,
+            refit_bundle=bundle,
+            verify_runtime=True,
+        )
+    )
+    frozen_device = evaluation_spec.requested_device
+    if device is not None and (not isinstance(device, str) or not device.strip()):
+        raise ReleaseGateError("fold-9 device must be a non-empty string")
+    if device is not None and device.strip().casefold() != frozen_device:
+        raise ReleaseGateError(
+            "fold-9 device must equal the frozen final-evaluation runtime"
+        )
+    if bf16 is not None and not isinstance(bf16, bool):
+        raise TypeError("fold-9 bf16 override must be boolean")
+    if bf16 is False:
+        raise ReleaseGateError("fold-9 BF16 is required by the final-evaluation freeze")
+    resolved_device = frozen_device
+    resolved_bf16 = True
+    if batch_size is not None or num_workers is not None:
+        raise ReleaseGateError(
+            "fold-9 loader settings must inherit each frozen refit configuration"
+        )
     destination = Path(output_directory).resolve()
-    destination.mkdir(parents=True, exist_ok=True)
+    if evaluation_spec.path is None:
+        raise ReleaseStateError("final-evaluation specification must be saved")
+    release_root = evaluation_spec.path.resolve().parent
+    if resolved_refit_path.parent != release_root:
+        raise ReleaseStateError(
+            "refit bundle and final-evaluation specification must share one release root"
+        )
+    canonical_destination = release_root / "fold9_predictions"
+    if destination != canonical_destination:
+        raise ReleaseStateError(
+            f"fold-9 output must use the canonical path {canonical_destination}"
+        )
     planned = {
         member.member_id: destination / f"{member.member_id}.fold9.npz"
         for member in bundle.members
     }
+    settings = {
+        member.member_id: _member_inference_settings(
+            member, batch_size=batch_size, num_workers=num_workers
+        )
+        for member in bundle.members
+    }
     stage_plan: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": FOLD9_EXPORT_STAGE_SCHEMA_VERSION,
         "artifact_type": FOLD9_EXPORT_PLAN_TYPE,
+        "refit_bundle_path": str(resolved_refit_path),
         "refit_bundle_sha256": bundle.artifact_sha256,
+        "final_evaluation_spec": evaluation_spec_binding,
         "protocol_hash": bundle.protocol_hash,
         "manifest_sha256": bundle.manifest_sha256,
         "output_directory": str(destination),
         "inference": {
-            "batch_size": batch_size,
-            "num_workers": num_workers,
-            "device": device,
-            "bf16": bf16,
+            "requested_batch_size": batch_size,
+            "requested_num_workers": num_workers,
+            "device": resolved_device,
+            "bf16": resolved_bf16,
         },
         "members": [
             {
@@ -522,33 +821,94 @@ def export_fold9_predictions(
                 "lineage_sha256": member.lineage_sha256,
                 "checkpoint_sha256": member.final_checkpoint_sha256,
                 "resolved_config_hash": member.resolved_config_hash,
+                "resolved_batch_size": settings[member.member_id][0],
+                "resolved_num_workers": settings[member.member_id][1],
                 "prediction_path": str(planned[member.member_id]),
             }
             for member in bundle.members
         ],
     }
     plan_path = destination / "fold9-export-plan.json"
-    if not plan_path.exists():
-        collisions = [
-            path
-            for prediction_path in planned.values()
-            for path in (prediction_path, prediction_path.with_suffix(".json"))
-            if path.exists()
-        ]
-        if collisions:
-            raise ReleaseStateError(
-                "fold-9 artifacts predate the batch plan: "
-                + ", ".join(str(path) for path in collisions)
-            )
-    _ensure_exact_stage_plan(plan_path, stage_plan)
-    completed: dict[str, Path] = {}
-    for member in bundle.members:
-        prediction_path = planned[member.member_id]
-        sidecar_path = prediction_path.with_suffix(".json")
-        if prediction_path.exists() or sidecar_path.exists():
+    completion_path = destination / "fold9-export-completion.json"
+    with _exclusive_stage_lock(destination):
+        completion_exists = completion_path.exists()
+        if not plan_path.exists():
+            collisions = [
+                path
+                for prediction_path in planned.values()
+                for path in (prediction_path, prediction_path.with_suffix(".json"))
+                if path.exists()
+            ]
+            if collisions or completion_path.exists():
+                raise ReleaseStateError(
+                    "fold-9 artifacts predate the batch plan: "
+                    + ", ".join(
+                        str(path)
+                        for path in [*collisions, completion_path]
+                        if path.exists()
+                    )
+                )
+        plan_sha256 = _ensure_exact_stage_plan(plan_path, stage_plan)
+        completed: dict[str, Path] = {}
+        predictions: dict[str, PredictionArtifact] = {}
+        for member in bundle.members:
+            prediction_path = planned[member.member_id]
+            sidecar_path = prediction_path.with_suffix(".json")
+            if (prediction_path.exists() or sidecar_path.exists()) and (
+                not prediction_path.is_file() or not sidecar_path.is_file()
+            ):
+                if completion_exists:
+                    raise ReleaseStateError(
+                        "completed fold-9 batch has a missing/partial artifact: "
+                        f"{member.member_id}"
+                    )
+                _quarantine_partial_fold9_pair(
+                    destination,
+                    member_id=member.member_id,
+                    prediction_path=prediction_path,
+                    sidecar_path=sidecar_path,
+                )
+            if not prediction_path.exists() and not sidecar_path.exists():
+                if completion_exists:
+                    raise ReleaseStateError(
+                        "completed fold-9 batch is missing an artifact: "
+                        f"{member.member_id}"
+                    )
+                request = PredictionExportRequest(
+                    checkpoint_path=member.final_checkpoint_path,
+                    resolved_config_path=member.resolved_config_path,
+                    run_metadata_path=member.metadata_path,
+                    refit_completion_path=member.completion_path,
+                    output_path=prediction_path,
+                    fold_role=FoldRole.CALIBRATION,
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    device=resolved_device,
+                    bf16=resolved_bf16,
+                )
+                result = exporter(request, protocol=protocol)
+                if (
+                    result.fold_role is not FoldRole.CALIBRATION
+                    or result.folds != CALIBRATION_FOLDS
+                ):
+                    raise ReleaseIntegrityError("fold-9 exporter returned the wrong fold role")
+                if (
+                    result.model_seed != member.seed
+                    or result.config_hash != member.resolved_config_hash
+                ):
+                    raise ReleaseIntegrityError(
+                        "fold-9 exporter returned mismatched member lineage"
+                    )
+                if result.files.npz_path.resolve() != prediction_path.resolve():
+                    raise ReleaseIntegrityError("fold-9 exporter wrote outside the batch plan")
+            else:
+                if not prediction_path.is_file() or not sidecar_path.is_file():
+                    raise ReleaseStateError(
+                        f"fold-9 exporter left a partial pair: {member.member_id}"
+                    )
             if not prediction_path.is_file() or not sidecar_path.is_file():
                 raise ReleaseStateError(
-                    f"partial fold-9 artifact cannot be adopted: {member.member_id}"
+                    f"fold-9 exporter left a partial pair: {member.member_id}"
                 )
             prediction = load_prediction_artifact(
                 prediction_path,
@@ -557,37 +917,161 @@ def export_fold9_predictions(
                 expected_manifest_hash=member.manifest_sha256,
             )
             _validate_prediction_lineage(prediction, member)
+            resolved_batch, resolved_workers = settings[member.member_id]
+            _validate_export_settings(
+                prediction,
+                member,
+                batch_size=resolved_batch,
+                num_workers=resolved_workers,
+                requested_device=resolved_device,
+                requested_bf16=resolved_bf16,
+            )
+            predictions[member.member_id] = prediction
             completed[member.member_id] = prediction_path
-            continue
-        request = PredictionExportRequest(
-            checkpoint_path=member.final_checkpoint_path,
-            resolved_config_path=member.resolved_config_path,
-            run_metadata_path=member.metadata_path,
-            output_path=planned[member.member_id],
-            fold_role=FoldRole.CALIBRATION,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            device=device,
-            bf16=bf16,
+        if set(completed) != {member.member_id for member in bundle.members}:
+            raise ReleaseStateError("fold-9 export did not complete the exact six-member batch")
+        first = predictions[bundle.members[0].member_id]
+        for member in bundle.members[1:]:
+            try:
+                assert_prediction_artifacts_aligned(first, predictions[member.member_id])
+            except (RuntimeError, ValueError) as error:
+                raise ReleaseIntegrityError(
+                    f"fold-9 export batch is not aligned: {error}"
+                ) from error
+        _validate_complete_fold9_cohort(predictions, bundle)
+        completion_body: dict[str, object] = {
+            "schema_version": FOLD9_EXPORT_STAGE_SCHEMA_VERSION,
+            "artifact_type": FOLD9_EXPORT_COMPLETION_TYPE,
+            "plan_path": str(plan_path.resolve()),
+            "plan_sha256": plan_sha256,
+            "refit_bundle_path": str(resolved_refit_path),
+            "refit_bundle_sha256": bundle.artifact_sha256,
+            "final_evaluation_spec": evaluation_spec_binding,
+            "protocol_hash": bundle.protocol_hash,
+            "manifest_sha256": bundle.manifest_sha256,
+            "inference": stage_plan["inference"],
+            "members": [
+                _prediction_completion_member(
+                    member, completed[member.member_id], predictions[member.member_id]
+                )
+                for member in bundle.members
+            ],
+        }
+        _seal_or_verify_completion(completion_path, completion_body)
+        return completed
+
+
+def _read_fold9_manifest(path: Path) -> pd.DataFrame:
+    columns = ["ecg_id", "patient_id", "strat_fold", *TARGET_COLUMNS]
+    try:
+        if path.suffix.casefold() == ".parquet":
+            frame = pd.read_parquet(
+                path,
+                columns=columns,
+                filters=[("strat_fold", "==", CALIBRATION_FOLDS[0])],
+            )
+        elif path.suffix.casefold() == ".csv":
+            identities = pd.read_csv(
+                path, usecols=["ecg_id", "patient_id", "strat_fold"]
+            )
+            identity_folds = pd.to_numeric(
+                identities["strat_fold"], errors="raise"
+            )
+            selected_rows = {
+                int(index)
+                for index in identities.index[
+                    identity_folds == CALIBRATION_FOLDS[0]
+                ]
+            }
+            # CSV cannot predicate-push down by value. Read target fields only for
+            # authorized physical rows so fold-10 labels never enter a DataFrame.
+            targets = pd.read_csv(
+                path,
+                usecols=list(TARGET_COLUMNS),
+                skiprows=lambda line_number: (
+                    line_number > 0 and line_number - 1 not in selected_rows
+                ),
+            )
+            frame = identities.loc[sorted(selected_rows)].reset_index(drop=True)
+            frame = pd.concat([frame, targets.reset_index(drop=True)], axis=1)
+        else:
+            raise ReleaseGateError("release manifest must be .parquet or .csv")
+    except (OSError, TypeError, ValueError) as error:
+        raise ReleaseIntegrityError(
+            f"could not read authorized fold-9 manifest: {error}"
+        ) from error
+    if frame.empty:
+        raise ReleaseIntegrityError("authorized fold-9 manifest is empty")
+    if frame["ecg_id"].isna().any() or frame["patient_id"].isna().any():
+        raise ReleaseIntegrityError("fold-9 manifest identifiers must not be missing")
+    if frame["ecg_id"].duplicated().any():
+        raise ReleaseIntegrityError("fold-9 manifest ECG identifiers must be unique")
+    try:
+        folds = pd.to_numeric(frame["strat_fold"], errors="raise").to_numpy(
+            dtype=np.int8
         )
-        result = exporter(request, protocol=protocol)
-        if result.fold_role is not FoldRole.CALIBRATION or result.folds != CALIBRATION_FOLDS:
-            raise ReleaseIntegrityError("fold-9 exporter returned the wrong fold role")
-        if result.model_seed != member.seed or result.config_hash != member.resolved_config_hash:
-            raise ReleaseIntegrityError("fold-9 exporter returned mismatched member lineage")
-        if result.files.npz_path.resolve() != prediction_path.resolve():
-            raise ReleaseIntegrityError("fold-9 exporter wrote outside the batch plan")
-        prediction = load_prediction_artifact(
-            prediction_path,
-            protocol=protocol,
-            expected_config_hash=member.resolved_config_hash,
-            expected_manifest_hash=member.manifest_sha256,
+        targets = (
+            frame.loc[:, list(TARGET_COLUMNS)]
+            .apply(pd.to_numeric, errors="raise")
+            .to_numpy(dtype=np.int8)
         )
-        _validate_prediction_lineage(prediction, member)
-        completed[member.member_id] = prediction_path
-    if set(completed) != {member.member_id for member in bundle.members}:
-        raise ReleaseStateError("fold-9 export did not complete the exact six-member batch")
-    return completed
+    except (TypeError, ValueError) as error:
+        raise ReleaseIntegrityError("fold-9 manifest folds/targets are invalid") from error
+    if not np.all(folds == CALIBRATION_FOLDS[0]):
+        raise ReleaseIntegrityError("authorized calibration manifest contains non-fold-9 rows")
+    if not np.isin(targets, (0, 1)).all():
+        raise ReleaseIntegrityError("fold-9 manifest targets must be binary")
+    frame = frame.copy()
+    frame["strat_fold"] = folds
+    frame.loc[:, list(TARGET_COLUMNS)] = targets
+    order = np.argsort(frame["ecg_id"].to_numpy(), kind="stable")
+    return frame.iloc[order].reset_index(drop=True)
+
+
+def _validate_complete_fold9_cohort(
+    predictions: Mapping[str, PredictionArtifact],
+    refit_bundle: RefitBundle,
+) -> None:
+    if set(predictions) != {member.member_id for member in refit_bundle.members}:
+        raise ReleaseGateError("complete-cohort check requires the exact six predictions")
+    first = predictions[refit_bundle.members[0].member_id]
+    for member in refit_bundle.members[1:]:
+        try:
+            assert_prediction_artifacts_aligned(first, predictions[member.member_id])
+        except (RuntimeError, ValueError) as error:
+            raise ReleaseIntegrityError(
+                f"fold-9 predictions are not aligned across members: {error}"
+            ) from error
+    manifest_paths = {member.manifest_path.resolve() for member in refit_bundle.members}
+    if len(manifest_paths) != 1:
+        raise ReleaseIntegrityError("refit members do not bind one manifest path")
+    manifest_path = next(iter(manifest_paths))
+    if _prefixed_file_sha256(manifest_path) != refit_bundle.manifest_sha256:
+        raise ReleaseIntegrityError("canonical manifest changed before calibration")
+    expected = _read_fold9_manifest(manifest_path)
+    expected_ecg = expected["ecg_id"].to_numpy()
+    expected_patient = expected["patient_id"].to_numpy()
+    expected_folds = expected["strat_fold"].to_numpy(dtype=np.int8)
+    expected_targets = expected.loc[:, list(TARGET_COLUMNS)].to_numpy(dtype=np.int8)
+    comparisons = {
+        "ecg_id": (first.ecg_id, expected_ecg),
+        "patient_id": (first.patient_id, expected_patient),
+        "strat_fold": (first.strat_fold, expected_folds),
+        "targets": (first.targets, expected_targets),
+    }
+    mismatches = [
+        name for name, (observed, canonical) in comparisons.items()
+        if not np.array_equal(observed, canonical)
+    ]
+    if mismatches:
+        raise ReleaseIntegrityError(
+            "fold-9 prediction cohort is incomplete or differs from the canonical manifest: "
+            + ", ".join(mismatches)
+        )
+
+
+def _decision_coverage_targets(decision: CalibrationDecisionArtifact) -> tuple[float, ...]:
+    return tuple(float(gate.target_coverage) for gate in decision.coverage_gates)
 
 
 def create_calibration_bundle(
@@ -597,6 +1081,7 @@ def create_calibration_bundle(
     *,
     protocol: ExperimentProtocol,
     created_at_utc: str | None = None,
+    stage_provenance: Mapping[str, object] | None = None,
 ) -> CalibrationBundle:
     """Verify six independently fitted fold-9 policies and bind their lineage."""
 
@@ -605,6 +1090,8 @@ def create_calibration_bundle(
     if set(prediction_paths) != expected_ids or set(decision_paths) != expected_ids:
         raise ReleaseGateError("calibration inputs must map the exact six refit member IDs")
     members: list[CalibrationMember] = []
+    loaded_predictions: dict[str, PredictionArtifact] = {}
+    decision_timestamps: list[str] = []
     for refit_member in refit_bundle.members:
         prediction_path = Path(prediction_paths[refit_member.member_id]).resolve()
         decision_path = Path(decision_paths[refit_member.member_id]).resolve()
@@ -615,6 +1102,12 @@ def create_calibration_bundle(
             expected_manifest_hash=refit_member.manifest_sha256,
         )
         decision = load_calibration_decisions(decision_path, protocol=protocol)
+        decision_timestamps.append(_timestamp(decision.created_at_utc))
+        if _decision_coverage_targets(decision) != CANONICAL_COVERAGE_TARGETS:
+            raise ReleaseIntegrityError(
+                "calibration decision coverage differs from the preregistered grid"
+            )
+        loaded_predictions[refit_member.member_id] = prediction
         members.append(
             _build_calibration_member(
                 refit_member,
@@ -624,11 +1117,20 @@ def create_calibration_bundle(
                 decision_path=decision_path,
             )
         )
+    _validate_complete_fold9_cohort(loaded_predictions, refit_bundle)
     ordered = tuple(members)
     if len({member.independent_fit_sha256 for member in ordered}) != 6:
         raise ReleaseGateError("calibration policies are not six independent member fits")
     if len({member.prediction_artifact_sha256 for member in ordered}) != 6:
         raise ReleaseGateError("each calibration fit requires its own prediction artifact")
+    if stage_provenance is not None:
+        canonical_created_at = max(decision_timestamps)
+        if created_at_utc is not None and _timestamp(created_at_utc) != canonical_created_at:
+            raise ReleaseGateError(
+                "release calibration bundle timestamp must derive from sealed decisions"
+            )
+    else:
+        canonical_created_at = _timestamp(created_at_utc)
     bundle = CalibrationBundle(
         refit_bundle_sha256=cast(str, refit_bundle.artifact_sha256),
         protocol_hash=refit_bundle.protocol_hash,
@@ -636,11 +1138,452 @@ def create_calibration_bundle(
         normalization_sha256=refit_bundle.normalization_sha256,
         label_order=refit_bundle.label_order,
         members=ordered,
-        created_at_utc=_timestamp(created_at_utc),
+        created_at_utc=canonical_created_at,
         artifact_sha256=None,
+        stage_provenance=(dict(stage_provenance) if stage_provenance is not None else None),
     )
     _validate_calibration_bundle(bundle)
     return bundle
+
+
+def _load_self_hashed_json(
+    path: Path,
+    *,
+    context: str,
+    hash_field: str,
+) -> tuple[Mapping[str, object], str]:
+    payload = read_json_mapping(path, context=context)
+    stored = _hash_string(payload.get(hash_field), f"{context} {hash_field}")
+    unhashed = dict(payload)
+    del unhashed[hash_field]
+    if canonical_sha256(unhashed) != stored:
+        raise ReleaseIntegrityError(f"{context} self-hash mismatch")
+    return payload, stored
+
+
+def _stage_binding(path: Path, *, hash_field: str) -> dict[str, object]:
+    _, artifact_hash = _load_self_hashed_json(
+        path,
+        context=f"release stage artifact {path.name}",
+        hash_field=hash_field,
+    )
+    return {
+        "path": str(path.resolve()),
+        "file_sha256": _prefixed_file_sha256(path),
+        "artifact_sha256": artifact_hash,
+    }
+
+
+def _load_final_evaluation_spec_binding(
+    path: str | Path,
+    *,
+    protocol: ExperimentProtocol,
+    refit_bundle_path: Path,
+    refit_bundle: RefitBundle,
+    verify_runtime: bool = True,
+) -> tuple[FinalEvaluationSpec, dict[str, object]]:
+    """Load the preregistration and prove it binds this exact refit root."""
+
+    resolved = Path(path).resolve()
+    try:
+        spec = load_final_evaluation_spec(
+            resolved,
+            protocol=protocol,
+            verify_sources=True,
+            verify_runtime=verify_runtime,
+        )
+    except (OSError, RuntimeError, ValueError, FinalEvaluationSpecError) as error:
+        raise ReleaseIntegrityError(
+            f"final-evaluation specification failed verification: {error}"
+        ) from error
+    if refit_bundle.artifact_sha256 is None:
+        raise ReleaseStateError("refit bundle must be integrity-bound")
+    if spec.protocol_hash != protocol.protocol_hash:
+        raise ReleaseIntegrityError("final-evaluation specification protocol differs")
+    if spec.refit_bundle_sha256 != refit_bundle.artifact_sha256:
+        raise ReleaseIntegrityError("final-evaluation specification refit root differs")
+    if spec.manifest_sha256 != refit_bundle.manifest_sha256:
+        raise ReleaseIntegrityError("final-evaluation specification manifest differs")
+    spec_refit = _mapping(spec.payload.get("refit_bundle"), "spec refit_bundle")
+    if Path(_string(spec_refit.get("path"), "spec refit bundle path")).resolve() != (
+        refit_bundle_path.resolve()
+    ):
+        raise ReleaseIntegrityError(
+            "final-evaluation specification binds a different refit bundle path"
+        )
+    if spec_refit.get("file_sha256") != _prefixed_file_sha256(refit_bundle_path):
+        raise ReleaseIntegrityError(
+            "final-evaluation specification refit bundle file differs"
+        )
+    return spec, {
+        "path": str(resolved),
+        "file_sha256": _prefixed_file_sha256(resolved),
+        "artifact_sha256": spec.artifact_sha256,
+    }
+
+
+def _preflight_fold9_export_completion(
+    completion_path: Path,
+    *,
+    protocol: ExperimentProtocol,
+    refit_bundle_path: Path,
+    refit_bundle: RefitBundle,
+    prediction_paths: Mapping[str, Path],
+) -> Mapping[str, object]:
+    """Verify the complete fold-9 release root without loading target arrays."""
+
+    completion, completion_hash = _load_self_hashed_json(
+        completion_path,
+        context="fold-9 export completion",
+        hash_field="artifact_sha256",
+    )
+    if completion.get("artifact_type") != FOLD9_EXPORT_COMPLETION_TYPE:
+        raise ReleaseIntegrityError("unexpected fold-9 export completion type")
+    plan_path = Path(
+        _string(completion.get("plan_path"), "fold-9 completion plan_path")
+    ).resolve()
+    plan, plan_hash = _load_self_hashed_json(
+        plan_path, context="fold-9 export plan", hash_field="plan_sha256"
+    )
+    _exact_keys(
+        plan,
+        {
+            "schema_version",
+            "artifact_type",
+            "refit_bundle_path",
+            "refit_bundle_sha256",
+            "final_evaluation_spec",
+            "protocol_hash",
+            "manifest_sha256",
+            "output_directory",
+            "inference",
+            "members",
+            "plan_sha256",
+        },
+        "fold-9 export plan",
+    )
+    _exact_keys(
+        completion,
+        {
+            "schema_version",
+            "artifact_type",
+            "plan_path",
+            "plan_sha256",
+            "refit_bundle_path",
+            "refit_bundle_sha256",
+            "final_evaluation_spec",
+            "protocol_hash",
+            "manifest_sha256",
+            "inference",
+            "members",
+            "artifact_sha256",
+        },
+        "fold-9 export completion",
+    )
+    output_directory = Path(
+        _string(plan.get("output_directory"), "fold-9 output_directory")
+    ).resolve()
+    if output_directory != plan_path.parent:
+        raise ReleaseIntegrityError("fold-9 plan output directory differs")
+    if completion_path.resolve().parent != output_directory:
+        raise ReleaseIntegrityError("fold-9 completion directory differs from plan")
+    for member_id, prediction_path in prediction_paths.items():
+        resolved_prediction = prediction_path.resolve()
+        if resolved_prediction.parent != output_directory or (
+            resolved_prediction.with_suffix(".json").parent != output_directory
+        ):
+            raise ReleaseIntegrityError(
+                f"fold-9 prediction escaped the planned directory: {member_id}"
+            )
+    completion_spec = _mapping(
+        completion.get("final_evaluation_spec"),
+        "fold-9 completion final_evaluation_spec",
+    )
+    spec_path = Path(
+        _string(completion_spec.get("path"), "final_evaluation_spec.path")
+    ).resolve()
+    evaluation_spec, expected_spec_binding = _load_final_evaluation_spec_binding(
+        spec_path,
+        protocol=protocol,
+        refit_bundle_path=refit_bundle_path,
+        refit_bundle=refit_bundle,
+        verify_runtime=True,
+    )
+    if dict(completion_spec) != expected_spec_binding or plan.get(
+        "final_evaluation_spec"
+    ) != expected_spec_binding:
+        raise ReleaseIntegrityError(
+            "fold-9 stage does not bind the verified final-evaluation specification"
+        )
+    expected_scalars: dict[str, object] = {
+        "schema_version": FOLD9_EXPORT_STAGE_SCHEMA_VERSION,
+        "artifact_type": FOLD9_EXPORT_COMPLETION_TYPE,
+        "plan_path": str(plan_path),
+        "plan_sha256": plan_hash,
+        "refit_bundle_path": str(refit_bundle_path.resolve()),
+        "refit_bundle_sha256": refit_bundle.artifact_sha256,
+        "final_evaluation_spec": expected_spec_binding,
+        "protocol_hash": refit_bundle.protocol_hash,
+        "manifest_sha256": refit_bundle.manifest_sha256,
+    }
+    drift = [
+        field for field, expected in expected_scalars.items()
+        if completion.get(field) != expected
+    ]
+    if drift:
+        raise ReleaseIntegrityError(
+            "fold-9 export completion lineage mismatch: " + ", ".join(drift)
+        )
+    if plan.get("refit_bundle_path") != str(refit_bundle_path.resolve()) or plan.get(
+        "refit_bundle_sha256"
+    ) != refit_bundle.artifact_sha256:
+        raise ReleaseIntegrityError("fold-9 export plan refit binding mismatch")
+    if plan.get("schema_version") != FOLD9_EXPORT_STAGE_SCHEMA_VERSION or plan.get(
+        "artifact_type"
+    ) != FOLD9_EXPORT_PLAN_TYPE or plan.get(
+        "protocol_hash"
+    ) != refit_bundle.protocol_hash or plan.get("manifest_sha256") != (
+        refit_bundle.manifest_sha256
+    ):
+        raise ReleaseIntegrityError("fold-9 export plan protocol/data binding mismatch")
+    inference = _mapping(plan.get("inference"), "fold-9 export plan inference")
+    _exact_keys(
+        inference,
+        {"requested_batch_size", "requested_num_workers", "device", "bf16"},
+        "fold-9 export plan inference",
+    )
+    requested_batch_raw = inference.get("requested_batch_size")
+    requested_workers_raw = inference.get("requested_num_workers")
+    requested_batch = (
+        None
+        if requested_batch_raw is None
+        else _integer(requested_batch_raw, "requested_batch_size", minimum=1)
+    )
+    requested_workers = (
+        None
+        if requested_workers_raw is None
+        else _integer(requested_workers_raw, "requested_num_workers", minimum=0)
+    )
+    requested_device = _string(inference.get("device"), "inference.device")
+    requested_bf16 = inference.get("bf16")
+    if not isinstance(requested_bf16, bool):
+        raise ReleaseIntegrityError("fold-9 export plan bf16 must be boolean")
+    if requested_device.casefold() != evaluation_spec.requested_device:
+        raise ReleaseIntegrityError(
+            "fold-9 export device differs from final-evaluation specification"
+        )
+    if requested_bf16 is not True:
+        raise ReleaseIntegrityError(
+            "fold-9 export must use BF16 from the final-evaluation specification"
+        )
+    expected_plan_members = []
+    for member in refit_bundle.members:
+        resolved_batch, resolved_workers = _member_inference_settings(
+            member,
+            batch_size=requested_batch,
+            num_workers=requested_workers,
+        )
+        expected_plan_members.append(
+            {
+                "member_id": member.member_id,
+                "lineage_sha256": member.lineage_sha256,
+                "checkpoint_sha256": member.final_checkpoint_sha256,
+                "resolved_config_hash": member.resolved_config_hash,
+                "resolved_batch_size": resolved_batch,
+                "resolved_num_workers": resolved_workers,
+                "prediction_path": str(prediction_paths[member.member_id].resolve()),
+            }
+        )
+    if plan.get("members") != expected_plan_members:
+        raise ReleaseIntegrityError("fold-9 export plan member/settings grid mismatch")
+    if completion.get("inference") != plan.get("inference"):
+        raise ReleaseIntegrityError("fold-9 export completion settings differ from plan")
+    completion_by_id = {
+        _string(_mapping(item, "fold-9 completion member").get("member_id"), "member_id"):
+        _mapping(item, "fold-9 completion member")
+        for item in _sequence(completion.get("members"), "fold-9 completion members")
+    }
+    if set(completion_by_id) != {member.member_id for member in refit_bundle.members}:
+        raise ReleaseIntegrityError("fold-9 completion member grid differs")
+    completion_member_keys = {
+        "member_id",
+        "refit_lineage_sha256",
+        "checkpoint_sha256",
+        "resolved_config_hash",
+        "prediction_path",
+        "prediction_npz_sha256",
+        "prediction_sidecar_path",
+        "prediction_sidecar_sha256",
+        "prediction_artifact_sha256",
+        "prediction_alignment_sha256",
+        "inference_device",
+        "inference_bf16",
+        "inference_batch_size",
+        "inference_num_workers",
+    }
+    for plan_member in expected_plan_members:
+        member_id = cast(str, plan_member["member_id"])
+        completion_member = completion_by_id.get(member_id)
+        if completion_member is None:  # pragma: no cover - set equality above
+            raise ReleaseIntegrityError(f"fold-9 completion member missing: {member_id}")
+        _exact_keys(
+            completion_member,
+            completion_member_keys,
+            f"fold-9 completion member {member_id}",
+        )
+        member = next(
+            item for item in refit_bundle.members if item.member_id == member_id
+        )
+        prediction_path = prediction_paths[member_id].resolve()
+        sidecar_path = prediction_path.with_suffix(".json")
+        expected_member_scalars: dict[str, object] = {
+            "member_id": member_id,
+            "refit_lineage_sha256": member.lineage_sha256,
+            "checkpoint_sha256": member.final_checkpoint_sha256,
+            "resolved_config_hash": member.resolved_config_hash,
+            "prediction_path": str(prediction_path),
+            "prediction_npz_sha256": _prefixed_file_sha256(prediction_path),
+            "prediction_sidecar_path": str(sidecar_path),
+            "prediction_sidecar_sha256": _prefixed_file_sha256(sidecar_path),
+            "inference_device": requested_device,
+            "inference_bf16": True,
+        }
+        drift = [
+            key
+            for key, expected in expected_member_scalars.items()
+            if completion_member.get(key) != expected
+        ]
+        if drift:
+            raise ReleaseIntegrityError(
+                f"fold-9 completion member differs: {member_id}: "
+                + ", ".join(drift)
+            )
+        _hash_string(
+            completion_member.get("prediction_artifact_sha256"),
+            f"{member_id}.prediction_artifact_sha256",
+        )
+        _hash_string(
+            completion_member.get("prediction_alignment_sha256"),
+            f"{member_id}.prediction_alignment_sha256",
+        )
+        if (
+            completion_member.get("inference_batch_size")
+            != plan_member["resolved_batch_size"]
+        ) or (
+            completion_member.get("inference_num_workers")
+            != plan_member["resolved_num_workers"]
+        ):
+            raise ReleaseIntegrityError(
+                f"fold-9 completion inference settings differ from plan: {member_id}"
+            )
+    return {
+        "final_evaluation_spec": expected_spec_binding,
+        "plan": {
+            "path": str(plan_path),
+            "file_sha256": _prefixed_file_sha256(plan_path),
+            "artifact_sha256": plan_hash,
+        },
+        "completion": {
+            "path": str(completion_path.resolve()),
+            "file_sha256": _prefixed_file_sha256(completion_path),
+            "artifact_sha256": completion_hash,
+        },
+        "plan_payload": dict(plan),
+        "completion_payload": dict(completion),
+        "requested_batch_size": requested_batch,
+        "requested_num_workers": requested_workers,
+        "requested_device": requested_device,
+        "requested_bf16": requested_bf16,
+        "expected_plan_members": expected_plan_members,
+    }
+
+
+def _verify_fold9_export_completion(
+    completion_path: Path,
+    *,
+    protocol: ExperimentProtocol,
+    refit_bundle_path: Path,
+    refit_bundle: RefitBundle,
+    prediction_paths: Mapping[str, Path],
+    predictions: Mapping[str, PredictionArtifact],
+) -> Mapping[str, object]:
+    """Complete the preflight with authorized target/cohort semantics."""
+
+    preflight = _preflight_fold9_export_completion(
+        completion_path,
+        protocol=protocol,
+        refit_bundle_path=refit_bundle_path,
+        refit_bundle=refit_bundle,
+        prediction_paths=prediction_paths,
+    )
+    _validate_complete_fold9_cohort(predictions, refit_bundle)
+    requested_batch_raw = preflight["requested_batch_size"]
+    requested_workers_raw = preflight["requested_num_workers"]
+    requested_batch = (
+        None
+        if requested_batch_raw is None
+        else _integer(requested_batch_raw, "requested_batch_size", minimum=1)
+    )
+    requested_workers = (
+        None
+        if requested_workers_raw is None
+        else _integer(requested_workers_raw, "requested_num_workers", minimum=0)
+    )
+    requested_device = _string(preflight["requested_device"], "requested_device")
+    requested_bf16 = preflight["requested_bf16"]
+    if requested_bf16 is not True:
+        raise ReleaseIntegrityError("verified fold-9 stage must use BF16")
+    for member in refit_bundle.members:
+        resolved_batch, resolved_workers = _member_inference_settings(
+            member,
+            batch_size=requested_batch,
+            num_workers=requested_workers,
+        )
+        _validate_export_settings(
+            predictions[member.member_id],
+            member,
+            batch_size=resolved_batch,
+            num_workers=resolved_workers,
+            requested_device=requested_device,
+            requested_bf16=True,
+        )
+    completion_payload = _mapping(
+        preflight["completion_payload"], "fold-9 completion payload"
+    )
+    expected_members = [
+        _prediction_completion_member(
+            member,
+            prediction_paths[member.member_id],
+            predictions[member.member_id],
+        )
+        for member in refit_bundle.members
+    ]
+    if completion_payload.get("members") != expected_members:
+        raise ReleaseIntegrityError(
+            "fold-9 export completion artifacts differ from the supplied batch"
+        )
+    return {
+        key: preflight[key]
+        for key in ("final_evaluation_spec", "plan", "completion")
+    }
+
+
+def _decision_completion_member(
+    member: RefitMember,
+    prediction: PredictionArtifact,
+    decision_path: Path,
+    decision: CalibrationDecisionArtifact,
+) -> dict[str, object]:
+    return {
+        "member_id": member.member_id,
+        "refit_lineage_sha256": member.lineage_sha256,
+        "prediction_artifact_sha256": prediction.integrity_sha256,
+        "prediction_alignment_sha256": prediction.alignment_sha256,
+        "decision_path": str(decision_path.resolve()),
+        "decision_file_sha256": _prefixed_file_sha256(decision_path),
+        "decision_artifact_sha256": decision.integrity_sha256,
+        "coverage_targets": list(_decision_coverage_targets(decision)),
+    }
 
 
 def fit_calibration_bundle(
@@ -649,43 +1592,97 @@ def fit_calibration_bundle(
     output_directory: str | Path,
     *,
     protocol: ExperimentProtocol,
-    coverage_targets: Sequence[float] = (1.0, 0.9, 0.8, 0.7, 0.5),
+    coverage_targets: Sequence[float] = CANONICAL_COVERAGE_TARGETS,
     created_at_utc: str | None = None,
+    fold9_export_completion_path: str | Path | None = None,
 ) -> CalibrationBundle:
     """Fit six fold-9 policies with the existing leakage-safe API."""
 
+    canonical_coverage = _canonical_coverage_targets(coverage_targets)
+    resolved_refit_path = Path(refit_bundle_path).resolve()
     refit_bundle = load_refit_bundle(
         refit_bundle_path, protocol=protocol, verify_sources=True
     )
     expected_ids = {member.member_id for member in refit_bundle.members}
     if set(prediction_paths) != expected_ids:
         raise ReleaseGateError("fold-9 predictions must map the exact six refit member IDs")
-    destination = Path(output_directory).resolve()
-    destination.mkdir(parents=True, exist_ok=True)
+    normalized_prediction_paths = {
+        member.member_id: Path(prediction_paths[member.member_id]).resolve()
+        for member in refit_bundle.members
+    }
+    prediction_directories = {path.parent for path in normalized_prediction_paths.values()}
+    if len(prediction_directories) != 1:
+        raise ReleaseIntegrityError("fold-9 predictions must share one sealed batch directory")
+    resolved_export_completion = (
+        Path(fold9_export_completion_path).resolve()
+        if fold9_export_completion_path is not None
+        else next(iter(prediction_directories)) / "fold9-export-completion.json"
+    )
+    # This verifies the immutable spec/runtime, plans, exact paths, settings,
+    # and raw file hashes before any fold-9 target array is materialized.
+    label_free_preflight = _preflight_fold9_export_completion(
+        resolved_export_completion,
+        protocol=protocol,
+        refit_bundle_path=resolved_refit_path,
+        refit_bundle=refit_bundle,
+        prediction_paths=normalized_prediction_paths,
+    )
     loaded_predictions: dict[str, PredictionArtifact] = {}
-    normalized_prediction_paths: dict[str, Path] = {}
     for member in refit_bundle.members:
-        prediction_path = Path(prediction_paths[member.member_id]).resolve()
         prediction = load_prediction_artifact(
-            prediction_path,
+            normalized_prediction_paths[member.member_id],
             protocol=protocol,
             expected_config_hash=member.resolved_config_hash,
             expected_manifest_hash=member.manifest_sha256,
         )
         _validate_prediction_lineage(prediction, member)
         loaded_predictions[member.member_id] = prediction
-        normalized_prediction_paths[member.member_id] = prediction_path
+    export_stage = _verify_fold9_export_completion(
+        resolved_export_completion,
+        protocol=protocol,
+        refit_bundle_path=resolved_refit_path,
+        refit_bundle=refit_bundle,
+        prediction_paths=normalized_prediction_paths,
+        predictions=loaded_predictions,
+    )
+    destination = Path(output_directory).resolve()
+    spec_binding = _mapping(
+        label_free_preflight["final_evaluation_spec"],
+        "final evaluation specification binding",
+    )
+    release_root = Path(
+        _string(spec_binding.get("path"), "final_evaluation_spec.path")
+    ).resolve().parent
+    if resolved_refit_path.parent != release_root:
+        raise ReleaseStateError(
+            "refit bundle and final-evaluation specification must share one release root"
+        )
+    canonical_destination = release_root / "calibration"
+    if destination != canonical_destination:
+        raise ReleaseStateError(
+            f"calibration output must use the canonical path {canonical_destination}"
+        )
+    destination.mkdir(parents=True, exist_ok=True)
     decision_outputs = {
         member.member_id: destination / f"{member.member_id}.fold9.decisions.json"
         for member in refit_bundle.members
     }
     fit_plan: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": CALIBRATION_FIT_STAGE_SCHEMA_VERSION,
         "artifact_type": CALIBRATION_FIT_PLAN_TYPE,
         "refit_bundle_sha256": refit_bundle.artifact_sha256,
+        "final_evaluation_spec": dict(
+            _mapping(
+                export_stage["final_evaluation_spec"],
+                "final evaluation specification binding",
+            )
+        ),
         "protocol_hash": refit_bundle.protocol_hash,
         "manifest_sha256": refit_bundle.manifest_sha256,
-        "coverage_targets": [float(value) for value in coverage_targets],
+        "fold9_export_completion": dict(
+            _mapping(export_stage["completion"], "fold9 export completion binding")
+        ),
+        "coverage_targets": list(canonical_coverage),
         "members": [
             {
                 "member_id": member.member_id,
@@ -700,44 +1697,125 @@ def fit_calibration_bundle(
         ],
     }
     fit_plan_path = destination / "calibration-fit-plan.json"
-    if not fit_plan_path.exists():
-        collisions = [path for path in decision_outputs.values() if path.exists()]
-        if collisions:
-            raise ReleaseStateError(
-                "calibration decisions predate the fit plan: "
-                + ", ".join(str(path) for path in collisions)
-            )
-    _ensure_exact_stage_plan(fit_plan_path, fit_plan)
-    decision_paths: dict[str, Path] = {}
-    for member in refit_bundle.members:
-        prediction = loaded_predictions[member.member_id]
-        output = decision_outputs[member.member_id]
-        if output.exists():
-            load_calibration_decisions(output, protocol=protocol)
-        else:
-            decisions = fit_calibration_decisions(
+    fit_completion_path = destination / "calibration-fit-completion.json"
+    with _exclusive_stage_lock(destination):
+        completion_exists = fit_completion_path.exists()
+        if not fit_plan_path.exists():
+            collisions = [path for path in decision_outputs.values() if path.exists()]
+            if collisions or fit_completion_path.exists():
+                raise ReleaseStateError(
+                    "calibration decisions predate the fit plan: "
+                    + ", ".join(
+                        str(path)
+                        for path in [*collisions, fit_completion_path]
+                        if path.exists()
+                    )
+                )
+        fit_plan_sha256 = _ensure_exact_stage_plan(fit_plan_path, fit_plan)
+        decision_paths: dict[str, Path] = {}
+        decisions_by_id: dict[str, CalibrationDecisionArtifact] = {}
+        for member in refit_bundle.members:
+            prediction = loaded_predictions[member.member_id]
+            output = decision_outputs[member.member_id]
+            if completion_exists and not output.is_file():
+                raise ReleaseStateError(
+                    "completed calibration batch is missing a decision: "
+                    f"{member.member_id}"
+                )
+            if output.exists():
+                decisions = load_calibration_decisions(output, protocol=protocol)
+            else:
+                decisions = fit_calibration_decisions(
+                    prediction,
+                    protocol=protocol,
+                    coverage_targets=canonical_coverage,
+                    created_at_utc=created_at_utc,
+                )
+                save_calibration_decisions(decisions, output)
+                decisions = load_calibration_decisions(output, protocol=protocol)
+            if _decision_coverage_targets(decisions) != canonical_coverage:
+                raise ReleaseIntegrityError(
+                    f"calibration decision differs from fit plan: {member.member_id}"
+                )
+            _build_calibration_member(
+                member,
                 prediction,
-                protocol=protocol,
-                coverage_targets=coverage_targets,
-                created_at_utc=created_at_utc,
+                prediction_path=normalized_prediction_paths[member.member_id],
+                decision=decisions,
+                decision_path=output,
             )
-            save_calibration_decisions(decisions, output)
-        decision_paths[member.member_id] = output
-    return create_calibration_bundle(
-        refit_bundle,
-        normalized_prediction_paths,
-        decision_paths,
-        protocol=protocol,
-        created_at_utc=created_at_utc,
-    )
+            decisions_by_id[member.member_id] = decisions
+            decision_paths[member.member_id] = output
+        completion_body: dict[str, object] = {
+            "schema_version": CALIBRATION_FIT_STAGE_SCHEMA_VERSION,
+            "artifact_type": CALIBRATION_FIT_COMPLETION_TYPE,
+            "plan_path": str(fit_plan_path.resolve()),
+            "plan_sha256": fit_plan_sha256,
+            "refit_bundle_path": str(resolved_refit_path),
+            "refit_bundle_sha256": refit_bundle.artifact_sha256,
+            "final_evaluation_spec": dict(
+                _mapping(
+                    export_stage["final_evaluation_spec"],
+                    "final evaluation specification binding",
+                )
+            ),
+            "fold9_export_completion": dict(
+                _mapping(export_stage["completion"], "fold9 export completion binding")
+            ),
+            "protocol_hash": refit_bundle.protocol_hash,
+            "manifest_sha256": refit_bundle.manifest_sha256,
+            "coverage_targets": list(canonical_coverage),
+            "members": [
+                _decision_completion_member(
+                    member,
+                    loaded_predictions[member.member_id],
+                    decision_paths[member.member_id],
+                    decisions_by_id[member.member_id],
+                )
+                for member in refit_bundle.members
+            ],
+        }
+        fit_completion_path, _ = _seal_or_verify_completion(
+            fit_completion_path, completion_body
+        )
+        stage_provenance: dict[str, object] = {
+            "final_evaluation_spec": dict(
+                _mapping(
+                    export_stage["final_evaluation_spec"],
+                    "final evaluation specification binding",
+                )
+            ),
+            "refit_bundle": {
+                "path": str(resolved_refit_path),
+                "file_sha256": _prefixed_file_sha256(resolved_refit_path),
+                "artifact_sha256": refit_bundle.artifact_sha256,
+            },
+            "fold9_export_plan": export_stage["plan"],
+            "fold9_export_completion": export_stage["completion"],
+            "calibration_fit_plan": _stage_binding(
+                fit_plan_path, hash_field="plan_sha256"
+            ),
+            "calibration_fit_completion": _stage_binding(
+                fit_completion_path, hash_field="artifact_sha256"
+            ),
+            "coverage_targets": list(canonical_coverage),
+        }
+        return create_calibration_bundle(
+            refit_bundle,
+            normalized_prediction_paths,
+            decision_paths,
+            protocol=protocol,
+            created_at_utc=created_at_utc,
+            stage_provenance=stage_provenance,
+        )
 
 
 def _ensure_exact_stage_plan(
     path: Path, payload: Mapping[str, object]
-) -> None:
+) -> str:
     if not path.exists():
-        write_new_hashed_json(path, payload, hash_field="plan_sha256")
-        return
+        _, digest = write_new_hashed_json(path, payload, hash_field="plan_sha256")
+        return digest
     existing = read_json_mapping(path, context=f"existing stage plan {path.name}")
     stored = _hash_string(existing.get("plan_sha256"), "plan_sha256")
     unhashed = dict(existing)
@@ -746,6 +1824,7 @@ def _ensure_exact_stage_plan(
         raise ReleaseIntegrityError(
             f"existing stage plan differs from requested exact batch: {path}"
         )
+    return stored
 
 
 def save_calibration_bundle(
@@ -754,8 +1833,26 @@ def save_calibration_bundle(
     """Save the frozen pre-fold-10 calibration bundle."""
 
     _validate_calibration_bundle(bundle)
+    if bundle.stage_provenance is None:
+        raise ReleaseStateError(
+            "calibration bundle requires sealed export/calibration stage provenance"
+        )
+    provenance = _mapping(bundle.stage_provenance, "stage_provenance")
+    spec_binding = _mapping(
+        provenance.get("final_evaluation_spec"),
+        "final_evaluation_spec binding",
+    )
+    release_root = Path(
+        _string(spec_binding.get("path"), "final_evaluation_spec.path")
+    ).resolve().parent
+    destination = Path(path).resolve()
+    canonical_destination = release_root / "calibration_bundle.json"
+    if destination != canonical_destination:
+        raise ReleaseStateError(
+            f"calibration bundle must use the canonical path {canonical_destination}"
+        )
     return write_new_hashed_json(
-        path,
+        destination,
         bundle.to_payload(include_integrity=False),
         hash_field="artifact_sha256",
     )
@@ -1447,6 +2544,7 @@ def _validate_prediction_lineage(prediction: PredictionArtifact, refit: RefitMem
     if prediction.fold_role is not FoldRole.CALIBRATION or prediction.folds != CALIBRATION_FOLDS:
         raise ReleaseGateError("calibration bundle accepts fold-9 predictions only")
     expected: dict[str, object] = {
+        "model_name": refit.run_name,
         "model_seed": refit.seed,
         "protocol_hash": refit.protocol_hash,
         "config_hash": refit.resolved_config_hash,
@@ -1454,6 +2552,7 @@ def _validate_prediction_lineage(prediction: PredictionArtifact, refit: RefitMem
         "label_order": LABEL_ORDER,
     }
     observed: dict[str, object] = {
+        "model_name": prediction.model_name,
         "model_seed": prediction.model_seed,
         "protocol_hash": prediction.protocol_hash,
         "config_hash": prediction.config_hash,
@@ -1478,12 +2577,263 @@ def _validate_prediction_lineage(prediction: PredictionArtifact, refit: RefitMem
         != refit.normalization_sha256
     ):
         raise ReleaseIntegrityError("fold-9 prediction normalization hash mismatch")
+    post_sweep_expected: dict[str, object] = {
+        "refit_run_kind": "post_sweep_frozen_refit",
+        "refit_completion_sha256": refit.completion_sha256,
+        "freeze_artifact_sha256": refit.freeze_artifact_sha256,
+        "recipe_sha256": refit.recipe_sha256,
+        "checkpoint_epoch": refit.frozen_epochs - 1,
+    }
+    post_sweep_drift = [
+        field for field, expected in post_sweep_expected.items()
+        if extra.get(field) != expected
+    ]
+    if post_sweep_drift:
+        raise ReleaseIntegrityError(
+            "fold-9 prediction post-sweep lineage mismatch: "
+            + ", ".join(post_sweep_drift)
+        )
+
+
+def _verified_stage_binding(
+    provenance: Mapping[str, object],
+    name: str,
+    *,
+    hash_field: str,
+) -> tuple[Path, Mapping[str, object], str]:
+    binding = _mapping(provenance.get(name), f"stage_provenance.{name}")
+    _exact_keys(
+        binding,
+        {"path", "file_sha256", "artifact_sha256"},
+        f"stage_provenance.{name}",
+    )
+    path = Path(_string(binding.get("path"), f"{name}.path")).resolve()
+    if _prefixed_file_sha256(path) != _hash_string(
+        binding.get("file_sha256"), f"{name}.file_sha256"
+    ):
+        raise ReleaseIntegrityError(f"bound stage artifact changed: {name}")
+    payload, artifact_hash = _load_self_hashed_json(
+        path, context=f"bound stage artifact {name}", hash_field=hash_field
+    )
+    if artifact_hash != _hash_string(
+        binding.get("artifact_sha256"), f"{name}.artifact_sha256"
+    ):
+        raise ReleaseIntegrityError(f"bound stage artifact hash differs: {name}")
+    return path, payload, artifact_hash
+
+
+def _verify_calibration_stage_root(
+    bundle: CalibrationBundle,
+    *,
+    protocol: ExperimentProtocol,
+) -> tuple[
+    RefitBundle,
+    Path,
+    Path,
+    Mapping[str, object],
+    Mapping[str, object],
+]:
+    if bundle.stage_provenance is None:
+        raise ReleaseIntegrityError("calibration bundle has no release-stage provenance")
+    provenance = _mapping(bundle.stage_provenance, "stage_provenance")
+    _exact_keys(
+        provenance,
+        {
+            "final_evaluation_spec",
+            "refit_bundle",
+            "fold9_export_plan",
+            "fold9_export_completion",
+            "calibration_fit_plan",
+            "calibration_fit_completion",
+            "coverage_targets",
+        },
+        "stage_provenance",
+    )
+    if _float_tuple(provenance.get("coverage_targets"), "coverage_targets") != (
+        CANONICAL_COVERAGE_TARGETS
+    ):
+        raise ReleaseIntegrityError("stage provenance coverage grid differs")
+    refit_binding = _mapping(provenance.get("refit_bundle"), "refit_bundle binding")
+    _exact_keys(
+        refit_binding,
+        {"path", "file_sha256", "artifact_sha256"},
+        "refit_bundle binding",
+    )
+    refit_path = Path(_string(refit_binding.get("path"), "refit_bundle.path")).resolve()
+    if _prefixed_file_sha256(refit_path) != _hash_string(
+        refit_binding.get("file_sha256"), "refit_bundle.file_sha256"
+    ):
+        raise ReleaseIntegrityError("bound refit bundle file changed")
+    refit_bundle = load_refit_bundle(refit_path, protocol=protocol, verify_sources=True)
+    if refit_bundle.artifact_sha256 != bundle.refit_bundle_sha256 or (
+        refit_bundle.artifact_sha256
+        != _hash_string(refit_binding.get("artifact_sha256"), "refit_bundle hash")
+    ):
+        raise ReleaseIntegrityError("calibration bundle refit root differs")
+    spec_binding = _mapping(
+        provenance.get("final_evaluation_spec"),
+        "final_evaluation_spec binding",
+    )
+    spec_path = Path(
+        _string(spec_binding.get("path"), "final_evaluation_spec.path")
+    ).resolve()
+    _, expected_spec_binding = _load_final_evaluation_spec_binding(
+        spec_path,
+        protocol=protocol,
+        refit_bundle_path=refit_path,
+        refit_bundle=refit_bundle,
+        verify_runtime=True,
+    )
+    if dict(spec_binding) != expected_spec_binding:
+        raise ReleaseIntegrityError(
+            "calibration provenance final-evaluation specification differs"
+        )
+
+    export_plan_path, export_plan, export_plan_hash = _verified_stage_binding(
+        provenance, "fold9_export_plan", hash_field="plan_sha256"
+    )
+    export_completion_path, export_completion, _ = _verified_stage_binding(
+        provenance, "fold9_export_completion", hash_field="artifact_sha256"
+    )
+    fit_plan_path, fit_plan, fit_plan_hash = _verified_stage_binding(
+        provenance, "calibration_fit_plan", hash_field="plan_sha256"
+    )
+    _, fit_completion, _ = _verified_stage_binding(
+        provenance, "calibration_fit_completion", hash_field="artifact_sha256"
+    )
+    _exact_keys(
+        fit_plan,
+        {
+            "schema_version",
+            "artifact_type",
+            "refit_bundle_sha256",
+            "final_evaluation_spec",
+            "protocol_hash",
+            "manifest_sha256",
+            "fold9_export_completion",
+            "coverage_targets",
+            "members",
+            "plan_sha256",
+        },
+        "calibration fit plan",
+    )
+    _exact_keys(
+        fit_completion,
+        {
+            "schema_version",
+            "artifact_type",
+            "plan_path",
+            "plan_sha256",
+            "refit_bundle_path",
+            "refit_bundle_sha256",
+            "final_evaluation_spec",
+            "fold9_export_completion",
+            "protocol_hash",
+            "manifest_sha256",
+            "coverage_targets",
+            "members",
+            "artifact_sha256",
+        },
+        "calibration fit completion",
+    )
+    if export_plan.get("artifact_type") != FOLD9_EXPORT_PLAN_TYPE or export_completion.get(
+        "artifact_type"
+    ) != FOLD9_EXPORT_COMPLETION_TYPE:
+        raise ReleaseIntegrityError("fold-9 stage artifact type mismatch")
+    if fit_plan.get("artifact_type") != CALIBRATION_FIT_PLAN_TYPE or fit_completion.get(
+        "artifact_type"
+    ) != CALIBRATION_FIT_COMPLETION_TYPE:
+        raise ReleaseIntegrityError("calibration stage artifact type mismatch")
+    if export_plan.get("schema_version") != FOLD9_EXPORT_STAGE_SCHEMA_VERSION or (
+        export_completion.get("schema_version") != FOLD9_EXPORT_STAGE_SCHEMA_VERSION
+    ):
+        raise ReleaseIntegrityError("fold-9 stage schema differs")
+    if fit_plan.get("schema_version") != CALIBRATION_FIT_STAGE_SCHEMA_VERSION or (
+        fit_completion.get("schema_version") != CALIBRATION_FIT_STAGE_SCHEMA_VERSION
+    ):
+        raise ReleaseIntegrityError("calibration stage schema differs")
+    for stage_name, stage in (
+        ("fold-9 plan", export_plan),
+        ("fold-9 completion", export_completion),
+        ("calibration plan", fit_plan),
+        ("calibration completion", fit_completion),
+    ):
+        if stage.get("final_evaluation_spec") != expected_spec_binding:
+            raise ReleaseIntegrityError(
+                f"{stage_name} final-evaluation specification binding differs"
+            )
+    expected_fit_lineage = {
+        "refit_bundle_sha256": refit_bundle.artifact_sha256,
+        "protocol_hash": bundle.protocol_hash,
+        "manifest_sha256": bundle.manifest_sha256,
+    }
+    for stage_name, stage in (
+        ("calibration plan", fit_plan),
+        ("calibration completion", fit_completion),
+    ):
+        drift = [
+            key
+            for key, expected in expected_fit_lineage.items()
+            if stage.get(key) != expected
+        ]
+        if drift:
+            raise ReleaseIntegrityError(
+                f"{stage_name} release lineage differs: " + ", ".join(drift)
+            )
+    if fit_completion.get("refit_bundle_path") != str(refit_path):
+        raise ReleaseIntegrityError("calibration completion refit path differs")
+    if export_completion.get("plan_path") != str(export_plan_path) or export_completion.get(
+        "plan_sha256"
+    ) != export_plan_hash:
+        raise ReleaseIntegrityError("fold-9 completion does not bind its exact plan")
+    if fit_completion.get("plan_path") != str(fit_plan_path) or fit_completion.get(
+        "plan_sha256"
+    ) != fit_plan_hash:
+        raise ReleaseIntegrityError("calibration completion does not bind its exact plan")
+    export_binding = _mapping(
+        provenance.get("fold9_export_completion"), "fold9 export binding"
+    )
+    if fit_plan.get("fold9_export_completion") != dict(export_binding) or fit_completion.get(
+        "fold9_export_completion"
+    ) != dict(export_binding):
+        raise ReleaseIntegrityError("calibration stage does not bind fold-9 completion")
+    if fit_plan.get("coverage_targets") != list(CANONICAL_COVERAGE_TARGETS) or (
+        fit_completion.get("coverage_targets") != list(CANONICAL_COVERAGE_TARGETS)
+    ):
+        raise ReleaseIntegrityError("calibration stage coverage grid differs")
+    if export_completion_path.parent != export_plan_path.parent:
+        raise ReleaseIntegrityError("fold-9 plan/completion directories differ")
+    return (
+        refit_bundle,
+        refit_path,
+        export_completion_path,
+        export_completion,
+        fit_completion,
+    )
 
 
 def _verify_calibration_sources(
     bundle: CalibrationBundle, *, protocol: ExperimentProtocol
 ) -> None:
+    (
+        refit_bundle,
+        refit_path,
+        export_completion_path,
+        export_completion,
+        fit_completion,
+    ) = _verify_calibration_stage_root(bundle, protocol=protocol)
+    refit_by_id = {member.member_id: member for member in refit_bundle.members}
+    calibration_by_id = {member.member_id: member for member in bundle.members}
+    if set(refit_by_id) != set(calibration_by_id):
+        raise ReleaseIntegrityError("calibration/refit member grids differ")
+    for member_id, refit_member in refit_by_id.items():
+        if calibration_by_id[member_id].refit_lineage_sha256 != refit_member.lineage_sha256:
+            raise ReleaseIntegrityError(
+                f"calibration member refit lineage differs: {member_id}"
+            )
     loaded_predictions: list[PredictionArtifact] = []
+    predictions_by_id: dict[str, PredictionArtifact] = {}
+    decisions_by_id: dict[str, CalibrationDecisionArtifact] = {}
     for member in bundle.members:
         if _prefixed_file_sha256(member.checkpoint_path) != member.checkpoint_sha256:
             raise ReleaseIntegrityError(f"refit checkpoint changed: {member.member_id}")
@@ -1521,6 +2871,8 @@ def _verify_calibration_sources(
             decision,
         )
         loaded_predictions.append(prediction)
+        predictions_by_id[member.member_id] = prediction
+        decisions_by_id[member.member_id] = decision
     if len({item.integrity_sha256 for item in loaded_predictions}) != 6:
         raise ReleaseIntegrityError(
             "calibration reload does not contain six distinct predictions"
@@ -1533,6 +2885,75 @@ def _verify_calibration_sources(
             raise ReleaseIntegrityError(
                 f"fold-9 predictions are not aligned across the six-member batch: {error}"
             ) from error
+    _validate_complete_fold9_cohort(predictions_by_id, refit_bundle)
+    verified_export_stage = _verify_fold9_export_completion(
+        export_completion_path,
+        protocol=protocol,
+        refit_bundle_path=refit_path,
+        refit_bundle=refit_bundle,
+        prediction_paths={
+            member.member_id: member.prediction_path for member in bundle.members
+        },
+        predictions=predictions_by_id,
+    )
+    provenance = _mapping(bundle.stage_provenance, "stage_provenance")
+    for key in ("final_evaluation_spec", "plan", "completion"):
+        provenance_key = {
+            "final_evaluation_spec": "final_evaluation_spec",
+            "plan": "fold9_export_plan",
+            "completion": "fold9_export_completion",
+        }[key]
+        if verified_export_stage[key] != provenance.get(provenance_key):
+            raise ReleaseIntegrityError(
+                "calibration provenance differs from reverified fold-9 stage"
+            )
+    expected_export_members = [
+        _prediction_completion_member(
+            refit_member,
+            calibration_by_id[refit_member.member_id].prediction_path,
+            predictions_by_id[refit_member.member_id],
+        )
+        for refit_member in refit_bundle.members
+    ]
+    if export_completion.get("members") != expected_export_members:
+        raise ReleaseIntegrityError("fold-9 completion member inventory changed")
+    expected_fit_members = [
+        _decision_completion_member(
+            refit_member,
+            predictions_by_id[refit_member.member_id],
+            calibration_by_id[refit_member.member_id].decision_path,
+            decisions_by_id[refit_member.member_id],
+        )
+        for refit_member in refit_bundle.members
+    ]
+    if fit_completion.get("members") != expected_fit_members:
+        raise ReleaseIntegrityError("calibration completion member inventory changed")
+    fit_plan_binding = _mapping(
+        provenance.get("calibration_fit_plan"), "calibration fit plan binding"
+    )
+    fit_plan_payload, _ = _load_self_hashed_json(
+        Path(_string(fit_plan_binding.get("path"), "calibration fit plan path")),
+        context="calibration fit plan",
+        hash_field="plan_sha256",
+    )
+    expected_fit_plan_members = [
+        {
+            "member_id": refit_member.member_id,
+            "refit_lineage_sha256": refit_member.lineage_sha256,
+            "prediction_path": str(
+                calibration_by_id[refit_member.member_id].prediction_path.resolve()
+            ),
+            "prediction_artifact_sha256": predictions_by_id[
+                refit_member.member_id
+            ].integrity_sha256,
+            "decision_path": str(
+                calibration_by_id[refit_member.member_id].decision_path.resolve()
+            ),
+        }
+        for refit_member in refit_bundle.members
+    ]
+    if fit_plan_payload.get("members") != expected_fit_plan_members:
+        raise ReleaseIntegrityError("calibration fit plan member inventory changed")
 
 
 def _verify_loaded_calibration_semantics(
@@ -1641,6 +3062,8 @@ def _verify_loaded_calibration_semantics(
     loaded_gates = tuple(gate.to_dict() for gate in decision.coverage_gates)
     if loaded_gates != tuple(dict(gate) for gate in member.entropy_gates):
         raise ReleaseIntegrityError("reloaded entropy gates differ from bundle")
+    if _decision_coverage_targets(decision) != CANONICAL_COVERAGE_TARGETS:
+        raise ReleaseIntegrityError("reloaded calibration coverage grid differs")
 
 
 def _parse_refit_bundle(
@@ -1828,6 +3251,7 @@ def _parse_calibration_bundle(
         "label_order",
         "release_grid",
         "members",
+        "stage_provenance",
         "created_at_utc",
         "artifact_sha256",
     }
@@ -1860,6 +3284,9 @@ def _parse_calibration_bundle(
         members=members,
         created_at_utc=_timestamp(_string(payload["created_at_utc"], "created_at_utc")),
         artifact_sha256=stored,
+        stage_provenance=dict(
+            _mapping(payload["stage_provenance"], "stage_provenance")
+        ),
     )
     _validate_calibration_bundle(bundle, require_integrity=True)
     return bundle
@@ -2096,6 +3523,7 @@ def _validate_release_grid(value: object, *, calibration: bool) -> None:
             "thresholds_per_fit",
             "temperature_scope",
             "retuning_after_freeze",
+            "coverage_targets",
         }
         if calibration
         else {"refit_folds", "normalization_folds"}
@@ -2114,6 +3542,10 @@ def _validate_release_grid(value: object, *, calibration: bool) -> None:
             raise ReleaseIntegrityError("temperature scope mismatch")
         if grid["retuning_after_freeze"] is not False:
             raise ReleaseIntegrityError("retuning must remain disabled")
+        if _float_tuple(grid["coverage_targets"], "coverage_targets") != (
+            CANONICAL_COVERAGE_TARGETS
+        ):
+            raise ReleaseIntegrityError("calibration coverage grid is not preregistered")
     else:
         if _integer_tuple(grid["refit_folds"], "refit_folds") != REFIT_FOLDS:
             raise ReleaseIntegrityError("release refit folds mismatch")
@@ -2179,9 +3611,15 @@ def _write_json(path: Path, payload: Mapping[str, object], *, replace: bool) -> 
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        if not replace and path.exists():
-            raise FileExistsError(f"immutable release artifact already exists: {path}")
-        os.replace(temporary, path)
+        if replace:
+            os.replace(temporary, path)
+        else:
+            try:
+                os.link(temporary, path)
+            except FileExistsError as error:
+                raise FileExistsError(
+                    f"immutable release artifact already exists: {path}"
+                ) from error
     finally:
         with suppress(OSError):
             temporary.unlink(missing_ok=True)
@@ -2313,8 +3751,12 @@ def _timestamp(value: str | None) -> str:
 __all__ = [
     "CALIBRATION_BUNDLE_SCHEMA_VERSION",
     "CALIBRATION_BUNDLE_TYPE",
+    "CALIBRATION_FIT_COMPLETION_TYPE",
+    "CANONICAL_COVERAGE_TARGETS",
     "EXPECTED_ARCHITECTURES",
     "EXPECTED_SEEDS",
+    "FOLD9_EXPORT_COMPLETION_TYPE",
+    "FOLD9_EXPORT_PLAN_TYPE",
     "REFIT_BUNDLE_SCHEMA_VERSION",
     "REFIT_BUNDLE_TYPE",
     "CalibrationBundle",

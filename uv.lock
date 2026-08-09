@@ -406,6 +406,7 @@ source = { editable = "." }
 dependencies = [
     { name = "captum" },
     { name = "fastapi" },
+    { name = "filelock" },
     { name = "jinja2" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -441,6 +442,7 @@ dev = [
 requires-dist = [
     { name = "captum", specifier = ">=0.8.0" },
     { name = "fastapi", specifier = ">=0.141.1" },
+    { name = "filelock", specifier = ">=3.32" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "matplotlib", specifier = ">=3.10" },
     { name = "numpy", specifier = ">=2.0" },

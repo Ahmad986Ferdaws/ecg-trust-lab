@@ -28,15 +28,24 @@ current fold-8 evidence from future final-test claims.
 - Calibration, abstention, patient-bootstrap, subgroup, corruption,
   attribution, immutable prediction, refit, final-report, and demo-backend
   layers are implemented and tested.
-- The fixed seeds 2026/2027/2028 confirmation, immutable architecture freeze,
-  six folds-1-8 refits, fold-9 release gate, and one-time fold-10 ledger are
-  implemented with end-to-end provenance and adversarial integrity checks.
+- The fixed seeds 2026/2027/2028 confirmation is complete: ResNet averaged
+  0.932173 versus 0.917785 for the transformer on aligned fold-8 predictions,
+  so the preregistered margin rule selected ResNet as the development primary.
+- All six fresh folds-1–8 refits are complete and their source-verifying release
+  bundle is sealed. The fold-9 gate and one-time fold-10 ledger are implemented
+  with end-to-end provenance and adversarial integrity checks.
 - A local FastAPI/Plotly research viewer is implemented for compatible WFDB
   uploads and curated examples; it will be bound to the final frozen model and
   calibration artifacts after the one-time evaluation.
-- Repository gate on August 8, 2026: 250 tests pass; Ruff and strict mypy are
-  clean across 35 source modules.
+- Repository gate on August 8, 2026: 318 tests pass; Ruff and strict mypy are
+  clean across 37 source modules.
 - Fold 9 and fold 10 have not been used for the reported development results.
+  A disclosed pre-evaluation audit incident exposed a bounded sample of raw
+  metadata rows including some fold-10 SCP codes, but no waveforms, predictions,
+  aggregate labels, or metrics; see the
+  [protocol-deviation log](reports/PROTOCOL_DEVIATIONS.md). The formal one-time
+  model evaluation remains unopened, but it will not be described as a fully
+  operator-blind test.
 
 ## Development commands
 
@@ -54,6 +63,7 @@ uv run python scripts/multiseed.py --help
 uv run python scripts/freeze_multiseed.py --help
 uv run python scripts/refit.py --help
 uv run python scripts/release_pipeline.py --help
+uv run python scripts/build_subgroups.py --help
 uv run python scripts/predict.py --help
 uv run python -m ecg_trust.calibration_cli --help
 uv run python scripts/demo_server.py --help

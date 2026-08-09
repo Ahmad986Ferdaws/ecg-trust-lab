@@ -235,7 +235,8 @@ column title.
 > Leave this entire section as `Not evaluated` until each row can be traced to
 > an integrity-verified `ecg_trust.final_evaluation_report` with fold role
 > `final_test`, fold `[10]`, matching frozen fold-9 decisions, and a valid
-> `report_sha256`.
+> `report_sha256`. Every report must also bind the exact final-evaluation
+> specification and required protocol-deviation disclosure.
 
 ### Per-seed macro results
 
@@ -258,8 +259,9 @@ it is not a replacement for patient-bootstrap uncertainty.
 | ResNet | `[N/N]` | `[VALUE]` | `[VALUE]` | `[VALUE]` | `[VALUE]` |
 | Transformer | `[N/N]` | `[VALUE]` | `[VALUE]` | `[VALUE]` | `[VALUE]` |
 
-The current repository has no cross-seed aggregation CLI. Record the exact
-extraction/aggregation code and its hash if this table is populated.
+Populate this table only from the sealed `ecg_trust.final_architecture_aggregate`
+artifacts created by the exact-six final batch, retaining their batch, source,
+final-specification, and deviation-log hashes.
 
 ### Per-label final results
 
@@ -282,12 +284,12 @@ targets, manifest, protocol, and label order, then use shared patient draws.
 
 | Seed | Difference direction | Metric | Estimate (95% paired patient CI) | Resamples valid / invalid | Artifact/code provenance |
 |---:|---|---|---:|---:|---|
-| `[SEED]` | `ResNet minus Transformer` | Macro AUROC | `[VALUE]` | `[V/I]` | `[HASH_OR_NOT_EVALUATED]` |
+| `[SEED]` | `Transformer minus ResNet` | Macro AUROC | `[VALUE]` | `[V/I]` | `[HASH_OR_NOT_EVALUATED]` |
 
-The library provides `assert_prediction_artifacts_aligned()` and
-`paired_model_difference_intervals()`, but the current repository has no
-paired-comparison CLI. State `Not evaluated` unless that analysis is saved and
-auditable.
+Use the sealed per-seed paired-bootstrap artifacts and their manifest from the
+exact-six final batch. The implemented comparison direction is
+`ecg_transformer minus resnet1d`; do not reverse signs silently when presenting
+the table.
 
 ## 11. Selective prediction
 
@@ -317,7 +319,7 @@ fairness claim.
 
 ## 13. Robustness and explanation evidence
 
-The current locked final-report command does not generate robustness or
+The locked final batch does not generate robustness or
 explanation-faithfulness artifacts. Do not mark these as complete based on a
 waveform visualization alone.
 

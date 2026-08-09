@@ -2,21 +2,36 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd  # type: ignore[import-untyped]
 import pytest
+from filelock import FileLock
 
 import ecg_trust.release_gates as release_gates
 from ecg_trust.decisioning import load_calibration_decisions
-from ecg_trust.predictions import create_prediction_artifact, save_prediction_artifact
+from ecg_trust.predictions import (
+    PredictionArtifact,
+    create_prediction_artifact,
+    load_prediction_artifact,
+    save_prediction_artifact,
+)
 from ecg_trust.protocol import ExperimentProtocol, FoldRole
 from ecg_trust.release_gates import (
+    CANONICAL_COVERAGE_TARGETS,
     EXPECTED_ARCHITECTURES,
     EXPECTED_SEEDS,
+    FOLD9_EXPORT_COMPLETION_TYPE,
+    FOLD9_EXPORT_PLAN_TYPE,
+    RefitBundle,
+    RefitMember,
     ReleaseGateError,
     ReleaseIntegrityError,
+    ReleaseStateError,
     canonical_sha256,
     create_refit_bundle,
     export_fold9_predictions,
@@ -25,6 +40,7 @@ from ecg_trust.release_gates import (
     load_refit_bundle,
     save_calibration_bundle,
     save_refit_bundle,
+    write_new_hashed_json,
 )
 
 
@@ -36,6 +52,156 @@ def _write(path: Path, value: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(value, encoding="utf-8")
     return path.resolve()
+
+
+def _write_fake_evaluation_spec(path: Path) -> dict[str, object]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_sha256 = "sha256:" + "a" * 64
+    if not path.exists():
+        path.write_text(
+            json.dumps({"artifact_sha256": artifact_sha256}) + "\n",
+            encoding="utf-8",
+        )
+    return {
+        "path": str(path.resolve()),
+        "file_sha256": _file_hash(path),
+        "artifact_sha256": artifact_sha256,
+    }
+
+
+@pytest.fixture(autouse=True)
+def _stub_final_evaluation_spec_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def load_binding(
+        path: str | Path,
+        **_: object,
+    ) -> tuple[SimpleNamespace, dict[str, object]]:
+        binding = _write_fake_evaluation_spec(Path(path).resolve())
+        return SimpleNamespace(
+            requested_device="cuda:0", path=Path(str(binding["path"]))
+        ), binding
+
+    monkeypatch.setattr(
+        release_gates, "_load_final_evaluation_spec_binding", load_binding
+    )
+
+
+def _write_fold9_manifest(path: Path) -> Path:
+    targets = np.asarray(
+        [
+            [0, 1, 0, 1, 0],
+            [1, 0, 1, 0, 1],
+            [0, 1, 0, 1, 0],
+            [1, 0, 1, 0, 1],
+        ],
+        dtype=np.int8,
+    )
+    frame = pd.DataFrame(
+        {
+            "ecg_id": [1, 2, 3, 4],
+            "patient_id": [11, 12, 13, 14],
+            "strat_fold": [9, 9, 9, 9],
+            "label_NORM": targets[:, 0],
+            "label_MI": targets[:, 1],
+            "label_STTC": targets[:, 2],
+            "label_CD": targets[:, 3],
+            "label_HYP": targets[:, 4],
+        }
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(path, index=False)
+    return path.resolve()
+
+
+def _post_sweep_prediction_metadata(
+    member: RefitMember,
+) -> dict[str, str | int | float | bool | None]:
+    return {
+        "lineage": "frozen_refit",
+        "checkpoint_sha256": member.final_checkpoint_sha256,
+        "checkpoint_epoch": member.frozen_epochs - 1,
+        "resolved_config_path": str(member.resolved_config_path.resolve()),
+        "normalization_sha256": member.normalization_sha256,
+        "inference_device": "cuda:0",
+        "inference_bf16": True,
+        "inference_batch_size": 16,
+        "inference_num_workers": 0,
+        "refit_run_kind": "post_sweep_frozen_refit",
+        "refit_completion_sha256": member.completion_sha256,
+        "freeze_artifact_sha256": member.freeze_artifact_sha256,
+        "recipe_sha256": member.recipe_sha256,
+    }
+
+
+def _seal_synthetic_fold9_export(
+    refit_path: Path,
+    refit: RefitBundle,
+    prediction_paths: dict[str, Path],
+    predictions: dict[str, PredictionArtifact],
+) -> Path:
+    output_dir = next(iter(prediction_paths.values())).parent
+    evaluation_spec = _write_fake_evaluation_spec(
+        output_dir.parent / "final_evaluation_spec.json"
+    )
+    plan_path = output_dir / "fold9-export-plan.json"
+    plan_body: dict[str, object] = {
+        "schema_version": release_gates.FOLD9_EXPORT_STAGE_SCHEMA_VERSION,
+        "artifact_type": FOLD9_EXPORT_PLAN_TYPE,
+        "refit_bundle_path": str(refit_path.resolve()),
+        "refit_bundle_sha256": refit.artifact_sha256,
+        "final_evaluation_spec": evaluation_spec,
+        "protocol_hash": refit.protocol_hash,
+        "manifest_sha256": refit.manifest_sha256,
+        "output_directory": str(output_dir.resolve()),
+        "inference": {
+            "requested_batch_size": 16,
+            "requested_num_workers": 0,
+            "device": "cuda:0",
+            "bf16": True,
+        },
+        "members": [
+            {
+                "member_id": member.member_id,
+                "lineage_sha256": member.lineage_sha256,
+                "checkpoint_sha256": member.final_checkpoint_sha256,
+                "resolved_config_hash": member.resolved_config_hash,
+                "resolved_batch_size": 16,
+                "resolved_num_workers": 0,
+                "prediction_path": str(prediction_paths[member.member_id].resolve()),
+            }
+            for member in refit.members
+        ],
+    }
+    plan_path, plan_hash = write_new_hashed_json(
+        plan_path, plan_body, hash_field="plan_sha256"
+    )
+    completion_body: dict[str, object] = {
+        "schema_version": release_gates.FOLD9_EXPORT_STAGE_SCHEMA_VERSION,
+        "artifact_type": FOLD9_EXPORT_COMPLETION_TYPE,
+        "plan_path": str(plan_path.resolve()),
+        "plan_sha256": plan_hash,
+        "refit_bundle_path": str(refit_path.resolve()),
+        "refit_bundle_sha256": refit.artifact_sha256,
+        "final_evaluation_spec": evaluation_spec,
+        "protocol_hash": refit.protocol_hash,
+        "manifest_sha256": refit.manifest_sha256,
+        "inference": plan_body["inference"],
+        "members": [
+            release_gates._prediction_completion_member(
+                member,
+                prediction_paths[member.member_id],
+                predictions[member.member_id],
+            )
+            for member in refit.members
+        ],
+    }
+    completion_path, _ = write_new_hashed_json(
+        output_dir / "fold9-export-completion.json",
+        completion_body,
+        hash_field="artifact_sha256",
+    )
+    return completion_path
 
 
 class _FakeFreeze:
@@ -306,7 +472,7 @@ def _completion_fixture(
 def synthetic_completions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[list[Path], dict[str, dict[str, object]], _FakeFreeze]:
-    manifest = _write(tmp_path / "manifest.parquet", "shared manifest")
+    manifest = _write_fold9_manifest(tmp_path / "manifest.parquet")
     normalization = _write(tmp_path / "normalization.json", "shared normalization")
     freeze = _write(tmp_path / "freeze.json", "shared freeze")
     completions: list[Path] = []
@@ -349,6 +515,81 @@ def synthetic_completions(
         lambda path, protocol, verify_sources=True: fake_freeze,
     )
     return completions, payloads, fake_freeze
+
+
+def _saved_fold9_predictions(
+    root: Path,
+    refit: RefitBundle,
+    *,
+    misaligned_member: str | None = None,
+    common_subset: bool = False,
+) -> tuple[dict[str, Path], dict[str, PredictionArtifact]]:
+    base_targets = np.asarray(
+        [
+            [0, 1, 0, 1, 0],
+            [1, 0, 1, 0, 1],
+            [0, 1, 0, 1, 0],
+            [1, 0, 1, 0, 1],
+        ],
+        dtype=np.int8,
+    )
+    paths: dict[str, Path] = {}
+    loaded: dict[str, PredictionArtifact] = {}
+    for index, member in enumerate(refit.members):
+        ecg_id = np.asarray([1, 2, 3, 4])
+        patient_id = np.asarray([11, 12, 13, 14])
+        targets = base_targets
+        if common_subset:
+            ecg_id = ecg_id[:3]
+            patient_id = patient_id[:3]
+            targets = targets[:3]
+        elif member.member_id == misaligned_member:
+            ecg_id = np.asarray([1, 2, 3, 5])
+            patient_id = np.asarray([11, 12, 13, 15])
+        logits = np.tile(
+            np.asarray([[-1.0, 1.0, -0.5, 0.5, -0.2]]),
+            (len(ecg_id), 1),
+        ) + index * 0.01
+        prediction = create_prediction_artifact(
+            ecg_id=ecg_id,
+            patient_id=patient_id,
+            strat_fold=np.full(len(ecg_id), 9, dtype=np.int8),
+            targets=targets,
+            raw_logits=logits,
+            model_name=member.run_name,
+            model_seed=member.seed,
+            protocol=ExperimentProtocol.canonical(),
+            config_hash=member.resolved_config_hash,
+            manifest_hash=member.manifest_sha256,
+            fold_role=FoldRole.CALIBRATION,
+            extra_metadata=_post_sweep_prediction_metadata(member),
+        )
+        path = root / f"{member.member_id}.npz"
+        save_prediction_artifact(
+            prediction, path, protocol=ExperimentProtocol.canonical()
+        )
+        paths[member.member_id] = path
+        loaded[member.member_id] = load_prediction_artifact(
+            path, protocol=ExperimentProtocol.canonical()
+        )
+    return paths, loaded
+
+
+def _valid_calibration_case(
+    tmp_path: Path,
+    completions: list[Path],
+) -> tuple[Path, RefitBundle, dict[str, Path], Path]:
+    protocol = ExperimentProtocol.canonical()
+    unsigned = create_refit_bundle(completions, protocol=protocol)
+    refit_path, _ = save_refit_bundle(unsigned, tmp_path / "refit-bundle.json")
+    refit = load_refit_bundle(refit_path, protocol=protocol, verify_sources=False)
+    prediction_paths, predictions = _saved_fold9_predictions(
+        tmp_path / "fold9", refit
+    )
+    completion = _seal_synthetic_fold9_export(
+        refit_path, refit, prediction_paths, predictions
+    )
+    return refit_path, refit, prediction_paths, completion
 
 
 def test_refit_bundle_requires_and_binds_exact_six_receipts(
@@ -399,6 +640,22 @@ def test_refit_bundle_tamper_is_detected(
 
     with pytest.raises(ReleaseIntegrityError, match="artifact hash"):
         load_refit_bundle(path, protocol=protocol, verify_sources=False)
+
+
+def test_immutable_release_writer_never_replaces_existing_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "immutable.json"
+    path.write_bytes(b"original\n")
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        write_new_hashed_json(
+            path,
+            {"artifact_type": "test"},
+            hash_field="artifact_sha256",
+        )
+
+    assert path.read_bytes() == b"original\n"
 
 
 @pytest.mark.parametrize(
@@ -499,9 +756,47 @@ def test_fold9_export_rechecks_bound_receipts_before_exporter_call(
             path,
             tmp_path / "fold9",
             protocol=protocol,
+            final_evaluation_spec_path=tmp_path / "unreached-spec.json",
             exporter=forbidden_exporter,  # type: ignore[arg-type]
         )
     assert called is False
+
+
+def test_fold9_export_requires_exact_bf16_runtime_setting(
+    synthetic_completions: tuple[
+        list[Path], dict[str, dict[str, object]], _FakeFreeze
+    ],
+) -> None:
+    completions, _, _ = synthetic_completions
+    member = create_refit_bundle(
+        completions, protocol=ExperimentProtocol.canonical()
+    ).members[0]
+    metadata = _post_sweep_prediction_metadata(member)
+    metadata["inference_bf16"] = False
+    prediction = create_prediction_artifact(
+        ecg_id=np.asarray([1]),
+        patient_id=np.asarray([11]),
+        strat_fold=np.asarray([9]),
+        targets=np.asarray([[1, 0, 0, 0, 0]]),
+        raw_logits=np.zeros((1, 5)),
+        model_name=member.run_name,
+        model_seed=member.seed,
+        protocol=ExperimentProtocol.canonical(),
+        config_hash=member.resolved_config_hash,
+        manifest_hash=member.manifest_sha256,
+        fold_role=FoldRole.CALIBRATION,
+        extra_metadata=metadata,
+    )
+
+    with pytest.raises(ReleaseIntegrityError, match="bf16 differs"):
+        release_gates._validate_export_settings(
+            prediction,
+            member,
+            batch_size=16,
+            num_workers=0,
+            requested_device="cuda:0",
+            requested_bf16=True,
+        )
 
 
 def test_calibration_batch_rejects_non_fold9_prediction(
@@ -539,7 +834,7 @@ def test_calibration_batch_rejects_non_fold9_prediction(
         fit_calibration_bundle(
             bundle_path,
             paths,
-            tmp_path / "decisions",
+            tmp_path / "calibration",
             protocol=protocol,
         )
 
@@ -557,6 +852,7 @@ def test_calibration_reload_recomputes_decision_semantics(
     refit_path, _ = save_refit_bundle(refit, tmp_path / "refit-bundle.json")
     refit = load_refit_bundle(refit_path, protocol=protocol, verify_sources=False)
     prediction_paths: dict[str, Path] = {}
+    predictions: dict[str, PredictionArtifact] = {}
     targets = np.asarray(
         [
             [0, 1, 0, 1, 0],
@@ -583,25 +879,28 @@ def test_calibration_reload_recomputes_decision_semantics(
             config_hash=member.resolved_config_hash,
             manifest_hash=member.manifest_sha256,
             fold_role=FoldRole.CALIBRATION,
-            extra_metadata={
-                "lineage": "frozen_refit",
-                "checkpoint_sha256": member.final_checkpoint_sha256,
-                "normalization_sha256": member.normalization_sha256,
-            },
+            extra_metadata=_post_sweep_prediction_metadata(member),
         )
         prediction_path = tmp_path / "fold9" / f"{member.member_id}.npz"
         prediction_path.parent.mkdir(parents=True, exist_ok=True)
         save_prediction_artifact(prediction, prediction_path, protocol=protocol)
         prediction_paths[member.member_id] = prediction_path
+        predictions[member.member_id] = load_prediction_artifact(
+            prediction_path, protocol=protocol
+        )
+    export_completion = _seal_synthetic_fold9_export(
+        refit_path, refit, prediction_paths, predictions
+    )
     calibration = fit_calibration_bundle(
         refit_path,
         prediction_paths,
-        tmp_path / "decisions",
+        tmp_path / "calibration",
         protocol=protocol,
-        coverage_targets=(1.0, 0.5),
+        coverage_targets=CANONICAL_COVERAGE_TARGETS,
+        fold9_export_completion_path=export_completion,
     )
     calibration_path, _ = save_calibration_bundle(
-        calibration, tmp_path / "calibration-bundle.json"
+        calibration, tmp_path / "calibration_bundle.json"
     )
     load_calibration_bundle(calibration_path, protocol=protocol, verify_sources=True)
 
@@ -627,4 +926,347 @@ def test_calibration_reload_recomputes_decision_semantics(
             calibration_path,
             protocol=protocol,
             verify_sources=True,
+        )
+
+
+def test_noncanonical_coverage_is_rejected_before_plan_creation(tmp_path: Path) -> None:
+    output = tmp_path / "calibration"
+    with pytest.raises(ReleaseGateError, match="preregistered grid"):
+        fit_calibration_bundle(
+            tmp_path / "missing-refits.json",
+            {},
+            output,
+            protocol=ExperimentProtocol.canonical(),
+            coverage_targets=(1.0, 0.8),
+        )
+    assert not output.exists()
+
+
+def test_csv_fold9_reader_does_not_materialize_fold10_targets(tmp_path: Path) -> None:
+    path = tmp_path / "role-safe.csv"
+    path.write_text(
+        "ecg_id,patient_id,strat_fold,label_NORM,label_MI,label_STTC,label_CD,label_HYP\n"
+        "1,11,9,1,0,0,0,0\n"
+        "2,12,10,SEALED,SEALED,SEALED,SEALED,SEALED\n",
+        encoding="utf-8",
+    )
+    selected = release_gates._read_fold9_manifest(path)
+    assert selected["ecg_id"].tolist() == [1]
+    assert selected["label_NORM"].tolist() == [1]
+
+
+@pytest.mark.parametrize("common_subset", [False, True])
+def test_calibration_rejects_misaligned_or_incomplete_cohort_before_fit(
+    tmp_path: Path,
+    synthetic_completions: tuple[
+        list[Path], dict[str, dict[str, object]], _FakeFreeze
+    ],
+    common_subset: bool,
+) -> None:
+    completions, _, _ = synthetic_completions
+    protocol = ExperimentProtocol.canonical()
+    unsigned = create_refit_bundle(completions, protocol=protocol)
+    refit_path, _ = save_refit_bundle(unsigned, tmp_path / "refit-bundle.json")
+    refit = load_refit_bundle(refit_path, protocol=protocol, verify_sources=False)
+    paths, predictions = _saved_fold9_predictions(
+        tmp_path / "fold9",
+        refit,
+        misaligned_member=(refit.members[-1].member_id if not common_subset else None),
+        common_subset=common_subset,
+    )
+    export_completion = _seal_synthetic_fold9_export(
+        refit_path, refit, paths, predictions
+    )
+    output = tmp_path / "calibration"
+    expected = "incomplete" if common_subset else "not aligned"
+    with pytest.raises(ReleaseIntegrityError, match=expected):
+        fit_calibration_bundle(
+            refit_path,
+            paths,
+            output,
+            protocol=protocol,
+            fold9_export_completion_path=export_completion,
+        )
+    assert not list(output.glob("*.decisions.json"))
+
+
+def test_active_stage_lock_rejects_second_exporter(
+    tmp_path: Path,
+    synthetic_completions: tuple[
+        list[Path], dict[str, dict[str, object]], _FakeFreeze
+    ],
+) -> None:
+    completions, _, _ = synthetic_completions
+    protocol = ExperimentProtocol.canonical()
+    refit = create_refit_bundle(completions, protocol=protocol)
+    refit_path, _ = save_refit_bundle(refit, tmp_path / "refit-bundle.json")
+    output = tmp_path / "fold9_predictions"
+    output.mkdir()
+    owner_path = output / release_gates._STAGE_LOCK_OWNER_NAME
+    owner_path.write_text(
+        json.dumps(
+            release_gates._stage_lock_owner_payload(nonce="active-test-lock")
+        ),
+        encoding="utf-8",
+    )
+    called = False
+
+    def forbidden_exporter(*args: object, **kwargs: object) -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("locked stage must not invoke exporter")
+
+    external_lock = FileLock(output / release_gates._STAGE_LOCK_NAME, timeout=0)
+    with external_lock, pytest.raises(release_gates.ReleaseStateError, match="owns"):
+        export_fold9_predictions(
+            refit_path,
+            output,
+            protocol=protocol,
+            final_evaluation_spec_path=tmp_path / "final-evaluation-spec.json",
+            exporter=forbidden_exporter,  # type: ignore[arg-type]
+        )
+    assert called is False
+
+
+def test_stale_stage_lock_is_recovered_for_safe_resume(tmp_path: Path) -> None:
+    lock = tmp_path / release_gates._STAGE_LOCK_NAME
+    owner = tmp_path / release_gates._STAGE_LOCK_OWNER_NAME
+    lock.write_text("partially written old lock", encoding="utf-8")
+    owner.write_text("{", encoding="utf-8")
+    with release_gates._exclusive_stage_lock(tmp_path):
+        assert lock.exists()
+        metadata = json.loads(owner.read_text(encoding="utf-8"))
+        assert metadata["schema_version"] == 2
+        assert metadata["pid"] == os.getpid()
+        assert metadata["process_create_time"] > 0
+    assert not owner.exists()
+
+
+def test_active_stage_lock_with_malformed_owner_fails_closed(tmp_path: Path) -> None:
+    lock = FileLock(tmp_path / release_gates._STAGE_LOCK_NAME, timeout=0)
+    owner = tmp_path / release_gates._STAGE_LOCK_OWNER_NAME
+    owner.write_text("{}", encoding="utf-8")
+    with (
+        lock,
+        pytest.raises(
+            release_gates.ReleaseStateError,
+            match="owner metadata unavailable or invalid",
+        ),
+        release_gates._exclusive_stage_lock(tmp_path),
+    ):
+        raise AssertionError("the competing lock must never be acquired")
+
+
+def test_resume_rejects_decision_with_wrong_coverage_grid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_completions: tuple[
+        list[Path], dict[str, dict[str, object]], _FakeFreeze
+    ],
+) -> None:
+    completions, _, _ = synthetic_completions
+    refit_path, _, paths, export_completion = _valid_calibration_case(
+        tmp_path, completions
+    )
+    protocol = ExperimentProtocol.canonical()
+    calibration = fit_calibration_bundle(
+        refit_path,
+        paths,
+        tmp_path / "calibration",
+        protocol=protocol,
+        fold9_export_completion_path=export_completion,
+    )
+    first = calibration.members[0]
+    real_loader = load_calibration_decisions
+
+    def wrong_grid(path: str | Path, *, protocol: ExperimentProtocol) -> object:
+        loaded = real_loader(path, protocol=protocol)
+        if Path(path).resolve() == first.decision_path.resolve():
+            return replace(loaded, coverage_gates=loaded.coverage_gates[:1])
+        return loaded
+
+    monkeypatch.setattr(release_gates, "load_calibration_decisions", wrong_grid)
+    with pytest.raises(ReleaseIntegrityError, match="differs from fit plan"):
+        fit_calibration_bundle(
+            refit_path,
+            paths,
+            tmp_path / "calibration",
+            protocol=protocol,
+            fold9_export_completion_path=export_completion,
+        )
+
+
+def test_calibration_reload_rechecks_stage_plan_and_refit_root(
+    tmp_path: Path,
+    synthetic_completions: tuple[
+        list[Path], dict[str, dict[str, object]], _FakeFreeze
+    ],
+) -> None:
+    completions, _, _ = synthetic_completions
+    refit_path, _, paths, export_completion = _valid_calibration_case(
+        tmp_path, completions
+    )
+    protocol = ExperimentProtocol.canonical()
+    calibration = fit_calibration_bundle(
+        refit_path,
+        paths,
+        tmp_path / "calibration",
+        protocol=protocol,
+        fold9_export_completion_path=export_completion,
+    )
+    bundle_path, _ = save_calibration_bundle(
+        calibration, tmp_path / "calibration_bundle.json"
+    )
+    assert calibration.stage_provenance is not None
+    plan = Path(
+        str(
+            release_gates._mapping(
+                calibration.stage_provenance["fold9_export_plan"], "plan"
+            )["path"]
+        )
+    )
+    plan.write_text("{}", encoding="utf-8")
+    with pytest.raises(ReleaseIntegrityError, match="stage artifact changed"):
+        load_calibration_bundle(bundle_path, protocol=protocol, verify_sources=True)
+
+
+def test_calibration_reload_rechecks_refit_source_receipts(
+    tmp_path: Path,
+    synthetic_completions: tuple[
+        list[Path], dict[str, dict[str, object]], _FakeFreeze
+    ],
+) -> None:
+    completions, _, _ = synthetic_completions
+    refit_path, refit, paths, export_completion = _valid_calibration_case(
+        tmp_path, completions
+    )
+    protocol = ExperimentProtocol.canonical()
+    calibration = fit_calibration_bundle(
+        refit_path,
+        paths,
+        tmp_path / "calibration",
+        protocol=protocol,
+        fold9_export_completion_path=export_completion,
+    )
+    bundle_path, _ = save_calibration_bundle(
+        calibration, tmp_path / "calibration_bundle.json"
+    )
+    refit.members[0].source_member_completion_path.write_text(
+        "tampered", encoding="utf-8"
+    )
+    with pytest.raises(ReleaseIntegrityError, match="source member completion"):
+        load_calibration_bundle(bundle_path, protocol=protocol, verify_sources=True)
+
+
+def test_calibration_reload_rechecks_final_evaluation_specification(
+    tmp_path: Path,
+    synthetic_completions: tuple[
+        list[Path], dict[str, dict[str, object]], _FakeFreeze
+    ],
+) -> None:
+    completions, _, _ = synthetic_completions
+    refit_path, _, paths, export_completion = _valid_calibration_case(
+        tmp_path, completions
+    )
+    protocol = ExperimentProtocol.canonical()
+    calibration = fit_calibration_bundle(
+        refit_path,
+        paths,
+        tmp_path / "calibration",
+        protocol=protocol,
+        fold9_export_completion_path=export_completion,
+    )
+    bundle_path, _ = save_calibration_bundle(
+        calibration, tmp_path / "calibration_bundle.json"
+    )
+    assert calibration.stage_provenance is not None
+    binding = release_gates._mapping(
+        calibration.stage_provenance["final_evaluation_spec"],
+        "final evaluation specification",
+    )
+    spec_path = Path(str(binding["path"]))
+    spec_path.write_text(
+        spec_path.read_text(encoding="utf-8") + " ", encoding="utf-8"
+    )
+
+    with pytest.raises(ReleaseIntegrityError, match="specification differs"):
+        load_calibration_bundle(bundle_path, protocol=protocol, verify_sources=True)
+
+
+def test_completed_calibration_resume_is_deterministic_and_does_not_refit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_completions: tuple[
+        list[Path], dict[str, dict[str, object]], _FakeFreeze
+    ],
+) -> None:
+    completions, _, _ = synthetic_completions
+    refit_path, _, paths, export_completion = _valid_calibration_case(
+        tmp_path, completions
+    )
+    protocol = ExperimentProtocol.canonical()
+    first = fit_calibration_bundle(
+        refit_path,
+        paths,
+        tmp_path / "calibration",
+        protocol=protocol,
+        fold9_export_completion_path=export_completion,
+    )
+
+    def forbidden_refit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a completed calibration stage must not refit")
+
+    monkeypatch.setattr(
+        release_gates, "fit_calibration_decisions", forbidden_refit
+    )
+    resumed = fit_calibration_bundle(
+        refit_path,
+        paths,
+        tmp_path / "calibration",
+        protocol=protocol,
+        fold9_export_completion_path=export_completion,
+    )
+    assert resumed.created_at_utc == first.created_at_utc
+    assert resumed.to_payload(include_integrity=False) == first.to_payload(
+        include_integrity=False
+    )
+    assert canonical_sha256(resumed.to_payload(include_integrity=False)) == (
+        canonical_sha256(first.to_payload(include_integrity=False))
+    )
+
+
+def test_completed_calibration_missing_decision_is_terminal_before_refit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_completions: tuple[
+        list[Path], dict[str, dict[str, object]], _FakeFreeze
+    ],
+) -> None:
+    completions, _, _ = synthetic_completions
+    refit_path, _, paths, export_completion = _valid_calibration_case(
+        tmp_path, completions
+    )
+    protocol = ExperimentProtocol.canonical()
+    calibration = fit_calibration_bundle(
+        refit_path,
+        paths,
+        tmp_path / "calibration",
+        protocol=protocol,
+        fold9_export_completion_path=export_completion,
+    )
+    calibration.members[0].decision_path.unlink()
+
+    def forbidden_refit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("terminal corruption must never trigger a refit")
+
+    monkeypatch.setattr(
+        release_gates, "fit_calibration_decisions", forbidden_refit
+    )
+    with pytest.raises(ReleaseStateError, match="missing a decision"):
+        fit_calibration_bundle(
+            refit_path,
+            paths,
+            tmp_path / "calibration",
+            protocol=protocol,
+            fold9_export_completion_path=export_completion,
         )

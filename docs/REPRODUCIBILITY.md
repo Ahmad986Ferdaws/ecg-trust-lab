@@ -3,8 +3,14 @@
 This document is the executable record for the current PTB-XL five-superclass
 pipeline. Run commands from the repository root in PowerShell. The matched
 12-by-2 sweep is complete; the fixed multi-seed confirmation and downstream
-release machinery are implemented, while their scientific results remain
-pending until each gated command actually completes.
+confirmation, architecture freeze, and six folds-1–8 refits are complete. The
+fold-9 calibration and formal fold-10 model-evaluation stages remain pending
+until each gated command actually completes.
+
+The authoritative deviation record is `reports/PROTOCOL_DEVIATIONS.md`.
+DEV-001 documents a bounded accidental display of raw rows that included some
+fold-10 SCP codes before model evaluation. No fold-10 prediction or metric was
+opened, but the final evaluation must not be described as fully operator-blind.
 
 The scientific task is multi-label prediction of `[NORM, MI, STTC, CD, HYP]`
 from a ten-second, 100 Hz, 12-lead ECG. It is diagnostic-superclass
@@ -412,13 +418,11 @@ wrapper and hash, checkpoint schema/config/protocol/manifest lineage,
 normalization file hash and folds-1-7 provenance, exact model metadata/state,
 patient-fold isolation, and requested fold role before constructing a dataset.
 
-At downstream commit B, this low-level exporter still supports the legacy
-single-run refit schema only. It is intentionally kept byte-identical to sweep
-commit A while the four confirmation runs and six refits execute. Do not use
-the legacy fold-9/fold-10 examples below for the post-sweep release. After all
-six refit receipts exist, a separately recorded commit C must add and test
-schema-v2 completion support; only then may `release_pipeline.py` cross the
-six-refit bundle gate into fold 9.
+This low-level exporter remains useful for fold-8 development checks. It is
+not an authorized release entry point for fold 9 or fold 10. The post-sweep
+release must use `scripts/release_pipeline.py`, which requires the exact sealed
+six-refit bundle, a fully verified final-evaluation specification, canonical
+paths, CUDA `cuda:0`, BF16, and immutable stage plans/completions.
 
 A selected development checkpoint may export fold 8 only:
 
@@ -428,18 +432,6 @@ uv run python scripts/predict.py `
   --resolved-config runs\development\resnet1d_matched_seed2026\resolved_config.json `
   --role model_selection `
   --output artifacts\predictions\resnet1d_seed2026_fold8.npz `
-  --device cuda `
-  --bf16
-```
-
-The authoritative frozen-refit checkpoint may export fold 9:
-
-```powershell
-uv run python scripts/predict.py `
-  --checkpoint runs\refit\resnet1d_refit_folds1-8_seed2026\final.ckpt `
-  --resolved-config runs\refit\resnet1d_refit_folds1-8_seed2026\resolved_refit_config.json `
-  --role calibration `
-  --output artifacts\predictions\resnet1d_seed2026_fold9.npz `
   --device cuda `
   --bf16
 ```
@@ -467,93 +459,104 @@ records array shapes/dtypes, source metadata, row-alignment hash, NPZ size and
 SHA-256, and a canonical artifact SHA-256. Existing pairs are never
 overwritten. A second export to the same stem fails.
 
-Fold 10 remains explicit and purpose-bound:
+Fold 9 and fold 10 are batch-level transitions, never one-checkpoint commands.
+The release pipeline derives all six member names and destinations from the
+sealed bundle and final specification. It records exact raw-file and artifact
+hashes and refuses partial, relocated, or post-completion regeneration.
+
+## 10. Sealed calibration and one-time final evaluation
+
+The release root below is
+`runs/release/ptbxl_matched_equal_budget_v1`. All output paths after the
+final-specification freeze are derived by code; the CLI intentionally exposes
+no batch-size, worker, device, precision, coverage, bootstrap, subgroup, or
+ledger-path overrides.
+
+### 10.1 Freeze subgroup metadata before fold 9
+
+Create the versioned subgroup artifact from the sealed refit bundle before the
+final-evaluation specification:
 
 ```powershell
-uv run python scripts/predict.py `
-  --checkpoint runs\refit\resnet1d_refit_folds1-8_seed2026\final.ckpt `
-  --resolved-config runs\refit\resnet1d_refit_folds1-8_seed2026\resolved_refit_config.json `
-  --role final_test `
-  --output artifacts\predictions\resnet1d_seed2026_fold10.npz `
-  --device cuda `
-  --bf16 `
-  --final-test-purpose "Confirmatory fold-10 predictions for frozen ResNet seed 2026" `
-  --final-test-confirmation "I understand fold 10 is the one-time final test set."
+uv run python scripts/build_subgroups.py `
+  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
+  --output runs\release\ptbxl_matched_equal_budget_v1\fold10_subgroups.json
 ```
 
-Use a stable naming convention:
+The builder reads only `ecg_id`, `patient_id`, `strat_fold`, `age`, and `sex`;
+it does not request diagnostic target columns. It freezes the preregistered
+sex groups (`male`, `female`, and `unknown`) using the official PTB-XL coding
+of male `0` and female `1`, plus age bands `<40`, `40-59`, `60-79`, `80+`, and
+`unknown`. PTB-XL's age sentinel `300` means older than 89 years and is mapped
+to the preregistered `80+` band; other out-of-range ages are rejected. The
+self-hashed artifact binds the protocol, exact source-manifest
+hash, sorted fold-10 ECG and patient identities, definitions, and record and
+patient counts. The final-batch command re-verifies the artifact and its source
+before it creates the one-time opening marker or ledger.
 
-```text
-artifacts/predictions/<model>_seed<seed>_fold9.npz
-artifacts/predictions/<model>_seed<seed>_fold9.json
-artifacts/predictions/<model>_seed<seed>_fold10.npz
-artifacts/predictions/<model>_seed<seed>_fold10.json
-```
+### 10.2 Commit the code and freeze the final-evaluation specification
 
-## 10. Calibration and locked final report
-
-The following commands consume the immutable prediction artifacts produced
-above.
-
-### 10.1 Fit fold-9 decisions
+Run all tests, Ruff, and strict mypy, then commit the clean code baseline. The
+freeze refuses a dirty Git worktree and binds the exact revision, `uv.lock`,
+installed distributions, Python/PyTorch/CUDA/cuDNN/driver versions, indexed GPU
+identity, determinism policy, refit bundle, subgroup artifact, report contract,
+and required protocol-deviation disclosure:
 
 ```powershell
-uv run python -m ecg_trust.calibration_cli fit `
-  --predictions artifacts\predictions\resnet1d_seed2026_fold9.npz `
-  --protocol configs\protocol.yaml `
-  --output artifacts\decisions\resnet1d_seed2026_fold9_decisions.json
+uv run python scripts/freeze_final_evaluation.py `
+  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
+  --subgroups runs\release\ptbxl_matched_equal_budget_v1\fold10_subgroups.json `
+  --protocol-deviations reports\PROTOCOL_DEVIATIONS.md `
+  --device cuda:0 `
+  --output runs\release\ptbxl_matched_equal_budget_v1\final_evaluation_spec.json
 ```
 
-Omitting `--coverage` uses the frozen default targets
-`[1.0, 0.9, 0.8, 0.7, 0.5]`. If different targets are desired, declare them
-before opening fold 10 and repeat `--coverage` for each value.
+### 10.3 Export the exact six fold-9 predictions
 
-The non-overwriting decision JSON binds the fold-9 prediction hash and row
-alignment, model/seed, protocol/config/manifest hashes, global temperature,
-per-label F1 thresholds, normalized binary-entropy cutoffs, software versions,
-and its own artifact hash.
-
-### 10.2 Prepare subgroup metadata
-
-The final-report command requires a JSON object with exactly this shape:
-
-```json
-{
-  "ecg_id": [10001, 10002],
-  "attributes": {
-    "sex": [0, 1],
-    "age_band": ["60-79", "80+"]
-  }
-}
+```powershell
+uv run python scripts/release_pipeline.py export-fold9 `
+  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
+  --evaluation-spec runs\release\ptbxl_matched_equal_budget_v1\final_evaluation_spec.json
 ```
 
-`ecg_id` must exactly match the sorted fold-10 prediction order, and every
-attribute must have one value per ECG. Choose subgroup definitions before
-opening fold 10. The current repository does not include a subgroup-JSON
-builder CLI.
+The command inherits each member's frozen loader settings, executes on
+`cuda:0` with BF16, verifies the canonical fold-9 cohort, and seals one plan
+and completion around the six immutable NPZ/JSON pairs.
 
-### 10.3 Open fold 10 once
+### 10.4 Fit and seal the six fold-9 policies
+
+```powershell
+uv run python scripts/release_pipeline.py fit-calibration `
+  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
+  --evaluation-spec runs\release\ptbxl_matched_equal_budget_v1\final_evaluation_spec.json
+```
+
+This fits one independent temperature, threshold vector, and frozen entropy
+coverage grid per architecture/seed member. It seals the canonical
+`calibration/` stage and `calibration_bundle.json`; a completed stage is
+terminal and missing or changed sources cause failure rather than refitting.
+
+### 10.5 Open fold 10 once
 
 Only after all model, seed, calibration, threshold, gate, subgroup, bootstrap,
 and reporting choices are frozen:
 
 ```powershell
-uv run python -m ecg_trust.calibration_cli final-report `
-  --decisions artifacts\decisions\resnet1d_seed2026_fold9_decisions.json `
-  --predictions artifacts\predictions\resnet1d_seed2026_fold10.npz `
-  --subgroups artifacts\subgroups\ptbxl_fold10_subgroups.json `
-  --protocol configs\protocol.yaml `
-  --output artifacts\final\resnet1d_seed2026_fold10_report.json `
-  --final-test-purpose "Confirmatory report for frozen ResNet seed 2026" `
-  --final-test-confirmation "I understand fold 10 is the one-time final test set." `
-  --bootstrap-resamples 1000 `
-  --bootstrap-seed 20260808 `
-  --minimum-group-samples 30 `
-  --minimum-group-patients 20
+uv run python scripts/release_pipeline.py run-final `
+  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
+  --calibration-bundle runs\release\ptbxl_matched_equal_budget_v1\calibration_bundle.json `
+  --evaluation-spec runs\release\ptbxl_matched_equal_budget_v1\final_evaluation_spec.json `
+  --purpose "Preregistered one-time PTB-XL fold-10 final evaluation" `
+  --operator "<operator-name>" `
+  --confirmation "I understand fold 10 is the one-time final test set."
 ```
 
-Run one formal command per preregistered model/seed. The report applies fold-9
-choices without fitting anything. It contains:
+Run this command exactly once for the entire six-member batch. It commits the
+global spec-keyed opening ledger before issuing a fold-10 token, then creates
+all predictions, member reports, architecture summaries, and paired
+patient-bootstrap comparisons. If the process is interrupted, rerun the exact
+same command with `--resume`; completed resume is read-only. The reports apply
+fold-9 choices without fitting anything and contain:
 
 - per-label and macro AUROC, average precision, Brier score, and 15-bin ECE;
 - fixed-gate realized coverage, Hamming risk, exact-match accuracy, and
@@ -561,13 +564,15 @@ choices without fitting anything. It contains:
 - subgroup metrics and subgroup coverage under the shared global gates;
 - patient-cluster percentile-bootstrap intervals, including valid/invalid
   replicate counts;
-- source hashes and a non-overwriting report SHA-256.
+- source hashes, frozen-spec and deviation-log bindings, and non-overwriting
+  report hashes;
+- cross-seed architecture summaries and paired within-seed model-difference
+  intervals using patient-cluster resampling.
 
-The current final report does not emit final-set log loss, robustness results,
-explanation-faithfulness results, cross-seed aggregation, or paired model
-difference intervals. Those must not appear as if produced by this command.
-The library does provide `paired_model_difference_intervals()` and prediction
-alignment checks, but no paired-comparison CLI is currently checked in.
+Robustness perturbations and explanation-faithfulness analysis are separate
+post-evaluation artifacts. They may inspect only the already frozen final
+batch and may not change model selection, calibration, thresholds, gates, or
+headline evaluation settings.
 
 ## 11. Artifact layout and provenance ledger
 

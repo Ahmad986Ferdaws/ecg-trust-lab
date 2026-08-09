@@ -46,7 +46,12 @@ from ecg_trust.protocol import (
     FinalTestAccessToken,
     FoldRole,
 )
-from ecg_trust.refit_config import FrozenRefitConfig, RefitConfigError
+from ecg_trust.refit_config import (
+    REFIT_FOLDS,
+    FrozenRefitConfig,
+    PostSweepRefitConfig,
+    RefitConfigError,
+)
 from ecg_trust.training import (
     CheckpointValidationError,
     EarlyStopping,
@@ -90,6 +95,7 @@ class PredictionExportRequest:
     output_path: Path
     fold_role: FoldRole
     run_metadata_path: Path | None = None
+    refit_completion_path: Path | None = None
     manifest_path: Path | None = None
     dataset_root: Path | None = None
     normalization_path: Path | None = None
@@ -168,7 +174,7 @@ class _ResolvedRun:
     lineage: ExportLineage
     config: dict[str, object]
     config_hash: str
-    typed_config: DevelopmentExperimentConfig | FrozenRefitConfig
+    typed_config: DevelopmentExperimentConfig | FrozenRefitConfig | PostSweepRefitConfig
     model_config: ModelConfig
     model_metadata: Mapping[str, object]
     run_name: str
@@ -180,6 +186,8 @@ class _ResolvedRun:
     num_workers: int
     learning_rate: float
     weight_decay: float
+    optimizer_betas: tuple[float, float]
+    optimizer_eps: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +198,7 @@ class _ValidatedInputs:
     manifest_hash: str
     normalization_hash: str
     expected_checkpoint_epoch: int
+    refit_completion_sha256: str | None = None
 
 
 class _IndexedDataset(Dataset[tuple[Tensor, Tensor, Tensor]]):
@@ -370,6 +379,49 @@ def _refit_base(raw: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _post_sweep_refit_base(raw: Mapping[str, object]) -> dict[str, object]:
+    recipe_fields = {
+        "schema_version",
+        "run_kind",
+        "freeze_artifact",
+        "freeze_artifact_sha256",
+        "recipe_sha256",
+        "comparison_id",
+        "architecture",
+        "confirmation_seed",
+        "run_name",
+        "initialization",
+        "folds",
+        "data",
+        "source",
+        "selection",
+        "model",
+        "model_identity",
+        "loader",
+        "optimization",
+        "optimizer",
+        "runtime",
+        "output",
+        "downstream_provenance",
+    }
+    resolution_fields = {
+        "selection_provenance",
+        "freeze_binding",
+        "attempt_index",
+        "effective_data",
+        "checkpoint_roles",
+    }
+    _keys(
+        raw,
+        required=recipe_fields | resolution_fields,
+        context="resolved post-sweep refit config",
+    )
+    return {
+        key: (_model_selection_mapping(raw) if key == "model" else raw[key])
+        for key in recipe_fields
+    }
+
+
 def _load_resolved_run(path: Path) -> _ResolvedRun:
     wrapper = _read_json(path, "resolved config wrapper")
     _keys(wrapper, required={"config_hash", "config"}, context="resolved config wrapper")
@@ -380,17 +432,37 @@ def _load_resolved_run(path: Path) -> _ResolvedRun:
         raise PredictionExportError("resolved config wrapper hash does not match its content")
 
     try:
-        if config.get("run_kind") == "frozen_refit":
-            typed: DevelopmentExperimentConfig | FrozenRefitConfig = (
+        if config.get("run_kind") == "post_sweep_frozen_refit":
+            post_sweep_typed = PostSweepRefitConfig.from_mapping(
+                _post_sweep_refit_base(config), base_dir=path.parent
+            )
+            typed: (
+                DevelopmentExperimentConfig | FrozenRefitConfig | PostSweepRefitConfig
+            ) = post_sweep_typed
+            # Downstream prediction artifacts intentionally retain the public
+            # frozen_refit lineage category; run_kind carries the v2 subtype.
+            lineage: ExportLineage = "frozen_refit"
+            model_config = post_sweep_typed.model
+            manifest_path = post_sweep_typed.data.manifest_path
+            dataset_root = post_sweep_typed.data.dataset_root
+            normalization_path = post_sweep_typed.data.normalization_path
+            learning_rate = post_sweep_typed.optimization.learning_rate
+            weight_decay = post_sweep_typed.optimization.weight_decay
+            optimizer_betas = post_sweep_typed.optimizer.betas
+            optimizer_eps = post_sweep_typed.optimizer.eps
+        elif config.get("run_kind") == "frozen_refit":
+            typed = (
                 FrozenRefitConfig.from_mapping(_refit_base(config), base_dir=path.parent)
             )
-            lineage: ExportLineage = "frozen_refit"
+            lineage = "frozen_refit"
             model_config = typed.model
             manifest_path = typed.data.manifest_path
             dataset_root = typed.data.dataset_root
             normalization_path = typed.data.normalization_path
             learning_rate = typed.optimization.learning_rate
             weight_decay = typed.optimization.weight_decay
+            optimizer_betas = (0.9, 0.999)
+            optimizer_eps = 1e-8
         elif "run_kind" not in config:
             typed = DevelopmentExperimentConfig.from_mapping(
                 _development_base(config), base_dir=path.parent
@@ -402,6 +474,8 @@ def _load_resolved_run(path: Path) -> _ResolvedRun:
             normalization_path = typed.data.normalization_path
             learning_rate = typed.optimization.learning_rate
             weight_decay = typed.optimization.weight_decay
+            optimizer_betas = (0.9, 0.999)
+            optimizer_eps = 1e-8
         else:
             raise PredictionExportError("resolved config has an unsupported run_kind")
     except (ExperimentConfigError, RefitConfigError) as error:
@@ -424,6 +498,8 @@ def _load_resolved_run(path: Path) -> _ResolvedRun:
         num_workers=typed.loader.num_workers,
         learning_rate=learning_rate,
         weight_decay=weight_decay,
+        optimizer_betas=optimizer_betas,
+        optimizer_eps=optimizer_eps,
     )
 
 
@@ -442,15 +518,11 @@ def _validate_model_metadata(model: nn.Module, run: _ResolvedRun) -> None:
         "trainable_parameters",
         "resolved_architecture_config",
     }
-    optional = (
-        {"capacity_match"}
-        if run.lineage == "development" and run.model_config.preset == "matched_capacity"
-        else set()
-    )
+    if run.model_config.preset == "matched_capacity":
+        required.add("capacity_match")
     _keys(
         run.model_metadata,
         required=required,
-        optional=optional,
         context="resolved model metadata",
     )
     expected_class = f"{type(model).__module__}.{type(model).__qualname__}"
@@ -474,18 +546,65 @@ def _validate_model_metadata(model: nn.Module, run: _ResolvedRun) -> None:
         raise PredictionExportError(
             "resolved architecture config does not match the instantiated model"
         )
-    if optional and _json_normalize(run.model_metadata["capacity_match"]) != _json_normalize(
-        MATCHED_CAPACITY_PRESET.metadata()
-    ):
+    if run.model_config.preset == "matched_capacity" and _json_normalize(
+        run.model_metadata["capacity_match"]
+    ) != _json_normalize(MATCHED_CAPACITY_PRESET.metadata()):
         raise PredictionExportError("matched-capacity metadata does not match the preset")
+    if isinstance(run.typed_config, PostSweepRefitConfig) and _json_normalize(
+        run.model_metadata
+    ) != _json_normalize(run.typed_config.model_identity):
+        raise PredictionExportError(
+            "resolved model metadata does not match the frozen model identity"
+        )
 
 
-def _read_manifest(path: Path) -> pd.DataFrame:
+_MANIFEST_IDENTITY_COLUMNS = (
+    "ecg_id",
+    "patient_id",
+    "strat_fold",
+    "record_path",
+)
+
+
+def _validate_single_line_csv_records(path: Path) -> None:
+    """Fail closed when row-number filtering cannot safely isolate CSV targets."""
+
+    try:
+        with path.open("rb") as handle:
+            in_quotes = False
+            while raw_line := handle.readline():
+                index = 0
+                while index < len(raw_line):
+                    if raw_line[index] == 0x22:
+                        if (
+                            in_quotes
+                            and index + 1 < len(raw_line)
+                            and raw_line[index + 1] == 0x22
+                        ):
+                            index += 2
+                            continue
+                        in_quotes = not in_quotes
+                    index += 1
+                if in_quotes:
+                    raise PredictionExportError(
+                        "CSV manifests with multiline quoted records are not supported "
+                        "for protected-fold export"
+                    )
+    except OSError as error:
+        raise PredictionExportError(f"could not inspect manifest {path}: {error}") from error
+
+
+def _read_manifest_identities(path: Path) -> pd.DataFrame:
     try:
         if path.suffix.casefold() == ".parquet":
-            frame = pd.read_parquet(path)
+            frame = pd.read_parquet(path, columns=list(_MANIFEST_IDENTITY_COLUMNS))
         elif path.suffix.casefold() == ".csv":
-            frame = pd.read_csv(path)
+            _validate_single_line_csv_records(path)
+            frame = pd.read_csv(
+                path,
+                usecols=list(_MANIFEST_IDENTITY_COLUMNS),
+                skip_blank_lines=False,
+            )
         else:
             raise PredictionExportError("manifest must be a .parquet or .csv file")
     except (OSError, ValueError) as error:
@@ -495,25 +614,100 @@ def _read_manifest(path: Path) -> pd.DataFrame:
     return cast(pd.DataFrame, frame)
 
 
-def _validated_manifest(
-    frame: pd.DataFrame,
-    *,
-    expected_folds: tuple[int, ...],
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    required = {"ecg_id", "patient_id", "strat_fold", "record_path", *TARGET_COLUMNS}
+def _validated_manifest_identities(frame: pd.DataFrame) -> pd.DataFrame:
+    required = set(_MANIFEST_IDENTITY_COLUMNS)
     missing = sorted(required.difference(frame.columns))
     if missing:
         raise PredictionExportError(f"manifest is missing required columns: {missing}")
-    if frame["ecg_id"].isna().any() or frame["patient_id"].isna().any():
-        raise PredictionExportError("manifest ECG and patient identifiers must not be missing")
+    if frame.loc[:, list(_MANIFEST_IDENTITY_COLUMNS)].isna().any().any():
+        raise PredictionExportError("manifest identity fields must not be missing")
     if frame["ecg_id"].duplicated().any():
         raise PredictionExportError("manifest ecg_id values must be unique")
     try:
         folds = pd.to_numeric(frame["strat_fold"], errors="raise").to_numpy(
             dtype=np.float64
         )
+    except (TypeError, ValueError) as error:
+        raise PredictionExportError("manifest folds must be numeric") from error
+    if not np.isfinite(folds).all() or not np.equal(folds, np.floor(folds)).all():
+        raise PredictionExportError("manifest folds must be finite integers")
+    if not np.isin(folds, np.arange(1, 11)).all():
+        raise PredictionExportError("manifest folds must lie in the canonical range 1-10")
+    result = frame.copy()
+    result["strat_fold"] = folds.astype(np.int8)
+    counts = result.groupby("patient_id", dropna=False)["strat_fold"].nunique()
+    leaked = counts[counts != 1]
+    if not leaked.empty:
+        preview = ", ".join(str(value) for value in leaked.index[:10])
+        raise PredictionExportError(
+            f"patients occur in multiple folds; first offending IDs: {preview}"
+        )
+    return result
+
+
+def _read_target_manifest(
+    path: Path,
+    *,
+    identities: pd.DataFrame,
+    target_folds: tuple[int, ...],
+) -> pd.DataFrame:
+    columns = [*_MANIFEST_IDENTITY_COLUMNS, *TARGET_COLUMNS]
+    try:
+        if path.suffix.casefold() == ".parquet":
+            frame = pd.read_parquet(
+                path,
+                columns=columns,
+                filters=[("strat_fold", "in", list(target_folds))],
+            )
+        elif path.suffix.casefold() == ".csv":
+            allowed_lines = {
+                int(position) + 1
+                for position in np.flatnonzero(
+                    identities["strat_fold"].isin(target_folds).to_numpy()
+                )
+            }
+
+            def skip_protected_row(line_number: int) -> bool:
+                return line_number != 0 and line_number not in allowed_lines
+
+            frame = pd.read_csv(
+                path,
+                usecols=columns,
+                skiprows=skip_protected_row,
+                skip_blank_lines=False,
+            )
+        else:  # pragma: no cover - guarded by identity loading
+            raise PredictionExportError("manifest must be a .parquet or .csv file")
+    except (OSError, ValueError) as error:
+        raise PredictionExportError(
+            f"could not load authorized target rows from {path}: {error}"
+        ) from error
+    if frame.empty:
+        raise PredictionExportError("manifest has no authorized target rows")
+    return cast(pd.DataFrame, frame)
+
+
+def _validated_manifest(
+    identities: pd.DataFrame,
+    target_frame: pd.DataFrame,
+    *,
+    target_folds: tuple[int, ...],
+    expected_folds: tuple[int, ...],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    required = {"ecg_id", "patient_id", "strat_fold", "record_path", *TARGET_COLUMNS}
+    missing = sorted(required.difference(target_frame.columns))
+    if missing:
+        raise PredictionExportError(f"manifest is missing required columns: {missing}")
+    if target_frame.loc[:, list(_MANIFEST_IDENTITY_COLUMNS)].isna().any().any():
+        raise PredictionExportError("authorized manifest identity fields must not be missing")
+    if target_frame["ecg_id"].duplicated().any():
+        raise PredictionExportError("authorized manifest ecg_id values must be unique")
+    try:
+        folds = pd.to_numeric(target_frame["strat_fold"], errors="raise").to_numpy(
+            dtype=np.float64
+        )
         targets = (
-            frame.loc[:, list(TARGET_COLUMNS)]
+            target_frame.loc[:, list(TARGET_COLUMNS)]
             .apply(pd.to_numeric, errors="raise")
             .to_numpy(dtype=np.float64)
         )
@@ -525,14 +719,27 @@ def _validated_manifest(
         raise PredictionExportError("manifest folds must lie in the canonical range 1-10")
     if not np.isfinite(targets).all() or not np.isin(targets, (0.0, 1.0)).all():
         raise PredictionExportError("manifest targets must be finite binary values")
-    fold_frame = frame.copy()
+    fold_frame = target_frame.copy()
     fold_frame["strat_fold"] = folds.astype(np.int8)
-    counts = fold_frame.groupby("patient_id", dropna=False)["strat_fold"].nunique()
-    leaked = counts[counts != 1]
-    if not leaked.empty:
-        preview = ", ".join(str(value) for value in leaked.index[:10])
+
+    observed_target_folds = tuple(
+        sorted(int(value) for value in fold_frame["strat_fold"].unique())
+    )
+    if observed_target_folds != target_folds:
         raise PredictionExportError(
-            f"patients occur in multiple folds; first offending IDs: {preview}"
+            "authorized target rows do not cover exactly the required folds; "
+            f"expected={target_folds}, observed={observed_target_folds}"
+        )
+    expected_identities = identities.loc[
+        identities["strat_fold"].isin(target_folds),
+        list(_MANIFEST_IDENTITY_COLUMNS),
+    ].reset_index(drop=True)
+    observed_identities = fold_frame.loc[
+        :, list(_MANIFEST_IDENTITY_COLUMNS)
+    ].reset_index(drop=True)
+    if not expected_identities.equals(observed_identities):
+        raise PredictionExportError(
+            "authorized target rows do not align with the target-free manifest identities"
         )
     selected = fold_frame.loc[
         fold_frame["strat_fold"].isin(expected_folds)
@@ -590,6 +797,160 @@ def _metadata_path(request: PredictionExportRequest, run: _ResolvedRun) -> Path:
     return request.resolved_config_path.parent / filename
 
 
+def _prefixed_sha256(value: str) -> str:
+    return "sha256:" + value.removeprefix("sha256:")
+
+
+def _completion_entry(
+    completion: Mapping[str, object], name: str
+) -> tuple[Path, str, str | None]:
+    files = _mapping(completion.get("files"), "refit completion files")
+    entry = _mapping(files.get(name), f"refit completion {name}")
+    path = Path(_string(entry.get("path"), f"refit completion {name} path")).resolve()
+    digest = _string(entry.get("sha256"), f"refit completion {name} sha256")
+    config_hash = (
+        _string(entry.get("config_hash"), "refit completion resolved config hash")
+        if name == "resolved_config"
+        else None
+    )
+    return path, digest, config_hash
+
+
+def _validate_post_sweep_completion(
+    request: PredictionExportRequest,
+    *,
+    run: _ResolvedRun,
+    protocol: ExperimentProtocol,
+    manifest_path: Path,
+    manifest_hash: str,
+    normalization_path: Path,
+    normalization_hash: str,
+) -> Mapping[str, object]:
+    # Imported only on the post-sweep path: refit_runner's transitive training
+    # modules import this exporter, so a module-scope import would form a cycle.
+    from ecg_trust.refit_runner import load_refit_completion
+
+    if not isinstance(run.typed_config, PostSweepRefitConfig):
+        raise PredictionExportError("internal post-sweep lineage type mismatch")
+    refit = run.typed_config
+    completion_path = (
+        request.refit_completion_path
+        if request.refit_completion_path is not None
+        else request.resolved_config_path.parent / "refit_completion.json"
+    ).resolve()
+    try:
+        completion = load_refit_completion(
+            completion_path,
+            protocol=protocol,
+            verify_sources=True,
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        raise PredictionExportError(
+            f"post-sweep refit completion verification failed: {error}"
+        ) from error
+
+    semantic_expectations: dict[str, object] = {
+        "comparison_id": refit.comparison_id,
+        "architecture": refit.architecture,
+        "seed": refit.confirmation_seed,
+        "status": "complete",
+        "run_name": refit.run_name,
+        "freeze_artifact_path": str(refit.freeze_artifact_path),
+        "freeze_artifact_sha256": refit.freeze_artifact_sha256,
+        "recipe_sha256": refit.recipe_sha256,
+        "refit_folds": list(REFIT_FOLDS),
+        "normalization_folds": list(TRAIN_FOLDS),
+        "frozen_epochs": refit.selection.frozen_epochs,
+        "protocol_hash": protocol.protocol_hash,
+        "manifest_hash": _prefixed_sha256(manifest_hash),
+        "normalization_hash": _prefixed_sha256(normalization_hash),
+        "downstream_provenance": refit.downstream_provenance.to_dict(),
+        "selection_provenance": run.config.get("selection_provenance"),
+    }
+    drift = [
+        field
+        for field, expected in semantic_expectations.items()
+        if completion.get(field) != expected
+    ]
+    if drift:
+        raise PredictionExportError(
+            "post-sweep refit completion differs from resolved lineage: "
+            + ", ".join(drift)
+        )
+
+    expected_run_dir = request.resolved_config_path.parent.resolve()
+    completion_run_dir = Path(
+        _string(completion.get("run_dir"), "refit completion run_dir")
+    ).resolve()
+    if completion_run_dir != expected_run_dir:
+        raise PredictionExportError(
+            "post-sweep refit completion run directory differs from resolved config"
+        )
+
+    expected_paths = {
+        "final_checkpoint": request.checkpoint_path.resolve(),
+        "resolved_config": request.resolved_config_path.resolve(),
+        "metadata": _metadata_path(request, run).resolve(),
+        "manifest": manifest_path.resolve(),
+        "normalization": normalization_path.resolve(),
+    }
+    for name, expected_path in expected_paths.items():
+        observed_path, _, _ = _completion_entry(completion, name)
+        if observed_path != expected_path:
+            raise PredictionExportError(
+                f"post-sweep refit completion {name} path differs from export input"
+            )
+
+    _, checkpoint_digest, _ = _completion_entry(completion, "final_checkpoint")
+    _, resolved_digest, resolved_config_hash = _completion_entry(
+        completion, "resolved_config"
+    )
+    _, manifest_digest, _ = _completion_entry(completion, "manifest")
+    _, normalization_digest, _ = _completion_entry(completion, "normalization")
+    file_expectations = {
+        "final checkpoint": (
+            checkpoint_digest,
+            _prefixed_sha256(sha256_file(request.checkpoint_path)),
+        ),
+        "resolved config": (
+            resolved_digest,
+            _prefixed_sha256(sha256_file(request.resolved_config_path)),
+        ),
+        "manifest": (manifest_digest, _prefixed_sha256(manifest_hash)),
+        "normalization": (
+            normalization_digest,
+            _prefixed_sha256(normalization_hash),
+        ),
+    }
+    mismatched_files = [
+        name for name, (observed, expected) in file_expectations.items() if observed != expected
+    ]
+    if mismatched_files:
+        raise PredictionExportError(
+            "post-sweep refit completion file hash mismatch: "
+            + ", ".join(mismatched_files)
+        )
+    if resolved_config_hash != run.config_hash:
+        raise PredictionExportError(
+            "post-sweep refit completion resolved config hash differs from wrapper"
+        )
+
+    freeze_binding = _mapping(
+        run.config.get("freeze_binding"), "resolved post-sweep freeze binding"
+    )
+    expected_binding = {
+        "path": str(refit.freeze_artifact_path),
+        "artifact_sha256": refit.freeze_artifact_sha256,
+        "comparison_id": refit.comparison_id,
+        "recipe_sha256": refit.recipe_sha256,
+    }
+    if dict(freeze_binding) != expected_binding:
+        raise PredictionExportError(
+            "resolved post-sweep freeze binding is internally inconsistent"
+        )
+    return completion
+
+
 def _validate_common_metadata(
     metadata: Mapping[str, object],
     *,
@@ -620,12 +981,11 @@ def _validate_common_metadata(
         raise PredictionExportError("run normalization provenance does not match its file")
 
 
-def _validate_lineage_metadata(
-    metadata: Mapping[str, object],
-    *,
-    request: PredictionExportRequest,
-    run: _ResolvedRun,
-) -> int:
+def _validate_requested_lineage(
+    request: PredictionExportRequest, run: _ResolvedRun
+) -> None:
+    """Reject an invalid role before any role-target columns are materialized."""
+
     if run.lineage == "development":
         if request.checkpoint_path.name != "best.ckpt":
             raise PredictionExportError(
@@ -635,8 +995,7 @@ def _validate_lineage_metadata(
             raise PredictionExportError(
                 "development checkpoints may export only model_selection fold 8"
             )
-        return _integer(metadata.get("best_epoch"), "run metadata best_epoch")
-
+        return
     if request.checkpoint_path.name != "final.ckpt":
         raise PredictionExportError(
             "calibration/final export requires the authoritative refit final.ckpt"
@@ -645,11 +1004,24 @@ def _validate_lineage_metadata(
         raise PredictionExportError(
             "frozen-refit checkpoints may export only calibration or final_test"
         )
-    if not isinstance(run.typed_config, FrozenRefitConfig):
+
+
+def _validate_lineage_metadata(
+    metadata: Mapping[str, object],
+    *,
+    request: PredictionExportRequest,
+    run: _ResolvedRun,
+    completion: Mapping[str, object] | None,
+) -> int:
+    _validate_requested_lineage(request, run)
+    if run.lineage == "development":
+        return _integer(metadata.get("best_epoch"), "run metadata best_epoch")
+
+    if not isinstance(run.typed_config, (FrozenRefitConfig, PostSweepRefitConfig)):
         raise PredictionExportError("internal frozen-refit lineage type mismatch")
     refit = run.typed_config
     requirements: dict[str, object] = {
-        "run_kind": "frozen_refit",
+        "run_kind": refit.run_kind,
         "refit_folds": list(range(1, 9)),
         "normalization_folds": list(TRAIN_FOLDS),
         "frozen_epochs": refit.selection.frozen_epochs,
@@ -673,10 +1045,42 @@ def _validate_lineage_metadata(
     checkpoint_roles = _mapping(
         run.config.get("checkpoint_roles"), "resolved refit checkpoint roles"
     )
-    if checkpoint_roles.get("final.ckpt") != "authoritative frozen-epoch refit artifact":
+    expected_roles = {
+        "best_training_loss.ckpt": "diagnostic minimum training loss only",
+        "last.ckpt": "crash-recovery state from the latest completed epoch",
+        "final.ckpt": "authoritative frozen-epoch refit artifact",
+    }
+    if dict(checkpoint_roles) != expected_roles:
         raise PredictionExportError(
-            "resolved refit config does not declare final.ckpt authoritative"
+            "resolved refit checkpoint roles are not canonical"
         )
+    if isinstance(refit, PostSweepRefitConfig):
+        if completion is None:
+            raise PredictionExportError("post-sweep export requires a refit completion")
+        post_sweep_requirements: dict[str, object] = {
+            "comparison_id": refit.comparison_id,
+            "architecture": refit.architecture,
+            "confirmation_seed": refit.confirmation_seed,
+            "freeze_artifact_path": str(refit.freeze_artifact_path),
+            "freeze_artifact_sha256": refit.freeze_artifact_sha256,
+            "recipe_sha256": refit.recipe_sha256,
+            "initialization": "fresh",
+            "attempt_index": run.config.get("attempt_index"),
+            "downstream_provenance": refit.downstream_provenance.to_dict(),
+            "final_checkpoint_sha256": _completion_entry(
+                completion, "final_checkpoint"
+            )[1],
+        }
+        drift = [
+            field
+            for field, expected in post_sweep_requirements.items()
+            if metadata.get(field) != expected
+        ]
+        if drift:
+            raise PredictionExportError(
+                "post-sweep refit metadata differs from frozen lineage: "
+                + ", ".join(drift)
+            )
     return refit.selection.frozen_epochs - 1
 
 
@@ -695,8 +1099,32 @@ def _validate_inputs(
         normalization = NormalizationStats.load(normalization_path)
     except (OSError, ValueError) as error:
         raise PredictionExportError(f"could not validate data inputs: {error}") from error
-    manifest = _read_manifest(manifest_path)
-    manifest, selected = _validated_manifest(manifest, expected_folds=expected_folds)
+    completion: Mapping[str, object] | None = None
+    if isinstance(run.typed_config, PostSweepRefitConfig):
+        completion = _validate_post_sweep_completion(
+            request,
+            run=run,
+            protocol=protocol,
+            manifest_path=manifest_path,
+            manifest_hash=manifest_hash,
+            normalization_path=normalization_path,
+            normalization_hash=normalization_hash,
+        )
+    target_folds = tuple(sorted(set(TRAIN_FOLDS) | set(expected_folds)))
+    identities = _validated_manifest_identities(
+        _read_manifest_identities(manifest_path)
+    )
+    target_manifest = _read_target_manifest(
+        manifest_path,
+        identities=identities,
+        target_folds=target_folds,
+    )
+    manifest, selected = _validated_manifest(
+        identities,
+        target_manifest,
+        target_folds=target_folds,
+        expected_folds=expected_folds,
+    )
     _validate_normalization(normalization, manifest=manifest, protocol=protocol)
     metadata = _read_json(_metadata_path(request, run), "run metadata")
     _validate_common_metadata(
@@ -707,7 +1135,12 @@ def _validate_inputs(
         normalization_hash=normalization_hash,
         normalization=normalization,
     )
-    expected_epoch = _validate_lineage_metadata(metadata, request=request, run=run)
+    expected_epoch = _validate_lineage_metadata(
+        metadata,
+        request=request,
+        run=run,
+        completion=completion,
+    )
     return _ValidatedInputs(
         manifest=manifest,
         selected_manifest=selected,
@@ -715,6 +1148,14 @@ def _validate_inputs(
         manifest_hash=manifest_hash,
         normalization_hash=normalization_hash,
         expected_checkpoint_epoch=expected_epoch,
+        refit_completion_sha256=(
+            _string(
+                completion.get("artifact_sha256"),
+                "post-sweep refit completion artifact hash",
+            )
+            if completion is not None
+            else None
+        ),
     )
 
 
@@ -733,6 +1174,8 @@ def _load_inference_model(
     optimizer = AdamW(
         model.parameters(),
         lr=run.learning_rate,
+        betas=run.optimizer_betas,
+        eps=run.optimizer_eps,
         weight_decay=run.weight_decay,
     )
     stopper: EarlyStopping | None = None
@@ -891,6 +1334,7 @@ def export_checkpoint_predictions(
         raise TypeError("protocol must be an ExperimentProtocol")
     expected_folds = protocol.folds_for(request.fold_role, test_access=test_access)
     run = _load_resolved_run(request.resolved_config_path)
+    _validate_requested_lineage(request, run)
     inputs = _validate_inputs(
         request,
         run=run,
@@ -911,6 +1355,12 @@ def export_checkpoint_predictions(
     model = model.to(runtime.device)
     selected = inputs.selected_manifest
     dataset_root = request.dataset_root or run.dataset_root
+    if isinstance(run.typed_config, PostSweepRefitConfig) and (
+        dataset_root.resolve() != run.dataset_root.resolve()
+    ):
+        raise PredictionExportError(
+            "post-sweep dataset root override differs from the frozen refit input"
+        )
     try:
         dataset = dataset_factory(
             selected,
@@ -942,6 +1392,30 @@ def export_checkpoint_predictions(
         if request.fold_role is FoldRole.FINAL_TEST and test_access is not None
         else None
     )
+    extra_metadata: dict[str, str | int | float | bool | None] = {
+        "lineage": run.lineage,
+        "checkpoint_path": str(request.checkpoint_path.resolve()),
+        "checkpoint_sha256": checkpoint_hash,
+        "checkpoint_epoch": checkpoint_epoch,
+        "resolved_config_path": str(request.resolved_config_path.resolve()),
+        "normalization_sha256": inputs.normalization_hash,
+        "inference_device": str(runtime.device),
+        "inference_bf16": runtime.bf16_enabled,
+        "inference_batch_size": request.batch_size or run.batch_size,
+        "inference_num_workers": (
+            run.num_workers if request.num_workers is None else request.num_workers
+        ),
+        "final_test_purpose": final_purpose,
+    }
+    if isinstance(run.typed_config, PostSweepRefitConfig):
+        extra_metadata.update(
+            {
+                "refit_run_kind": run.typed_config.run_kind,
+                "refit_completion_sha256": inputs.refit_completion_sha256,
+                "freeze_artifact_sha256": run.typed_config.freeze_artifact_sha256,
+                "recipe_sha256": run.typed_config.recipe_sha256,
+            }
+        )
     artifact = create_prediction_artifact(
         ecg_id=selected["ecg_id"].to_numpy(),
         patient_id=selected["patient_id"].to_numpy(),
@@ -955,21 +1429,7 @@ def export_checkpoint_predictions(
         manifest_hash=inputs.manifest_hash,
         fold_role=request.fold_role,
         producer="ecg_trust.prediction_export",
-        extra_metadata={
-            "lineage": run.lineage,
-            "checkpoint_path": str(request.checkpoint_path.resolve()),
-            "checkpoint_sha256": checkpoint_hash,
-            "checkpoint_epoch": checkpoint_epoch,
-            "resolved_config_path": str(request.resolved_config_path.resolve()),
-            "normalization_sha256": inputs.normalization_hash,
-            "inference_device": str(runtime.device),
-            "inference_bf16": runtime.bf16_enabled,
-            "inference_batch_size": request.batch_size or run.batch_size,
-            "inference_num_workers": (
-                run.num_workers if request.num_workers is None else request.num_workers
-            ),
-            "final_test_purpose": final_purpose,
-        },
+        extra_metadata=extra_metadata,
         test_access=test_access,
     )
     files = save_prediction_artifact(

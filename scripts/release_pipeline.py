@@ -5,11 +5,20 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 from ecg_trust.final_batch import FinalBatchSettings, run_final_batch
-from ecg_trust.protocol import FINAL_TEST_CONFIRMATION, load_protocol
+from ecg_trust.final_evaluation_spec import (
+    FinalEvaluationSpec,
+    load_final_evaluation_spec,
+)
+from ecg_trust.protocol import (
+    FINAL_TEST_CONFIRMATION,
+    ExperimentProtocol,
+    load_protocol,
+)
 from ecg_trust.release_gates import (
     create_refit_bundle,
     export_fold9_predictions,
@@ -21,18 +30,103 @@ from ecg_trust.release_gates import (
 )
 
 
-def _member_paths(values: Sequence[str]) -> dict[str, Path]:
-    result: dict[str, Path] = {}
-    for value in values:
-        member_id, separator, raw_path = value.partition("=")
-        if not separator or not member_id.strip() or not raw_path.strip():
-            raise argparse.ArgumentTypeError(
-                "member paths must use MEMBER_ID=PATH"
-            )
-        if member_id in result:
-            raise argparse.ArgumentTypeError(f"duplicate member ID {member_id!r}")
-        result[member_id] = Path(raw_path)
-    return result
+def _mapping(value: object, context: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
+        raise ValueError(f"{context} must be a string-keyed mapping")
+    return cast(Mapping[str, object], value)
+
+
+def _string(value: object, context: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{context} must be a non-empty string")
+    return value
+
+
+def _integer(value: object, context: str, *, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ValueError(f"{context} must be an integer >= {minimum}")
+    return value
+
+
+def _number(value: object, context: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{context} must be numeric")
+    return float(value)
+
+
+def _loaded_evaluation_spec(
+    path: Path, *, protocol: ExperimentProtocol
+) -> FinalEvaluationSpec:
+    return load_final_evaluation_spec(
+        path,
+        protocol=protocol,
+        verify_sources=True,
+        verify_runtime=True,
+    )
+
+
+def _release_root(spec: FinalEvaluationSpec) -> Path:
+    if spec.path is None:  # pragma: no cover - loaded artifacts always have a path
+        raise ValueError("final-evaluation specification must be saved")
+    return spec.path.resolve().parent
+
+
+def _final_settings(spec: FinalEvaluationSpec) -> FinalBatchSettings:
+    payload = spec.payload
+    evaluation = _mapping(payload["final_evaluation"], "final_evaluation")
+    subgroup = _mapping(payload["subgroup_artifact"], "subgroup_artifact")
+    return FinalBatchSettings.create(
+        output_directory=_release_root(spec) / "fold10_final",
+        subgroup_path=Path(_string(subgroup["path"], "subgroup_artifact.path")),
+        device=spec.requested_device,
+        bf16=True,
+        bootstrap_resamples=_integer(
+            evaluation["bootstrap_resamples"], "bootstrap_resamples", minimum=2
+        ),
+        bootstrap_seed=_integer(
+            evaluation["bootstrap_base_seed"], "bootstrap_base_seed", minimum=0
+        ),
+        bootstrap_confidence=_number(
+            evaluation["bootstrap_confidence"], "bootstrap_confidence"
+        ),
+        bootstrap_minimum_valid=_integer(
+            evaluation["bootstrap_minimum_valid"],
+            "bootstrap_minimum_valid",
+            minimum=1,
+        ),
+        minimum_group_samples=_integer(
+            evaluation["minimum_group_samples"],
+            "minimum_group_samples",
+            minimum=1,
+        ),
+        minimum_group_patients=_integer(
+            evaluation["minimum_group_patients"],
+            "minimum_group_patients",
+            minimum=1,
+        ),
+        ece_bins=_integer(evaluation["ece_bins"], "ece_bins", minimum=2),
+    )
+
+
+def _assert_calibration_binds_spec(
+    calibration_bundle: object,
+    spec: FinalEvaluationSpec,
+) -> None:
+    provenance = getattr(calibration_bundle, "stage_provenance", None)
+    stage = _mapping(provenance, "calibration stage_provenance")
+    binding = _mapping(
+        stage["final_evaluation_spec"], "final_evaluation_spec binding"
+    )
+    if spec.path is None or Path(
+        _string(binding["path"], "final_evaluation_spec.path")
+    ).resolve() != spec.path.resolve():
+        raise ValueError(
+            "calibration bundle is bound to a different final-evaluation specification"
+        )
+    if binding["artifact_sha256"] != spec.artifact_sha256:
+        raise ValueError(
+            "calibration bundle final-evaluation specification hash differs"
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,11 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export.add_argument("--protocol", type=Path, default=Path("configs/protocol.yaml"))
     export.add_argument("--refit-bundle", type=Path, required=True)
-    export.add_argument("--output-dir", type=Path, required=True)
-    export.add_argument("--batch-size", type=int)
-    export.add_argument("--num-workers", type=int)
-    export.add_argument("--device", default="auto")
-    export.add_argument("--no-bf16", action="store_true")
+    export.add_argument("--evaluation-spec", type=Path, required=True)
 
     calibrate = subparsers.add_parser(
         "fit-calibration",
@@ -78,15 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--protocol", type=Path, default=Path("configs/protocol.yaml")
     )
     calibrate.add_argument("--refit-bundle", type=Path, required=True)
-    calibrate.add_argument(
-        "--prediction",
-        action="append",
-        required=True,
-        metavar="MEMBER_ID=PATH",
-    )
-    calibrate.add_argument("--decision-output-dir", type=Path, required=True)
-    calibrate.add_argument("--bundle-output", type=Path, required=True)
-    calibrate.add_argument("--coverage", type=float, action="append")
+    calibrate.add_argument("--evaluation-spec", type=Path, required=True)
 
     verify_calibration = subparsers.add_parser(
         "verify-calibration",
@@ -107,9 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     final.add_argument("--protocol", type=Path, default=Path("configs/protocol.yaml"))
     final.add_argument("--refit-bundle", type=Path, required=True)
     final.add_argument("--calibration-bundle", type=Path, required=True)
-    final.add_argument("--subgroups", type=Path, required=True)
-    final.add_argument("--output-dir", type=Path, required=True)
-    final.add_argument("--ledger", type=Path, required=True)
+    final.add_argument("--evaluation-spec", type=Path, required=True)
     final.add_argument("--purpose", required=True)
     final.add_argument("--operator", required=True)
     final.add_argument(
@@ -118,17 +198,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Must exactly equal: {FINAL_TEST_CONFIRMATION}",
     )
     final.add_argument("--resume", action="store_true")
-    final.add_argument("--batch-size", type=int)
-    final.add_argument("--num-workers", type=int)
-    final.add_argument("--device", default="auto")
-    final.add_argument("--no-bf16", action="store_true")
-    final.add_argument("--bootstrap-resamples", type=int, default=1_000)
-    final.add_argument("--bootstrap-seed", type=int, default=20_260_808)
-    final.add_argument("--bootstrap-confidence", type=float, default=0.95)
-    final.add_argument("--bootstrap-minimum-valid", type=int)
-    final.add_argument("--minimum-group-samples", type=int, default=30)
-    final.add_argument("--minimum-group-patients", type=int, default=20)
-    final.add_argument("--ece-bins", type=int, default=15)
     return parser
 
 
@@ -137,65 +206,80 @@ def main(argv: Sequence[str] | None = None) -> int:
     protocol = load_protocol(args.protocol)
 
     if args.command == "seal-refits":
-        bundle = create_refit_bundle(args.refit_completion, protocol=protocol)
-        path, digest = save_refit_bundle(bundle, args.output)
+        refit_bundle = create_refit_bundle(args.refit_completion, protocol=protocol)
+        path, digest = save_refit_bundle(refit_bundle, args.output)
         print(json.dumps({"path": str(path), "artifact_sha256": digest}))
         return 0
     if args.command == "verify-refits":
-        bundle = load_refit_bundle(args.bundle, protocol=protocol, verify_sources=True)
-        print(json.dumps(bundle.to_payload(), sort_keys=True))
+        verified_refits = load_refit_bundle(
+            args.bundle, protocol=protocol, verify_sources=True
+        )
+        print(json.dumps(verified_refits.to_payload(), sort_keys=True))
         return 0
     if args.command == "export-fold9":
+        evaluation_spec = _loaded_evaluation_spec(
+            args.evaluation_spec, protocol=protocol
+        )
         paths = export_fold9_predictions(
             args.refit_bundle,
-            args.output_dir,
+            _release_root(evaluation_spec) / "fold9_predictions",
             protocol=protocol,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            device=args.device,
-            bf16=not args.no_bf16,
+            final_evaluation_spec_path=args.evaluation_spec,
         )
         print(json.dumps({key: str(value) for key, value in paths.items()}))
         return 0
     if args.command == "fit-calibration":
-        predictions = _member_paths(args.prediction)
-        bundle = fit_calibration_bundle(
+        evaluation_spec = _loaded_evaluation_spec(
+            args.evaluation_spec, protocol=protocol
+        )
+        release_root = _release_root(evaluation_spec)
+        verified_refits = load_refit_bundle(
+            args.refit_bundle, protocol=protocol, verify_sources=True
+        )
+        predictions = {
+            member.member_id: (
+                release_root / "fold9_predictions" / f"{member.member_id}.fold9.npz"
+            )
+            for member in verified_refits.members
+        }
+        calibration_bundle = fit_calibration_bundle(
             args.refit_bundle,
             predictions,
-            args.decision_output_dir,
+            release_root / "calibration",
             protocol=protocol,
-            coverage_targets=args.coverage or (1.0, 0.9, 0.8, 0.7, 0.5),
+            fold9_export_completion_path=(
+                release_root
+                / "fold9_predictions"
+                / "fold9-export-completion.json"
+            ),
         )
-        path, digest = save_calibration_bundle(bundle, args.bundle_output)
+        path, digest = save_calibration_bundle(
+            calibration_bundle, release_root / "calibration_bundle.json"
+        )
         print(json.dumps({"path": str(path), "artifact_sha256": digest}))
         return 0
     if args.command == "verify-calibration":
-        bundle = load_calibration_bundle(
+        verified_calibration = load_calibration_bundle(
             args.bundle, protocol=protocol, verify_sources=True
         )
-        print(json.dumps(bundle.to_payload(), sort_keys=True))
+        print(json.dumps(verified_calibration.to_payload(), sort_keys=True))
         return 0
     if args.command == "run-final":
-        settings = FinalBatchSettings.create(
-            output_directory=args.output_dir,
-            subgroup_path=args.subgroups,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            device=args.device,
-            bf16=not args.no_bf16,
-            bootstrap_resamples=args.bootstrap_resamples,
-            bootstrap_seed=args.bootstrap_seed,
-            bootstrap_confidence=args.bootstrap_confidence,
-            bootstrap_minimum_valid=args.bootstrap_minimum_valid,
-            minimum_group_samples=args.minimum_group_samples,
-            minimum_group_patients=args.minimum_group_patients,
-            ece_bins=args.ece_bins,
+        evaluation_spec = _loaded_evaluation_spec(
+            args.evaluation_spec, protocol=protocol
         )
+        verified_calibration = load_calibration_bundle(
+            args.calibration_bundle,
+            protocol=protocol,
+            verify_sources=True,
+        )
+        _assert_calibration_binds_spec(verified_calibration, evaluation_spec)
+        settings = _final_settings(evaluation_spec)
         result = run_final_batch(
             refit_bundle_path=args.refit_bundle,
             calibration_bundle_path=args.calibration_bundle,
             settings=settings,
-            ledger_path=args.ledger,
+            ledger_path=None,
             protocol=protocol,
             purpose=args.purpose,
             operator=args.operator,

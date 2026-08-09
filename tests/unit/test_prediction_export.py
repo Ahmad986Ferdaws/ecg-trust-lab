@@ -13,6 +13,7 @@ from torch import Tensor, nn
 from torch.optim import AdamW
 from torch.utils.data import Dataset
 
+import ecg_trust.refit_runner as refit_runner_module
 from ecg_trust.constants import LEADS, TARGET_COLUMNS
 from ecg_trust.data.dataset import NormalizationProvenance, NormalizationStats
 from ecg_trust.data.manifest import sha256_file
@@ -132,12 +133,18 @@ def _bundle(
     lineage: str,
     architecture: str,
     mixed_patient: bool = False,
+    manifest_format: str = "parquet",
 ) -> _Bundle:
     run_dir = tmp_path / lineage
     run_dir.mkdir(parents=True)
     manifest = _manifest(mixed_patient=mixed_patient)
-    manifest_path = run_dir / "manifest.parquet"
-    manifest.to_parquet(manifest_path, index=False)
+    manifest_path = run_dir / f"manifest.{manifest_format}"
+    if manifest_format == "parquet":
+        manifest.to_parquet(manifest_path, index=False)
+    elif manifest_format == "csv":
+        manifest.to_csv(manifest_path, index=False)
+    else:
+        raise AssertionError(f"unsupported test manifest format: {manifest_format}")
     normalization_path = run_dir / "normalization.json"
     stats = _stats(manifest)
     stats.save(normalization_path)
@@ -298,6 +305,233 @@ def _bundle(
         manifest=manifest_path,
         normalization=normalization_path,
         dataset_root=dataset_root,
+    )
+
+
+def _post_sweep_bundle(tmp_path: Path) -> tuple[_Bundle, dict[str, object]]:
+    run_dir = tmp_path / "post-sweep" / "attempt00"
+    run_dir.mkdir(parents=True)
+    manifest = _manifest()
+    manifest_path = run_dir / "manifest.parquet"
+    manifest.to_parquet(manifest_path, index=False)
+    normalization_path = run_dir / "normalization.json"
+    stats = _stats(manifest)
+    stats.save(normalization_path)
+    dataset_root = run_dir / "records"
+    dataset_root.mkdir()
+
+    selection = ModelConfig.from_mapping(
+        {"architecture": "resnet1d", "preset": "smoke"}
+    )
+    model = build_experiment_model(selection)
+    model_metadata = _model_metadata(model, selection)
+    freeze_path = tmp_path / "multi-seed-freeze.json"
+    freeze_path.write_text("{}\n", encoding="utf-8")
+    fake_source = tmp_path / "source"
+    fake_hash = "sha256:" + "a" * 64
+    source = {
+        "member_completion": str(fake_source / "member_completion.json"),
+        "member_completion_sha256": fake_hash,
+        "manifest_sha256": "sha256:" + sha256_file(manifest_path),
+        "normalization_sha256": "sha256:" + sha256_file(normalization_path),
+        "run_metadata": str(fake_source / "run_metadata.json"),
+        "run_metadata_sha256": fake_hash,
+        "resolved_config": str(fake_source / "resolved_config.json"),
+        "resolved_config_file_sha256": fake_hash,
+        "resolved_config_hash": fake_hash,
+        "history": str(fake_source / "history.jsonl"),
+        "history_sha256": fake_hash,
+        "best_checkpoint": str(fake_source / "best.ckpt"),
+        "best_checkpoint_sha256": fake_hash,
+        "prediction": str(fake_source / "fold8.npz"),
+        "prediction_npz_sha256": fake_hash,
+        "prediction_json": str(fake_source / "fold8.json"),
+        "prediction_artifact_sha256": fake_hash,
+        "best_epoch": 1,
+        "best_validation_macro_auroc": 0.91,
+    }
+    freeze_hash = "sha256:" + "b" * 64
+    recipe_hash = "sha256:" + "c" * 64
+    downstream = {
+        "project_root": str(tmp_path.resolve()),
+        "code_revision": "d" * 40,
+        "dependency_lock_sha256": "sha256:" + "e" * 64,
+    }
+    selection_provenance = {
+        "checkpoint": str(fake_source / "best.ckpt"),
+        "checkpoint_sha256": "a" * 64,
+        "checkpoint_config_hash": fake_hash,
+        "selected_epoch": 1,
+        "selected_epoch_count": 2,
+        "selected_macro_auroc": 0.91,
+        "source_seed": 71,
+        "member_completion_sha256": fake_hash,
+        "freeze_artifact_sha256": freeze_hash,
+        "recipe_sha256": recipe_hash,
+    }
+    checkpoint_roles = {
+        "best_training_loss.ckpt": "diagnostic minimum training loss only",
+        "last.ckpt": "crash-recovery state from the latest completed epoch",
+        "final.ckpt": "authoritative frozen-epoch refit artifact",
+    }
+    config: dict[str, object] = {
+        "schema_version": 2,
+        "run_kind": "post_sweep_frozen_refit",
+        "freeze_artifact": str(freeze_path.resolve()),
+        "freeze_artifact_sha256": freeze_hash,
+        "recipe_sha256": recipe_hash,
+        "comparison_id": "synthetic-comparison-v1",
+        "architecture": "resnet1d",
+        "confirmation_seed": 71,
+        "run_name": "synthetic_post_sweep_resnet",
+        "initialization": "fresh",
+        "folds": {
+            "refit": list(range(1, 9)),
+            "normalization": list(TRAIN_FOLDS),
+        },
+        "data": {
+            "manifest": str(manifest_path),
+            "dataset_root": str(dataset_root),
+            "normalization": str(normalization_path),
+        },
+        "source": source,
+        "selection": {
+            "objective": "fold8_uncalibrated_macro_roc_auc",
+            "architecture_mean_macro_auroc": 0.91,
+            "frozen_epochs": 2,
+            "epoch_budget_rule": (
+                "max(warmup_epochs+1,median("
+                "selected_zero_based_best_epoch+1_across_seeds))"
+            ),
+        },
+        "model": model_metadata,
+        "model_identity": model_metadata,
+        "loader": {
+            "batch_size": 2,
+            "num_workers": 0,
+            "pin_memory": False,
+            "persistent_workers": False,
+        },
+        "optimization": {
+            "learning_rate": 0.001,
+            "weight_decay": 0.01,
+            "warmup_epochs": 0,
+            "minimum_lr_ratio": 0.1,
+            "gradient_clip_norm": 1.0,
+            "scheduler": "warmup_cosine",
+        },
+        "optimizer": {"name": "AdamW", "betas": [0.8, 0.95], "eps": 1e-7},
+        "runtime": {"seed": 71, "device": "cpu", "bf16": False},
+        "output": {"root_dir": str(tmp_path / "refits")},
+        "downstream_provenance": downstream,
+        "selection_provenance": selection_provenance,
+        "freeze_binding": {
+            "path": str(freeze_path.resolve()),
+            "artifact_sha256": freeze_hash,
+            "comparison_id": "synthetic-comparison-v1",
+            "recipe_sha256": recipe_hash,
+        },
+        "attempt_index": 0,
+        "effective_data": {"refit_records": 8},
+        "checkpoint_roles": checkpoint_roles,
+    }
+    config_hash = _canonical(config)
+    resolved_path = run_dir / "resolved_refit_config.json"
+    _write_json(resolved_path, {"config_hash": config_hash, "config": config})
+    checkpoint_path = run_dir / "final.ckpt"
+    optimizer = AdamW(
+        model.parameters(),
+        lr=0.001,
+        betas=(0.8, 0.95),
+        eps=1e-7,
+        weight_decay=0.01,
+    )
+    save_checkpoint(
+        checkpoint_path,
+        model=model,
+        optimizer=optimizer,
+        scaler=None,
+        epoch=1,
+        protocol_hash=ExperimentProtocol.canonical().protocol_hash,
+        config=config,
+        manifest_hash=sha256_file(manifest_path),
+        early_stopping=None,
+    )
+    metadata_path = run_dir / "refit_metadata.json"
+    metadata = {
+        "status": "complete",
+        "run_kind": "post_sweep_frozen_refit",
+        "seed": 71,
+        "refit_folds": list(range(1, 9)),
+        "normalization_folds": list(TRAIN_FOLDS),
+        "frozen_epochs": 2,
+        "completed_epochs": 2,
+        "early_stopping_enabled": False,
+        "model_selection_enabled": False,
+        "authoritative_checkpoint": "final.ckpt",
+        "final_epoch": 1,
+        "resolved_config_hash": config_hash,
+        "protocol_hash": ExperimentProtocol.canonical().protocol_hash,
+        "manifest_hash": sha256_file(manifest_path),
+        "normalization_file_hash": sha256_file(normalization_path),
+        "normalization_provenance": stats.provenance.to_dict(),
+        "selection_provenance": selection_provenance,
+        "comparison_id": "synthetic-comparison-v1",
+        "architecture": "resnet1d",
+        "confirmation_seed": 71,
+        "freeze_artifact_path": str(freeze_path.resolve()),
+        "freeze_artifact_sha256": freeze_hash,
+        "recipe_sha256": recipe_hash,
+        "initialization": "fresh",
+        "attempt_index": 0,
+        "downstream_provenance": downstream,
+        "final_checkpoint_sha256": "sha256:" + sha256_file(checkpoint_path),
+    }
+    _write_json(metadata_path, metadata)
+
+    def entry(path: Path) -> dict[str, object]:
+        return {"path": str(path.resolve()), "sha256": "sha256:" + sha256_file(path)}
+
+    completion: dict[str, object] = {
+        "comparison_id": "synthetic-comparison-v1",
+        "architecture": "resnet1d",
+        "seed": 71,
+        "status": "complete",
+        "run_name": "synthetic_post_sweep_resnet",
+        "run_dir": str(run_dir.resolve()),
+        "freeze_artifact_path": str(freeze_path.resolve()),
+        "freeze_artifact_sha256": freeze_hash,
+        "recipe_sha256": recipe_hash,
+        "refit_folds": list(range(1, 9)),
+        "normalization_folds": list(TRAIN_FOLDS),
+        "frozen_epochs": 2,
+        "protocol_hash": ExperimentProtocol.canonical().protocol_hash,
+        "manifest_hash": "sha256:" + sha256_file(manifest_path),
+        "normalization_hash": "sha256:" + sha256_file(normalization_path),
+        "downstream_provenance": downstream,
+        "selection_provenance": selection_provenance,
+        "files": {
+            "final_checkpoint": entry(checkpoint_path),
+            "resolved_config": {
+                **entry(resolved_path),
+                "config_hash": config_hash,
+            },
+            "metadata": entry(metadata_path),
+            "manifest": entry(manifest_path),
+            "normalization": entry(normalization_path),
+        },
+        "artifact_sha256": "sha256:" + "f" * 64,
+    }
+    _write_json(run_dir / "refit_completion.json", completion)
+    return (
+        _Bundle(
+            checkpoint=checkpoint_path,
+            resolved_config=resolved_path,
+            manifest=manifest_path,
+            normalization=normalization_path,
+            dataset_root=dataset_root,
+        ),
+        completion,
     )
 
 
@@ -479,3 +713,150 @@ def test_export_rejects_model_metadata_drift_and_overwrite(tmp_path: Path) -> No
             protocol=ExperimentProtocol.canonical(),
             dataset_factory=_factory([]),
         )
+
+
+def test_post_sweep_refit_binds_completion_and_keeps_public_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, completion = _post_sweep_bundle(tmp_path)
+    completion_calls: list[tuple[Path, bool]] = []
+
+    def load_completion(
+        path: str | Path,
+        *,
+        protocol: ExperimentProtocol,
+        verify_sources: bool = True,
+    ) -> dict[str, object]:
+        assert protocol == ExperimentProtocol.canonical()
+        completion_calls.append((Path(path).resolve(), verify_sources))
+        return completion
+
+    monkeypatch.setattr(refit_runner_module, "load_refit_completion", load_completion)
+    calls: list[tuple[int, ...]] = []
+    protocol = ExperimentProtocol.canonical()
+    result = export_checkpoint_predictions(
+        _request(bundle, FoldRole.CALIBRATION, tmp_path / "post-sweep-fold9.npz"),
+        protocol=protocol,
+        dataset_factory=_factory(calls),
+    )
+
+    artifact = load_prediction_artifact(result.files.npz_path, protocol=protocol)
+    assert completion_calls == [
+        (bundle.resolved_config.parent / "refit_completion.json", True)
+    ]
+    assert calls == [(9,)]
+    assert result.lineage == "frozen_refit"
+    assert artifact.extra_metadata["lineage"] == "frozen_refit"
+    assert (
+        artifact.extra_metadata["refit_run_kind"]
+        == "post_sweep_frozen_refit"
+    )
+    assert (
+        artifact.extra_metadata["refit_completion_sha256"]
+        == completion["artifact_sha256"]
+    )
+    assert artifact.extra_metadata["freeze_artifact_sha256"] == (
+        completion["freeze_artifact_sha256"]
+    )
+
+
+def test_post_sweep_refit_rejects_completion_drift_before_dataset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, completion = _post_sweep_bundle(tmp_path)
+    drifted = json.loads(json.dumps(completion))
+    drifted["downstream_provenance"]["code_revision"] = "tampered"
+    monkeypatch.setattr(
+        refit_runner_module,
+        "load_refit_completion",
+        lambda *args, **kwargs: drifted,
+    )
+    calls: list[tuple[int, ...]] = []
+    with pytest.raises(PredictionExportError, match="downstream_provenance"):
+        export_checkpoint_predictions(
+            _request(bundle, FoldRole.CALIBRATION, tmp_path / "drifted-fold9.npz"),
+            protocol=ExperimentProtocol.canonical(),
+            dataset_factory=_factory(calls),
+        )
+    assert calls == []
+
+
+def test_fold9_parquet_reads_no_fold10_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _bundle(
+        tmp_path,
+        lineage="frozen_refit",
+        architecture="resnet1d",
+    )
+    original = pd.read_parquet
+    reads: list[dict[str, object]] = []
+
+    def guarded_read_parquet(*args: object, **kwargs: object) -> pd.DataFrame:
+        reads.append(dict(kwargs))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pd, "read_parquet", guarded_read_parquet)
+    export_checkpoint_predictions(
+        _request(bundle, FoldRole.CALIBRATION, tmp_path / "guarded-parquet.npz"),
+        protocol=ExperimentProtocol.canonical(),
+        dataset_factory=_factory([]),
+    )
+
+    target_reads = [
+        call
+        for call in reads
+        if set(TARGET_COLUMNS).intersection(cast(list[str], call.get("columns", [])))
+    ]
+    assert len(target_reads) == 1
+    assert target_reads[0]["filters"] == [
+        ("strat_fold", "in", [1, 2, 3, 4, 5, 6, 7, 9])
+    ]
+    identity_reads = [call for call in reads if call not in target_reads]
+    assert identity_reads
+    assert all(
+        not set(TARGET_COLUMNS).intersection(
+            cast(list[str], call.get("columns", []))
+        )
+        for call in identity_reads
+    )
+
+
+def test_fold9_csv_skips_fold10_before_loading_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _bundle(
+        tmp_path,
+        lineage="frozen_refit",
+        architecture="resnet1d",
+        manifest_format="csv",
+    )
+    original = pd.read_csv
+    reads: list[dict[str, object]] = []
+
+    def guarded_read_csv(*args: object, **kwargs: object) -> pd.DataFrame:
+        reads.append(dict(kwargs))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pd, "read_csv", guarded_read_csv)
+    export_checkpoint_predictions(
+        _request(bundle, FoldRole.CALIBRATION, tmp_path / "guarded-csv.npz"),
+        protocol=ExperimentProtocol.canonical(),
+        dataset_factory=_factory([]),
+    )
+
+    target_reads = [
+        call
+        for call in reads
+        if set(TARGET_COLUMNS).intersection(cast(list[str], call.get("usecols", [])))
+    ]
+    assert len(target_reads) == 1
+    skiprows = target_reads[0]["skiprows"]
+    assert callable(skiprows)
+    assert skiprows(0) is False
+    assert skiprows(9) is False
+    assert skiprows(10) is True

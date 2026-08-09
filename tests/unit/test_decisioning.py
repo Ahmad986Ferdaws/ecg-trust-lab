@@ -51,6 +51,21 @@ def _token(protocol: ExperimentProtocol) -> FinalTestAccessToken:
     )
 
 
+def _report_provenance(tmp_path: Path) -> dict[str, object]:
+    return {
+        "final_evaluation_spec": {
+            "path": str((tmp_path / "final-evaluation-spec.json").resolve()),
+            "file_sha256": _hash("final-evaluation-spec-file"),
+            "artifact_sha256": _hash("final-evaluation-spec-artifact"),
+        },
+        "protocol_deviations": {
+            "path": str((tmp_path / "PROTOCOL_DEVIATIONS.md").resolve()),
+            "file_sha256": _hash("protocol-deviations-file"),
+            "required_in_final_reporting": True,
+        },
+    }
+
+
 def _stored_prediction(
     tmp_path: Path,
     *,
@@ -218,6 +233,7 @@ def test_final_report_uses_frozen_decisions_without_calling_fit_functions(
         test_access=token,
         subgroup_ecg_id=subgroup_ids,
         subgroups=subgroups,
+        **_report_provenance(tmp_path),
         bootstrap_resamples=30,
         bootstrap_seed=11,
         bootstrap_minimum_valid=5,
@@ -273,6 +289,7 @@ def test_final_report_requires_token_exact_provenance_and_subgroup_alignment(
             test_access=None,  # type: ignore[arg-type]
             subgroup_ecg_id=final_prediction.ecg_id,
             subgroups=subgroup,
+            **_report_provenance(tmp_path),
             bootstrap_resamples=10,
         )
     with pytest.raises(FinalReportProvenanceError, match="ecg_id order"):
@@ -283,6 +300,7 @@ def test_final_report_requires_token_exact_provenance_and_subgroup_alignment(
             test_access=token,
             subgroup_ecg_id=final_prediction.ecg_id[::-1],
             subgroups=subgroup,
+            **_report_provenance(tmp_path),
             bootstrap_resamples=10,
         )
 
@@ -303,6 +321,7 @@ def test_final_report_requires_token_exact_provenance_and_subgroup_alignment(
             test_access=token,
             subgroup_ecg_id=mismatched.ecg_id,
             subgroups={"sex": np.asarray(["F"] * mismatched.n_samples)},
+            **_report_provenance(tmp_path),
             bootstrap_resamples=10,
         )
 
@@ -325,6 +344,7 @@ def test_final_report_is_integrity_bound_and_token_gated(tmp_path: Path) -> None
         test_access=token,
         subgroup_ecg_id=final_prediction.ecg_id,
         subgroups={"sex": np.where(np.arange(20) % 2, "M", "F")},
+        **_report_provenance(tmp_path),
         bootstrap_resamples=20,
         bootstrap_minimum_valid=5,
         minimum_group_samples=2,
@@ -345,6 +365,13 @@ def test_final_report_is_integrity_bound_and_token_gated(tmp_path: Path) -> None
     )
     verified = verify_final_report(saved.path, protocol=protocol, test_access=token)
     assert verified["report_sha256"] == saved.sha256
+    assert verified["schema_version"] == 2
+    assert verified["final_evaluation_spec"] == _report_provenance(tmp_path)[
+        "final_evaluation_spec"
+    ]
+    assert verified["protocol_deviations"] == _report_provenance(tmp_path)[
+        "protocol_deviations"
+    ]
 
     with pytest.raises(FinalTestAccessError, match="fold 10 is sealed"):
         verify_final_report(
@@ -357,7 +384,7 @@ def test_final_report_is_integrity_bound_and_token_gated(tmp_path: Path) -> None
         verify_final_report(saved.path, protocol=protocol, test_access=token)
 
 
-def test_cli_runs_synthetic_fold9_and_authorized_fold10_flow(tmp_path: Path) -> None:
+def test_low_level_cli_fits_fold9_and_exposes_no_fold10_command(tmp_path: Path) -> None:
     protocol = ExperimentProtocol.canonical()
     calibration = _stored_prediction(
         tmp_path,
@@ -387,54 +414,7 @@ def test_cli_runs_synthetic_fold9_and_authorized_fold10_flow(tmp_path: Path) -> 
     )
     assert fit_result.exit_code == 0, fit_result.output
     assert decision_path.is_file()
-
-    token = _token(protocol)
-    final_prediction = _stored_prediction(
-        tmp_path,
-        fold=10,
-        role=FoldRole.FINAL_TEST,
-        protocol=protocol,
-        token=token,
-    )
-    final_path = tmp_path / "fold-10-resnet1d.npz"
-    subgroup_path = tmp_path / "subgroups.json"
-    subgroup_path.write_text(
-        json.dumps(
-            {
-                "ecg_id": final_prediction.ecg_id.tolist(),
-                "attributes": {"sex": ["F", "M"] * 10},
-            }
-        ),
-        encoding="utf-8",
-    )
-    report_path = tmp_path / "cli-final-report.json"
-    report_result = runner.invoke(
-        app,
-        [
-            "final-report",
-            "--decisions",
-            str(decision_path),
-            "--predictions",
-            str(final_path),
-            "--subgroups",
-            str(subgroup_path),
-            "--protocol",
-            str(DEFAULT_PROTOCOL_PATH),
-            "--output",
-            str(report_path),
-            "--final-test-purpose",
-            "synthetic CLI test",
-            "--final-test-confirmation",
-            FINAL_TEST_CONFIRMATION,
-            "--bootstrap-resamples",
-            "10",
-            "--minimum-valid-resamples",
-            "2",
-            "--minimum-group-samples",
-            "2",
-            "--minimum-group-patients",
-            "2",
-        ],
-    )
-    assert report_result.exit_code == 0, report_result.output
-    assert report_path.is_file()
+    help_result = runner.invoke(app, ["--help"])
+    assert help_result.exit_code == 0
+    assert "final-report" not in help_result.output
+    assert "release_pipeline.py" in help_result.output

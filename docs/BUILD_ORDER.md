@@ -52,16 +52,17 @@ iteration and equal-budget sweeps, not fitting an otherwise oversized model.
    wall time, and fold-8 metrics. The paired 12-candidate sweep completed with
    fold-8 leaders of 0.931852 for ResNet and 0.923927 for the transformer.
 
-7. **Freeze choices, then calibrate — active.** Confirm both winning
-   configurations at paired seeds 2026, 2027, and 2028; freeze the architecture
-   decision and robust median epoch budgets; refit all six models on folds 1–8;
-   then fit temperature scaling, thresholds, and abstention cutoffs only on
-   fold 9. Save the resolved configuration and protocol hashes before final
-   testing.
+7. **Freeze choices, then calibrate — active.** Paired seeds 2026, 2027, and
+   2028, the architecture decision, robust median epoch budgets, and all six
+   folds-1–8 refits are complete. The current work is to commit the sealed
+   release code, freeze label-free subgroups and the exact CUDA/runtime/report
+   specification, export all six fold-9 predictions, and fit the independent
+   temperature, threshold, and abstention policies.
 
-8. **Open fold 10 once.** Generate immutable logits/probabilities and report
-   per-label and macro AUROC/AUPRC, Brier score, log loss, ECE, thresholded
-   metrics, risk–coverage curves, and paired patient-cluster bootstrap
+8. **Open fold 10 once.** Run the global spec-keyed exact-six ledgered batch.
+   Generate immutable logits/probabilities and report per-label and macro
+   AUROC/AUPRC, Brier score, ECE, thresholded metrics, risk–coverage curves,
+   subgroup results, cross-seed summaries, and paired patient-cluster bootstrap
    intervals. Do not tune after inspecting these results.
 
 9. **Audit trustworthiness.** Measure subgroup performance and gate coverage;
@@ -75,25 +76,34 @@ iteration and equal-budget sweeps, not fitting an otherwise oversized model.
 
 ## Immediate command sequence
 
-The equal-budget sweep is already complete. After committing the downstream
-orchestration as a clean revision, run the fixed confirmation from the project
-root:
+The sweep, paired confirmation, architecture freeze, and all six refits are
+already complete. The next sequence is:
 
 ```powershell
 uv run ecg-verify
-uv run python scripts/smoke_dataset.py
 uv run pytest
 uv run ruff check src tests scripts
 uv run mypy
 git status --short
-uv run python scripts/multiseed.py plan
-uv run python scripts/multiseed.py status
-uv run python scripts/multiseed.py run
+git add README.md docs reports scripts src tests pyproject.toml uv.lock
+git commit -m "Seal final evaluation release pipeline"
+uv run python scripts/build_subgroups.py `
+  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
+  --output runs\release\ptbxl_matched_equal_budget_v1\fold10_subgroups.json
+uv run python scripts/freeze_final_evaluation.py `
+  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
+  --subgroups runs\release\ptbxl_matched_equal_budget_v1\fold10_subgroups.json `
+  --device cuda:0 `
+  --output runs\release\ptbxl_matched_equal_budget_v1\final_evaluation_spec.json
+uv run python scripts/release_pipeline.py export-fold9 `
+  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
+  --evaluation-spec runs\release\ptbxl_matched_equal_budget_v1\final_evaluation_spec.json
+uv run python scripts/release_pipeline.py fit-calibration `
+  --refit-bundle runs\release\ptbxl_matched_equal_budget_v1\refit_bundle.json `
+  --evaluation-spec runs\release\ptbxl_matched_equal_budget_v1\final_evaluation_spec.json
 ```
 
-If interrupted, use `scripts/multiseed.py run --resume` only for the persisted,
-hash-matched plan. Once all six member receipts verify, pass those six paths
-explicitly to `scripts/freeze_multiseed.py`, then run each generated refit
-recipe with `scripts/refit.py`. No fold-9 or fold-10 command belongs in routine
-development instructions; the release pipeline exposes those stages only
-after the six-refit bundle gate passes.
+Inspect and archive the sealed fold-9/calibration artifact hashes before the
+single `run-final` invocation. Only an interrupted hash-identical final batch
+may use `--resume`; completed resume is verification-only and performs no new
+export or ledger mutation.

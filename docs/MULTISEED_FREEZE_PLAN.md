@@ -203,17 +203,17 @@ budgets, hyperparameters, or ensemble membership.
 
 ## Acceptance gates
 
-- [ ] Exactly six complete, aligned fold-8 confirmation artifacts exist for
+- [x] Exactly six complete, aligned fold-8 confirmation artifacts exist for
       the fixed paired seeds; no replacement seed or best-seed selection.
-- [ ] Architecture score, margin decision, practical-tie fallback, and median
+- [x] Architecture score, margin decision, practical-tie fallback, and median
       epoch budgets recompute exactly from source artifacts.
-- [ ] Freeze JSON is immutable, integrity-bound, and contains no fold-9/10
+- [x] Freeze JSON is immutable, integrity-bound, and contains no fold-9/10
       source or metric.
-- [ ] Generated refit recipes are exact members of the freeze artifact; manual
+- [x] Generated refit recipes are exact members of the freeze artifact; manual
       placeholder configs are rejected.
-- [ ] Refit verification binds complete source-run metadata, checkpoint hash,
+- [x] Refit verification binds complete source-run metadata, checkpoint hash,
       seed, precision, scientific config, and architecture-level epoch budget.
-- [ ] All six refit completions bind authoritative final checkpoints and the
+- [x] All six refit completions bind authoritative final checkpoints and the
       same freeze hash before the fold-9 release bundle can be created.
-- [ ] CPU-only tests cover tampering, missing seeds, misalignment, incomplete
+- [x] CPU-only tests cover tampering, missing seeds, misalignment, incomplete
       runs, seed/config drift, premature fold 9, and deterministic regeneration.

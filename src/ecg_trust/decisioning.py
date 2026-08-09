@@ -51,7 +51,7 @@ from ecg_trust.protocol import (
 
 DECISION_SCHEMA_VERSION = 1
 DECISION_ARTIFACT_TYPE = "ecg_trust.calibration_decisions"
-FINAL_REPORT_SCHEMA_VERSION = 1
+FINAL_REPORT_SCHEMA_VERSION = 2
 FINAL_REPORT_TYPE = "ecg_trust.final_evaluation_report"
 ENTROPY_METHOD = "mean_normalized_binary_entropy"
 
@@ -173,6 +173,8 @@ class FinalEvaluationReport:
     selective_prediction: SelectivePredictionResult
     subgroup_audit: SubgroupAuditResult
     patient_bootstrap: PatientClusterBootstrapResult
+    final_evaluation_spec: Mapping[str, object]
+    protocol_deviations: Mapping[str, object]
     created_at_utc: str
 
     def to_payload(self) -> dict[str, object]:
@@ -203,6 +205,8 @@ class FinalEvaluationReport:
             "selective_prediction": self.selective_prediction.to_dict(),
             "subgroup_audit": self.subgroup_audit.to_dict(),
             "patient_bootstrap": self.patient_bootstrap.to_dict(),
+            "final_evaluation_spec": dict(self.final_evaluation_spec),
+            "protocol_deviations": dict(self.protocol_deviations),
             "created": {
                 "timestamp_utc": self.created_at_utc,
                 "software_versions": _software_versions(),
@@ -387,6 +391,8 @@ def generate_final_report(
     test_access: FinalTestAccessToken,
     subgroup_ecg_id: ArrayLike,
     subgroups: Mapping[str, ArrayLike],
+    final_evaluation_spec: Mapping[str, object],
+    protocol_deviations: Mapping[str, object],
     bootstrap_resamples: int = 1_000,
     bootstrap_seed: int = 20_260_808,
     bootstrap_confidence: float = 0.95,
@@ -406,6 +412,10 @@ def generate_final_report(
     protocol.folds_for(FoldRole.FINAL_TEST, test_access=test_access)
     _validate_final_provenance(decisions, final_prediction, protocol)
     _validate_subgroup_alignment(subgroup_ecg_id, final_prediction.ecg_id)
+    spec_binding, deviation_binding = _normalize_final_reporting_provenance(
+        final_evaluation_spec,
+        protocol_deviations,
+    )
 
     probabilities = decisions.temperature_scaling.predict_proba(
         final_prediction.raw_logits, label_order=final_prediction.label_order
@@ -463,6 +473,8 @@ def generate_final_report(
         selective_prediction=selective,
         subgroup_audit=subgroup_audit,
         patient_bootstrap=bootstrap,
+        final_evaluation_spec=MappingProxyType(spec_binding),
+        protocol_deviations=MappingProxyType(deviation_binding),
         created_at_utc=_timestamp(created_at_utc),
     )
 
@@ -513,12 +525,17 @@ def verify_final_report(
             "selective_prediction",
             "subgroup_audit",
             "patient_bootstrap",
+            "final_evaluation_spec",
+            "protocol_deviations",
             "created",
             "report_sha256",
         },
         context="final evaluation report",
     )
-    if _integer(payload.get("schema_version"), "schema_version", minimum=1) != 1:
+    if (
+        _integer(payload.get("schema_version"), "schema_version", minimum=1)
+        != FINAL_REPORT_SCHEMA_VERSION
+    ):
         raise DecisionIntegrityError("unsupported final report schema_version")
     if _string(payload.get("report_type"), "report_type") != FINAL_REPORT_TYPE:
         raise DecisionIntegrityError("unexpected final report type")
@@ -529,7 +546,60 @@ def verify_final_report(
     del unhashed["report_sha256"]
     if stored != _payload_hash(unhashed):
         raise DecisionIntegrityError("final report SHA-256 mismatch")
+    normalized_spec, normalized_deviations = _normalize_final_reporting_provenance(
+        _mapping(payload["final_evaluation_spec"], "final_evaluation_spec"),
+        _mapping(payload["protocol_deviations"], "protocol_deviations"),
+    )
+    if payload["final_evaluation_spec"] != normalized_spec:
+        raise DecisionIntegrityError(
+            "final report has non-canonical final_evaluation_spec provenance"
+        )
+    if payload["protocol_deviations"] != normalized_deviations:
+        raise DecisionIntegrityError(
+            "final report has non-canonical protocol_deviations provenance"
+        )
     return payload
+
+
+def _normalize_final_reporting_provenance(
+    final_evaluation_spec: Mapping[str, object],
+    protocol_deviations: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Require the exact frozen spec and mandatory deviation-log bindings."""
+
+    spec = _mapping(final_evaluation_spec, "final_evaluation_spec")
+    _expect_keys(
+        spec,
+        required={"path", "file_sha256", "artifact_sha256"},
+        context="final_evaluation_spec",
+    )
+    deviations = _mapping(protocol_deviations, "protocol_deviations")
+    _expect_keys(
+        deviations,
+        required={"path", "file_sha256", "required_in_final_reporting"},
+        context="protocol_deviations",
+    )
+    if deviations["required_in_final_reporting"] is not True:
+        raise FinalReportProvenanceError(
+            "protocol deviation disclosure must be required in final reporting"
+        )
+    normalized_spec: dict[str, object] = {
+        "path": _string(spec["path"], "final_evaluation_spec.path"),
+        "file_sha256": _hash_string(
+            spec["file_sha256"], "final_evaluation_spec.file_sha256"
+        ),
+        "artifact_sha256": _hash_string(
+            spec["artifact_sha256"], "final_evaluation_spec.artifact_sha256"
+        ),
+    }
+    normalized_deviations: dict[str, object] = {
+        "path": _string(deviations["path"], "protocol_deviations.path"),
+        "file_sha256": _hash_string(
+            deviations["file_sha256"], "protocol_deviations.file_sha256"
+        ),
+        "required_in_final_reporting": True,
+    }
+    return normalized_spec, normalized_deviations
 
 
 def _validate_calibration_prediction(
