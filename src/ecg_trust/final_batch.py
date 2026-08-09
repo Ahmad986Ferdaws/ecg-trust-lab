@@ -2037,7 +2037,9 @@ def _validate_final_export_result(
         result.files.json_path.resolve() != prediction_path.with_suffix(".json").resolve()
     ):
         raise ReleaseIntegrityError("final exporter wrote outside the planned path")
-    if result.files.npz_sha256 != sha256_file(prediction_path):
+    if _normalized_hash(
+        result.files.npz_sha256, "export npz_sha256"
+    ) != "sha256:" + sha256_file(prediction_path):
         raise ReleaseIntegrityError("final exporter NPZ hash differs from saved file")
 
 

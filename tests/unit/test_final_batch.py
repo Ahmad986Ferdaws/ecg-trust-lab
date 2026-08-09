@@ -20,6 +20,8 @@ from ecg_trust.final_batch import (
     load_final_opening_ledger,
     open_or_resume_final_batch,
 )
+from ecg_trust.prediction_export import PredictionExportResult
+from ecg_trust.predictions import PredictionArtifactFiles
 from ecg_trust.protocol import (
     FINAL_TEST_CONFIRMATION,
     ExperimentProtocol,
@@ -743,6 +745,42 @@ def test_ledger_writer_lock_does_not_remove_replacement_owner(tmp_path: Path) ->
             encoding="utf-8",
         )
     assert json.loads(lock_path.read_text(encoding="utf-8"))["nonce"] == "replacement"
+
+
+def test_final_export_result_accepts_prefixed_npz_hash(tmp_path: Path) -> None:
+    refits, _ = _bundles(tmp_path)
+    refit = refits.members[0]
+    prediction_path = tmp_path / "member.fold10.npz"
+    prediction_path.write_bytes(b"fold-10 predictions")
+    prediction_path.with_suffix(".json").write_text("{}", encoding="utf-8")
+    npz_sha256 = hashlib.sha256(prediction_path.read_bytes()).hexdigest()
+    result = PredictionExportResult(
+        files=PredictionArtifactFiles(
+            npz_path=prediction_path,
+            json_path=prediction_path.with_suffix(".json"),
+            npz_sha256="sha256:" + npz_sha256,
+            artifact_sha256=_hash("prediction artifact"),
+        ),
+        lineage="frozen_refit",
+        fold_role=FoldRole.FINAL_TEST,
+        folds=(10,),
+        record_count=1,
+        model_name=refit.run_name,
+        model_seed=refit.seed,
+        checkpoint_sha256=refit.final_checkpoint_sha256,
+        config_hash=refit.resolved_config_hash,
+        manifest_hash=refit.manifest_sha256,
+        normalization_sha256=refit.normalization_sha256,
+        device="cuda:0",
+        bf16_enabled=True,
+    )
+
+    final_batch._validate_final_export_result(
+        result,
+        refit=refit,
+        prediction_path=prediction_path,
+        inference={"device": "cuda:0", "bf16": True},
+    )
 
 
 @pytest.mark.parametrize("orphan_suffix", [".npz", ".json"])
