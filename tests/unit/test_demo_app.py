@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -118,11 +119,36 @@ def test_index_metadata_and_local_plotly_are_self_contained() -> None:
     assert page.status_code == 200
     assert "Research use only" in page.text
     assert "ECG Trust Lab" in page.text
+    assert '<link rel="icon" href="data:,">' in page.text
+    assert "type: 'scatter'" in page.text
+    assert "scattergl" not in page.text.casefold()
+    assert "webgl" not in page.text.casefold()
     assert metadata.json()["label_order"] == list(SUPERCLASSES)
     assert metadata.json()["input"]["samples_per_lead"] == 1000
     assert metadata.json()["decision_policy"]["calibration_folds"] == [9]
     assert javascript.status_code == 200
     assert "plotly" in javascript.text[:1000].casefold()
+
+
+def test_index_csp_nonce_authorizes_inline_controller_per_request() -> None:
+    with TestClient(create_app(backend=FakeBackend())) as client:
+        pages = (client.get("/"), client.get("/"))
+
+    nonces: list[str] = []
+    for page in pages:
+        script_source = next(
+            directive.strip()
+            for directive in page.headers["content-security-policy"].split(";")
+            if directive.strip().startswith("script-src ")
+        )
+        match = re.search(r"'nonce-([A-Za-z0-9_-]+)'", script_source)
+        assert match is not None
+        nonce = match.group(1)
+        nonces.append(nonce)
+        assert "'unsafe-inline'" not in script_source
+        assert page.text.count(f'<script nonce="{nonce}">') == 1
+
+    assert nonces[0] != nonces[1]
 
 
 def test_upload_prediction_returns_waveform_and_hides_temporary_path(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>PTB-XL ECG Trust Lab</title>
   <style>
     :root {
@@ -167,7 +168,7 @@
   </div>
 </main>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', () => {
   const labels = {{ labels | tojson }};
   const leads = {{ leads | tojson }};
@@ -230,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const waveform = payload.waveform;
     const traces = leads.map((lead, index) => ({
-      type: 'scattergl', mode: 'lines', name: lead, x: waveform.time_seconds, y: waveform.values[index],
+      type: 'scatter', mode: 'lines', name: lead, x: waveform.time_seconds, y: waveform.values[index],
       xaxis: `x${index ? index + 1 : ''}`, yaxis: `y${index ? index + 1 : ''}`,
       line: {width: 1, color: '#a7d9d1'}, hovertemplate: `${lead}<br>%{x:.2f}s<br>%{y:.3f}mV<extra></extra>`
     }));

@@ -6,6 +6,7 @@ import asyncio
 import json
 import math
 import re
+import secrets
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -292,12 +293,15 @@ def create_app(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
+        csp_nonce = secrets.token_urlsafe(32)
+        request.state.csp_nonce = csp_nonce
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            f"default-src 'self'; script-src 'self' 'nonce-{csp_nonce}'; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
         )
         if request.url.path != "/assets/plotly.min.js":
@@ -314,6 +318,7 @@ def create_app(
                 "labels": SUPERCLASSES,
                 "leads": LEADS,
                 "notice": RESEARCH_ONLY_NOTICE,
+                "csp_nonce": request.state.csp_nonce,
             },
         )
 
