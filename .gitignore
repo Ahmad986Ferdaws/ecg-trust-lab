@@ -9,6 +9,20 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
+publication/media/.build-tools/
+publication/media/.verify/
+publication/media/slides/
+
+# Local credentials and exported model binaries
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.safetensors
+*.onnx
 
 # Editors and operating system
 .vscode/

@@ -1,0 +1,546 @@
+from __future__ import annotations
+
+import io
+import json
+import math
+import tarfile
+from collections.abc import Mapping
+from pathlib import Path
+from types import MappingProxyType, SimpleNamespace
+from typing import Any, cast
+
+import numpy as np
+import pandas as pd  # type: ignore[import-untyped]
+import pytest
+import torch
+from torch import Tensor, nn
+from torch.utils.data import Dataset
+
+from ecg_trust.audit_artifacts import load_audit_array_artifact
+from ecg_trust.audit_runtime import EXPECTED_AUDIT_MEMBER_IDS, CompletedAuditRuntime
+from ecg_trust.protocol import LABEL_ORDER
+from ecg_trust.sph_transport import (
+    SPHFrozenMemberOutput,
+    SPHTransportCohorts,
+    SPHTransportEvaluation,
+    SPHTransportInference,
+    SPHTransportIntegrityError,
+    SPHTransportSpec,
+    _architecture_summaries,
+    apply_frozen_member_decisions,
+    assert_identifier_free_public_outputs,
+    infer_sph_transport,
+    load_sph_transport_spec,
+    record_sph_attempt_failure,
+    reserve_sph_transport_attempt,
+    save_sph_transport_outputs,
+    verify_sph_archive_safety,
+)
+from scripts.sph_transport import build_parser
+
+
+class _CountingDataset(Dataset[tuple[Tensor, Tensor]]):
+    def __init__(self, count: int) -> None:
+        self.count = count
+        self.reads = np.zeros(count, dtype=np.int64)
+
+    def __len__(self) -> int:
+        return self.count
+
+    def __getitem__(self, index: int) -> tuple[Tensor, Tensor]:
+        self.reads[index] += 1
+        signal = torch.full((12, 1000), float(index + 1), dtype=torch.float32)
+        target = torch.tensor([(index + offset) % 2 for offset in range(5)], dtype=torch.float32)
+        return signal, target
+
+
+class _CountingModel(nn.Module):
+    def __init__(self, offset: float) -> None:
+        super().__init__()
+        self.offset = offset
+        self.calls = 0
+
+    def forward(self, signals: Tensor) -> Tensor:
+        self.calls += 1
+        base = signals.mean(dim=(1, 2)) + self.offset
+        return torch.stack([base + index for index in range(5)], dim=1)
+
+
+class _Normalization:
+    def to_dict(self) -> dict[str, object]:
+        return {"kind": "frozen-test-normalization"}
+
+
+class _Temperature:
+    temperature = 2.0
+
+    def predict_proba(
+        self, logits: np.ndarray[Any, Any], *, label_order: tuple[str, ...]
+    ) -> np.ndarray[Any, Any]:
+        assert label_order == LABEL_ORDER
+        return 1.0 / (1.0 + np.exp(-np.asarray(logits) / self.temperature))
+
+
+class _Thresholds:
+    thresholds = (0.5, 0.5, 0.5, 0.5, 0.5)
+
+    def apply(
+        self, probabilities: np.ndarray[Any, Any], *, label_order: tuple[str, ...]
+    ) -> np.ndarray[Any, Any]:
+        assert label_order == LABEL_ORDER
+        return np.asarray(probabilities) >= np.asarray(self.thresholds)[None, :]
+
+
+def _fake_member(member_id: str, offset: float = 0.0) -> SimpleNamespace:
+    architecture, raw_seed = member_id.split("-seed")
+    model = _CountingModel(offset)
+    decisions = SimpleNamespace(
+        label_order=LABEL_ORDER,
+        temperature_scaling=_Temperature(),
+        threshold_optimization=_Thresholds(),
+        coverage_gates=(
+            SimpleNamespace(target_coverage=1.0, maximum_entropy=1.0),
+            SimpleNamespace(target_coverage=0.5, maximum_entropy=0.5),
+        ),
+        integrity_sha256="sha256:" + "1" * 64,
+    )
+    return SimpleNamespace(
+        member_id=member_id,
+        architecture=architecture,
+        seed=int(raw_seed),
+        model=model,
+        normalization=_Normalization(),
+        runtime=SimpleNamespace(device=torch.device("cpu"), bf16_enabled=False),
+        settings=SimpleNamespace(
+            batch_size=2,
+            num_workers=0,
+            pin_memory=False,
+            persistent_workers=False,
+        ),
+        decisions=decisions,
+        checkpoint_sha256="sha256:" + "2" * 64,
+        normalize_physical_batch=lambda signals: signals / 2.0,
+    )
+
+
+def _fake_runtime() -> SimpleNamespace:
+    return SimpleNamespace(
+        members=tuple(
+            _fake_member(member_id, offset=float(index))
+            for index, member_id in enumerate(EXPECTED_AUDIT_MEMBER_IDS)
+        ),
+        refit_bundle=SimpleNamespace(normalization_sha256="sha256:" + "3" * 64),
+        clean_equivalence=tuple(
+            SimpleNamespace(
+                to_dict=lambda member_id=member_id: {
+                    "member_id": member_id,
+                    "exact": True,
+                }
+            )
+            for member_id in EXPECTED_AUDIT_MEMBER_IDS
+        ),
+    )
+
+
+def _output_spec(tmp_path: Path, output_name: str = "run") -> SPHTransportSpec:
+    config = tmp_path / f"{output_name}-frozen.yaml"
+    config.write_text("protocol_id: test\n", encoding="utf-8")
+    return SPHTransportSpec(
+        path=config,
+        project_root=tmp_path,
+        file_sha256="sha256:" + "a" * 64,
+        metadata_path=tmp_path / "metadata.csv",
+        code_dictionary_path=tmp_path / "code.csv",
+        rule_path=tmp_path / "rule.pdf",
+        records_archive_path=tmp_path / "records.tar.gz",
+        records_dir=tmp_path / "records",
+        normalization_path=tmp_path / "normalization.json",
+        refit_bundle_path=tmp_path / "refit.json",
+        calibration_bundle_path=tmp_path / "calibration.json",
+        final_evaluation_spec_path=tmp_path / "final.json",
+        opening_ledger_path=tmp_path / "ledger.json",
+        protocol_path=tmp_path / "protocol.yaml",
+        output_root=tmp_path / output_name,
+        public_row_permutation_seed=2_026_081_601,
+        _payload_json="{}",
+    )
+
+
+def test_one_data_pass_fans_out_to_exact_six_and_preserves_alignment() -> None:
+    dataset = _CountingDataset(7)
+    expected_targets = np.asarray(
+        [[(row + offset) % 2 for offset in range(5)] for row in range(7)],
+        dtype=np.int8,
+    )
+    runtime = _fake_runtime()
+
+    result = infer_sph_transport(
+        cast(CompletedAuditRuntime, runtime),
+        dataset,
+        expected_targets=expected_targets,
+    )
+
+    assert np.array_equal(dataset.reads, np.ones(7, dtype=np.int64))
+    assert np.array_equal(result.targets, expected_targets)
+    assert tuple(result.raw_logits) == EXPECTED_AUDIT_MEMBER_IDS
+    assert result.per_record_max_abs_mv.tolist() == pytest.approx(
+        [float(index) for index in range(1, 8)]
+    )
+    assert result.physical_signal_sha256.startswith("sha256:")
+    for member in runtime.members:
+        assert member.model.calls == math.ceil(7 / 2)
+        assert result.raw_logits[member.member_id].shape == (7, 5)
+
+
+def test_frozen_member_policy_uses_threshold_equality_and_fixed_gate_cutoffs() -> None:
+    member = _fake_member(EXPECTED_AUDIT_MEMBER_IDS[0])
+    logits = np.zeros((3, 5), dtype=np.float64)
+
+    result = apply_frozen_member_decisions(cast(Any, member), logits)
+
+    assert result.predictions.all()  # sigmoid(0 / T) == frozen threshold 0.5
+    assert result.gate_selected[:, 0].all()
+    assert not result.gate_selected[:, 1].any()  # entropy 1.0 exceeds cutoff 0.5
+    assert result.temperature == 2.0
+
+
+def test_private_alignment_and_identifier_free_public_outputs_are_immutable(
+    tmp_path: Path,
+) -> None:
+    count = 4
+    spec = _output_spec(tmp_path)
+    output_root = spec.output_root
+    targets = np.asarray(
+        [[0, 1, 0, 1, 0], [1, 0, 1, 0, 1], [1, 1, 0, 0, 0], [0, 0, 1, 1, 0]],
+        dtype=np.int8,
+    )
+    masks = {
+        "primary_mapped": np.asarray([True, True, True, True]),
+        "broad_exact10": np.asarray([True, True, True, True]),
+        "no_ambiguous_mapped": np.asarray([True, False, True, True]),
+    }
+    cohorts = SPHTransportCohorts(
+        manifest=pd.DataFrame(
+            {
+                "ecg_id": ["A00001", "A00002", "A00003", "A00004"],
+                "patient_id": ["S00001", "S00002", "S00002", "S00003"],
+                "record_path": [f"A0000{index}.h5" for index in range(1, 5)],
+            }
+        ),
+        ecg_ids=np.asarray(["A00001", "A00002", "A00003", "A00004"]),
+        patient_ids=np.asarray(["S00001", "S00002", "S00002", "S00003"]),
+        targets=targets,
+        masks=MappingProxyType(masks),
+        alignment_sha256="sha256:" + "b" * 64,
+        summaries=MappingProxyType(
+            {
+                name: MappingProxyType({"records": int(mask.sum()), "patients": 3})
+                for name, mask in masks.items()
+            }
+        ),
+    )
+    inference = SPHTransportInference(
+        targets=targets,
+        raw_logits=MappingProxyType({}),
+        per_record_max_abs_mv=np.arange(1, count + 1, dtype=np.float64),
+        per_record_lead_max_abs_mv=np.ones((count, 12), dtype=np.float64),
+        physical_signal_sha256="sha256:" + "c" * 64,
+        per_lead_qc=MappingProxyType(
+            {lead: MappingProxyType({"sample_mean_mv": 0.0}) for lead in range(12)}
+        ),
+    )
+    runtime = _fake_runtime()
+    outputs: dict[str, SPHFrozenMemberOutput] = {}
+    member_reports: dict[str, Mapping[str, object]] = {}
+    metric_payload = {
+        "macro": {
+            "roc_auc": 0.7,
+            "average_precision": 0.6,
+            "brier_score": 0.2,
+            "ece": 0.1,
+        },
+        "per_label": [
+            {
+                "label": label,
+                "prevalence": 0.5,
+                "roc_auc": 0.7,
+                "average_precision": 0.6,
+                "brier_score": 0.2,
+                "ece": 0.1,
+            }
+            for label in LABEL_ORDER
+        ],
+    }
+    for member in runtime.members:
+        output = apply_frozen_member_decisions(
+            cast(Any, member), np.zeros((count, 5), dtype=np.float64)
+        )
+        outputs[member.member_id] = output
+        for cohort_name in masks:
+            member_reports[f"{cohort_name}/{member.member_id}"] = MappingProxyType(
+                {
+                    "n_samples": int(masks[cohort_name].sum()),
+                    "probability_views": {
+                        "raw_sigmoid": {"metrics": metric_payload},
+                        "frozen_temperature_calibrated": {"metrics": metric_payload},
+                    },
+                    "frozen_threshold_decisions": {
+                        "hamming_risk": 0.25,
+                        "exact_match_accuracy": 0.5,
+                    },
+                    "frozen_entropy_gates": [
+                        {
+                            "target_coverage": target,
+                            "observed_coverage": target - 0.05,
+                            "hamming_risk": 0.2,
+                            "exact_match_accuracy": 0.4,
+                        }
+                        for target in (1.0, 0.9, 0.8, 0.7, 0.5)
+                    ],
+                }
+            )
+    interval = {"estimate": 0.01, "lower": -0.02, "upper": 0.04}
+    paired_reports = {
+        f"{cohort_name}/seed{seed}": MappingProxyType(
+            {
+                "probability_views": {
+                    "frozen_temperature_calibrated": {
+                        "macro": {
+                            metric: interval
+                            for metric in (
+                                "roc_auc",
+                                "average_precision",
+                                "brier_score",
+                                "ece",
+                            )
+                        }
+                    }
+                }
+            }
+        )
+        for cohort_name in masks
+        for seed in (2026, 2027, 2028)
+    }
+    evaluation = SPHTransportEvaluation(
+        member_outputs=MappingProxyType(outputs),
+        member_reports=MappingProxyType(member_reports),
+        paired_reports=MappingProxyType(paired_reports),
+        architecture_summaries=MappingProxyType({}),
+    )
+
+    attempt = reserve_sph_transport_attempt(
+        spec,
+        cast(CompletedAuditRuntime, runtime),
+        source_inventory={"status": "synthetic_test"},
+        execution_state={"git_worktree_clean": True},
+    )
+    committed = save_sph_transport_outputs(
+        spec,
+        cast(CompletedAuditRuntime, runtime),
+        cohorts,
+        inference,
+        evaluation,
+        attempt=attempt,
+    )
+
+    private = load_audit_array_artifact(output_root / "private" / "cohort_alignment.npz")
+    public = load_audit_array_artifact(
+        output_root / "public" / "member_predictions" / "resnet1d-seed2026.npz"
+    )
+    assert {"ecg_id", "patient_id"} <= set(private.arrays)
+    assert "ecg_id" not in public.arrays and "patient_id" not in public.arrays
+    assert committed.public_manifest_path.is_file()
+    for relative in (
+        "private/protocol.snapshot.yaml",
+        "private/source_inventory.json",
+        "private/cohort_manifest.parquet",
+        "private/RUN_LOG.md",
+        "private/derived_artifacts.manifest.json",
+        "public/cohort_summary.json",
+        "public/FINAL_RESULTS.md",
+        "public/member_predictions",
+        "public/member_reports",
+        "public/architecture_summaries",
+        "public/paired_bootstrap_reports",
+    ):
+        assert (output_root / relative).exists()
+    rendered = (output_root / "public" / "FINAL_RESULTS.md").read_text(encoding="utf-8")
+    assert "Primary calibrated architecture results" in rendered
+    assert "Paired Transformer-minus-ResNet" in rendered
+    assert "| 1.0 | resnet1d |" in rendered
+    assert "| 0.5 | ecg_transformer |" in rendered
+    assert_identifier_free_public_outputs(output_root / "public")
+    with pytest.raises(SPHTransportIntegrityError, match="unexpected state"):
+        save_sph_transport_outputs(
+            spec,
+            cast(CompletedAuditRuntime, runtime),
+            cohorts,
+            inference,
+            evaluation,
+            attempt=attempt,
+        )
+
+
+def test_malformed_or_unfrozen_protocol_fails_before_source_access(tmp_path: Path) -> None:
+    config = tmp_path / "configs" / "external_transport_sph_frozen.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "schema_version: 1\nprotocol_id: sph-external-transport-v1\nstatus: draft\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(SPHTransportIntegrityError, match="not frozen"):
+        load_sph_transport_spec(config)
+
+
+def test_architecture_summaries_retain_per_label_threshold_and_all_gate_seed_values() -> None:
+    reports: dict[str, Mapping[str, object]] = {}
+    for cohort_name in ("primary_mapped", "broad_exact10", "no_ambiguous_mapped"):
+        for architecture in ("resnet1d", "ecg_transformer"):
+            for seed_index, seed in enumerate((2026, 2027, 2028)):
+                metric_payload = {
+                    "macro": {
+                        "roc_auc": 0.70 + seed_index * 0.01,
+                        "average_precision": 0.60,
+                        "brier_score": 0.20,
+                        "ece": 0.10,
+                    },
+                    "per_label": [
+                        {
+                            "label": label,
+                            "prevalence": 0.50,
+                            "roc_auc": 0.71 + seed_index * 0.01,
+                            "average_precision": 0.61,
+                            "brier_score": 0.21,
+                            "ece": 0.11,
+                        }
+                        for label in LABEL_ORDER
+                    ],
+                }
+                reports[f"{cohort_name}/{architecture}-seed{seed}"] = {
+                    "probability_views": {
+                        "raw_sigmoid": {"metrics": metric_payload},
+                        "frozen_temperature_calibrated": {"metrics": metric_payload},
+                    },
+                    "frozen_threshold_decisions": {
+                        "hamming_risk": 0.25,
+                        "exact_match_accuracy": 0.50,
+                    },
+                    "frozen_entropy_gates": [
+                        {
+                            "target_coverage": target,
+                            "observed_coverage": target - 0.01,
+                            "hamming_risk": 0.20,
+                            "exact_match_accuracy": 0.40,
+                        }
+                        for target in (1.0, 0.9, 0.8, 0.7, 0.5)
+                    ],
+                }
+
+    summaries = _architecture_summaries(reports)
+    summary = summaries["primary_mapped__resnet1d"]
+    statistics = cast(Mapping[str, Mapping[str, object]], summary["statistics"])
+
+    representative = statistics["raw_sigmoid.per_label.NORM.roc_auc"]
+    assert representative["values"] == pytest.approx([0.71, 0.72, 0.73])
+    assert representative["mean"] == pytest.approx(0.72)
+    assert representative["sample_standard_deviation"] == pytest.approx(0.01)
+    assert "frozen_threshold_decisions.hamming_risk" in statistics
+    for target_key in ("target_1p0", "target_0p9", "target_0p8", "target_0p7", "target_0p5"):
+        for metric in ("observed_coverage", "hamming_risk", "exact_match_accuracy"):
+            key = f"frozen_entropy_gates.{target_key}.{metric}"
+            assert key in statistics
+            assert len(cast(list[object], statistics[key]["values"])) == 3
+
+
+def test_attempt_reservation_and_failure_receipt_make_failed_run_visible(
+    tmp_path: Path,
+) -> None:
+    spec = _output_spec(tmp_path, "failed-run")
+    runtime = _fake_runtime()
+    attempt = reserve_sph_transport_attempt(
+        spec,
+        cast(CompletedAuditRuntime, runtime),
+        source_inventory={"archive_member_content_match": True},
+        execution_state={"git_worktree_clean": True},
+    )
+    assert attempt.marker_path.is_file()
+
+    failure = record_sph_attempt_failure(attempt, RuntimeError("synthetic OOM"))
+
+    payload = json.loads(failure.read_text(encoding="utf-8"))
+    assert payload["artifact_type"] == "ecg_trust.sph_transport_attempt_failure"
+    assert payload["exception_type"] == "builtins.RuntimeError"
+    assert payload["exception_message"] == "synthetic OOM"
+    assert any(spec.output_root.iterdir())
+    with pytest.raises(FileExistsError, match="refusing attempt"):
+        reserve_sph_transport_attempt(
+            spec,
+            cast(CompletedAuditRuntime, runtime),
+            source_inventory={"archive_member_content_match": True},
+            execution_state={"git_worktree_clean": True},
+        )
+    with pytest.raises(FileExistsError):
+        record_sph_attempt_failure(attempt, RuntimeError("second failure"))
+
+
+def test_public_privacy_scan_rejects_identity_in_markdown(tmp_path: Path) -> None:
+    public = tmp_path / "public"
+    public.mkdir()
+    (public / "results.md").write_text(
+        "A source row A24032 must never appear here.\n", encoding="utf-8"
+    )
+    with pytest.raises(SPHTransportIntegrityError, match="public text"):
+        assert_identifier_free_public_outputs(public)
+
+
+def test_public_privacy_scan_rejects_aha_code_field_in_text(tmp_path: Path) -> None:
+    public = tmp_path / "public"
+    public.mkdir()
+    (public / "notes.txt").write_text("AHA_Code must stay private.\n", encoding="utf-8")
+    with pytest.raises(SPHTransportIntegrityError, match="public text"):
+        assert_identifier_free_public_outputs(public)
+
+
+def test_public_privacy_scan_rejects_private_field_in_json_value(tmp_path: Path) -> None:
+    public = tmp_path / "public"
+    public.mkdir()
+    (public / "notes.json").write_text('{"note":"do not emit AHA_Code values"}\n', encoding="utf-8")
+    with pytest.raises(SPHTransportIntegrityError, match="public text"):
+        assert_identifier_free_public_outputs(public)
+
+
+def test_archive_audit_rejects_same_named_modified_extracted_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive_path = tmp_path / "records.tar.gz"  # Official suffix may hold plain tar.
+    records_dir = tmp_path / "records"
+    records_dir.mkdir()
+    (records_dir / "A00001.h5").write_bytes(b"modified")
+    with tarfile.open(archive_path, mode="w") as archive:
+        payload = b"authoritative"
+        member = tarfile.TarInfo("records/A00001.h5")
+        member.size = len(payload)
+        archive.addfile(member, io.BytesIO(payload))
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.build_sph_transport_manifest",
+        lambda _metadata, _codes: pd.DataFrame({"record_path": ["A00001.h5"]}),
+    )
+    spec = cast(
+        SPHTransportSpec,
+        SimpleNamespace(
+            records_archive_path=archive_path,
+            records_dir=records_dir,
+            metadata_path=tmp_path / "metadata.csv",
+            code_dictionary_path=tmp_path / "code.csv",
+        ),
+    )
+    with pytest.raises(SPHTransportIntegrityError, match="differs from archive member"):
+        verify_sph_archive_safety(spec, cast(Any, None))
+
+
+def test_cli_exposes_no_scientific_overrides() -> None:
+    parser = build_parser()
+    destinations = {action.dest for action in parser._actions}  # noqa: SLF001
+    assert destinations == {"help", "config"}
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--bootstrap-resamples", "2"])

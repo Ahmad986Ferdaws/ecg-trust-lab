@@ -10,7 +10,21 @@ Start with the concise [build order](docs/BUILD_ORDER.md) or the full
 [completed r3 model card](docs/MODEL_CARD_PTBXL_SUPERCLASS_R3.md) separates the
 sealed fold-10 result from post-evaluation descriptive audits. The
 [development report](reports/DEVELOPMENT_RESULTS.md) is retained as a
-historical pre-evaluation snapshot.
+historical pre-evaluation snapshot. A concise
+[portfolio case study](docs/PORTFOLIO_CASE_STUDY.md) explains the full project,
+result, limitations, and résumé-ready summary without requiring ML expertise.
+The [sanitized public result snapshot](reports/FINAL_RESULTS_PUBLIC.md) links
+the identifier-free aggregate tables and figures that can safely accompany a
+source-only clone.
+
+## Demo walkthrough
+
+[![ECG Trust Lab demo poster](publication/media/ecg-trust-lab-demo-poster.png)](publication/media/ecg-trust-lab-research-demo.mp4)
+
+The linked [29.5-second silent walkthrough](publication/media/ecg-trust-lab-research-demo.mp4)
+shows the frozen model state, calibrated probabilities, accept/defer gate,
+12-lead waveform, and Grad-CAM sensitivity overlay. It is a research-interface
+demonstration, not a clinical-use demonstration.
 
 ## Current status
 
@@ -56,6 +70,16 @@ historical pre-evaluation snapshot.
   supersessions and regenerated every derived artifact without reuse; see the
   [post-evaluation run log](reports/POST_EVALUATION_RUN_LOG.md).
 
+## Repository contents
+
+The repository tracks source code, frozen configuration, tests, documentation,
+run logs, and small publication figures. Patient data, local environments,
+checkpoints, predictions, and generated run trees are intentionally excluded
+from Git. A fresh clone therefore does **not** contain PTB-XL records or trained
+weights. Use the [reproducibility guide](docs/REPRODUCIBILITY.md) to reconstruct
+the pipeline from the official dataset; do not treat the repository as a
+downloadable clinical model.
+
 ## Development commands
 
 Run these commands from the project directory:
@@ -84,6 +108,14 @@ uv run mypy
 See the [verified environment record](docs/ENVIRONMENT.md) for exact versions
 and CUDA details, and [reproducibility guide](docs/REPRODUCIBILITY.md) for the
 complete artifact flow.
+
+## Dataset attribution
+
+PTB-XL 1.0.3 is provided by Wagner et al. through PhysioNet under CC BY 4.0.
+The [data card](docs/DATA_CARD.md) records the dataset authors, DOI, license,
+release checksums, and required attribution. Raw PTB-XL files are not
+redistributed in this repository; the included derived waveform visualizations
+remain subject to the dataset's CC BY 4.0 attribution requirements.
 
 ## Scope statement
 

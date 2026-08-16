@@ -1,0 +1,27 @@
+{
+  "artifact": "ecg-trust-lab-research-demo.mp4",
+  "artifact_sha256": "db1432deaa0684dd4ca32899469f830fe50276f37eec3a043c2868bf193ebacc",
+  "poster": "ecg-trust-lab-demo-poster.png",
+  "poster_sha256": "c77fcc029c94a488020ff433d52ec473683a5ef723115c0bcf710ee19a825a4b",
+  "source_captures": {
+    "ecg-demo-r3-initial.png": "f0002b07edbdf0144acab0b6587bde1946bc1118240d694b5e777f54dd56a4d8",
+    "ecg-demo-r3-gradcam.png": "b1cd50671825ee519d06ef67aaace177eabeb550bf553250bf4908f5c1e67a88"
+  },
+  "video": {
+    "duration_seconds": 29.5,
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "codec": "H.264/AVC",
+    "pixel_format": "yuv420p",
+    "audio": false
+  },
+  "scientific_scope": "Research prototype; not a medical device or clinical validation.",
+  "decode_verification": "passed",
+  "ffmpeg_verification_excerpt": [
+    "Duration: 00:00:29.50, start: 0.000000, bitrate: 654 kb/s",
+    "Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 1920x1080, 651 kb/s, 30 fps, 30 tbr, 15360 tbn (default)",
+    "Stream #0:0(und): Video: wrapped_avframe, yuv420p(progressive), 1920x1080, q=2-31, 200 kb/s, 30 fps, 30 tbn (default)",
+    "frame=  885 fps=0.0 q=-0.0 Lsize=N/A time=00:00:29.50 bitrate=N/A speed=86.6x"
+  ]
+}

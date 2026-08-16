@@ -1,0 +1,23 @@
+* text=auto eol=lf
+
+# Publication assets and scientific binary formats must never be line-normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.mp4 binary
+*.pdf binary
+*.ckpt binary
+*.pt binary
+*.pth binary
+*.npz binary
+*.npy binary
+*.parquet binary
+*.h5 binary
+*.hdf5 binary
+*.gz binary
+*.zip binary
+
+# These aggregate result files have published byte-level SHA-256 values.
+publication/results/**/*.csv text eol=lf
+publication/results/SHA256SUMS.txt text eol=lf

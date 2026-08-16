@@ -1,0 +1,382 @@
+schema_version: 1
+protocol_id: sph-external-transport-v1
+status: frozen_before_first_inference
+frozen_at_utc: "2026-08-16T18:45:39Z"
+scientific_parent_git_revision: 4d516b0e989112a9b0b11da5cf58a87f687b0024
+
+purpose:
+  kind: exploratory_external_transport_stress_test
+  source_domain: Shandong Provincial Hospital (SPH)
+  target_task: PTB-XL five-superclass multilabel classification
+  target_order: [NORM, MI, STTC, CD, HYP]
+  interpretation: descriptive_transport_evidence_only
+  clinical_validation: false
+
+source:
+  collection_title: A large-scale multi-label 12-lead electrocardiogram database with standardized diagnostic statements
+  collection_doi: 10.6084/m9.figshare.c.5779802.v1
+  paper_doi: 10.1038/s41597-022-01403-5
+  license: CC0-1.0
+  local_root: data/raw/sph/figshare-v1
+  official_records: 25770
+  official_patients: 24666
+  sampling_rate_hz: 500
+  lead_order: [I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6]
+  files:
+    metadata:
+      path: data/raw/sph/figshare-v1/metadata.csv
+      figshare_doi: 10.6084/m9.figshare.17912441.v1
+      size_bytes: 999219
+      official_md5: md5:8ef8e8789059a585c89c5302c7891909
+      local_sha256: sha256:c6f8dc5197758a3970aae554f8b6ee884d96656b121879bc0eb1adf367ea6d86
+    diagnostic_dictionary:
+      path: data/raw/sph/figshare-v1/code.csv
+      figshare_doi: 10.6084/m9.figshare.17912507.v1
+      size_bytes: 1839
+      official_md5: md5:9fafec6cc6e1ef8117e2964116654d05
+      local_sha256: sha256:4d22759fd19d37133c78d439a5726f9e0bc412cc17483c424926ce9abb33c8fc
+    translation_rules:
+      path: data/raw/sph/figshare-v1/rule.pdf
+      figshare_doi: 10.6084/m9.figshare.19738468.v1
+      size_bytes: 47063
+      official_md5: md5:8e84772f206d50f0e661c787cd4c905a
+      local_sha256: sha256:3991b608fa1f9ab470a934a6437352ebd0080c9dd066dc5085cb155208dfec68
+    records_archive:
+      path: data/raw/sph/figshare-v1/records.tar.gz
+      extracted_root: data/raw/sph/figshare-v1/records
+      figshare_doi: 10.6084/m9.figshare.17912444.v1
+      size_bytes: 2281799680
+      official_md5: md5:0beef976f54cf0a95fac9f45bb157950
+      local_sha256: sha256:cebad89d7d25663272eeb45545712d76302d334bb107cdc23fd15390c9194e55
+      expected_hdf5_files: 25770
+      expected_unique_record_ids: 25770
+      archive_path_traversal_allowed: false
+      metadata_record_set_match_required: true
+
+label_contract:
+  source_column: AHA_Code
+  statement_separator: ";"
+  primary_modifier_separator: "+"
+  token_type: exact_base10_integer
+  primary_code_rule: exactly_one_non_modifier_integer_per_semicolon_statement
+  non_modifier_code_rule: code_less_than_200_or_code_greater_than_or_equal_to_500
+  modifier_code_rule: code_greater_than_or_equal_to_200_and_less_than_500
+  plus_token_order_significance: none
+  malformed_statement_rule: fail_if_not_exactly_one_non_modifier_integer
+  duplicate_statement_rule: preserve_in_provenance_and_map_idempotently_by_set_membership
+  direct_map:
+    NORM:
+      codes: [1]
+      descriptions: [Normal ECG]
+    MI:
+      codes: [160, 161, 165, 166]
+      descriptions: [Anterior MI, Inferior MI, Anteroseptal MI, Extensive anterior MI]
+    STTC:
+      codes: [145, 146, 147, 148]
+      descriptions: [ST deviation, ST deviation with T-wave change, T-wave abnormality, Prolonged QT interval]
+    CD:
+      codes: [83, 84, 85, 86, 87, 88, 101, 102, 104, 105, 106, 108]
+      descriptions:
+        - Second-degree AV block, Mobitz type I (Wenckebach)
+        - Second-degree AV block, Mobitz type II
+        - 2:1 AV block
+        - AV block, varying conduction
+        - AV block, advanced (high-grade)
+        - AV block, complete (third-degree)
+        - Left anterior fascicular block
+        - Left posterior fascicular block
+        - Left bundle-branch block
+        - Incomplete right bundle-branch block
+        - Right bundle-branch block
+        - Ventricular preexcitation
+    HYP:
+      codes: [140, 142, 143]
+      descriptions: [Left atrial enlargement, Left ventricular hypertrophy, Right ventricular hypertrophy]
+  ambiguous_unmapped_primary_codes:
+    80: Short PR interval
+    81: "AV conduction ratio N:D"
+    82: Prolonged PR interval
+    152: TU fusion
+    153: ST-T change due to ventricular hypertrophy
+    155: Early repolarization
+  other_unmapped_rule: never_infer_a_target_from_an_unlisted_code
+  cross_ontology_expert_review_performed: false
+  adjudication_allowed_after_freeze: false
+
+signal_contract:
+  hdf5_dataset_key: ecg
+  source_shape: [12, 5000]
+  source_duration_seconds: 10
+  source_unit: millivolts
+  require_numeric: true
+  require_finite: true
+  allow_transpose: false
+  allow_lead_reordering: false
+  allow_amplitude_rescaling: false
+  resampling:
+    method: scipy.signal.resample_poly
+    up: 1
+    down: 5
+    axis: 1
+    target_sampling_rate_hz: 100
+    target_shape: [12, 1000]
+    output_dtype: float32
+    contiguous: true
+  normalization:
+    policy: apply_unchanged_after_resampling
+    path: artifacts/preprocessing/ptbxl_v1.0.3_train_folds_1-7_normalization.json
+    sha256: sha256:4a6cb489098361d8221403c14871c242672c346975af3a07f731ceac97264363
+    refit_on_sph: false
+    adapt_on_sph: false
+  amplitude_qc:
+    timing: before_model_inference_and_outcome_metrics
+    role: descriptive_unit_scale_smoke_check_only
+    selection_cohort: primary_mapped
+    selection_order: ecg_id_ascending
+    selection_indices: numpy.linspace(0, n_minus_1, 256, dtype=int)
+    selected_records: 256
+    statistics: [absolute_median, absolute_p95, absolute_p99, absolute_maximum]
+    rounded_reference_millivolts:
+      absolute_median: 0.042047
+      absolute_p95: 0.311201
+      absolute_p99: 0.864611
+      absolute_maximum: 58.506
+    acceptance_bounds: none
+    reject_finite_outliers: false
+    clip: false
+    rescale: false
+    may_change_eligibility_or_preprocessing: false
+    full_exact10_preinference_audit:
+      evidence_role: descriptive_observed_evidence_only
+      performance_outcomes_consulted: false
+      records_expected: 18842
+      records_checked: 18842
+      records_passed_signal_contract: 18842
+      raw_hdf5:
+        dtype: float16
+        shape: [12, 5000]
+        numeric_and_finite_records: 18842
+      resampled_physical_space:
+        timing: before_ptb_normalization
+        dtype: float32
+        shape: [12, 1000]
+        contiguous_and_finite_records: 18842
+        global_absolute_millivolts:
+          q50: 0.042204175144433975
+          q95: 0.3094510748982424
+          q99: 0.8505193614959694
+          q99_9: 1.7757529041766844
+          q99_99: 10.919973223976712
+          maximum: 717.4902954101562
+        per_record_maximum_absolute_millivolts:
+          q50: 1.682507574558258
+          q95: 2.915231156349182
+          q99: 16.064358968734766
+          q99_9: 57.53314697647054
+          maximum: 717.4902954101562
+        records_exceeding_maximum_absolute_millivolts:
+          gt_5: 354
+          gt_10: 260
+          gt_20: 96
+          gt_50: 24
+      amplitude_acceptance_rule: none
+      extreme_finite_values: retain_without_clipping_rejection_or_rescaling
+      may_change_cohort_or_model_choices: false
+
+cohorts:
+  inference_universe: broad_exact10
+  one_inference_pass_only: true
+  primary_mapped:
+    selection: N == 5000 and mapped_target_count >= 1
+    records: 15698
+    patients: 15193
+    all_zero_target_rows: 0
+    positive_records: {NORM: 11172, MI: 138, STTC: 3030, CD: 1510, HYP: 113}
+    positive_patients: {NORM: 10874, MI: 131, STTC: 2947, CD: 1453, HYP: 110}
+  broad_exact10:
+    selection: N == 5000
+    records: 18842
+    patients: 18157
+    directly_mapped_records: 15698
+    out_of_scope_only_records: 3144
+    sensitivity_target_rule: out_of_scope_only_rows_are_operationally_all_zero
+    caveat: absent_direct_mapping_is_unknown_not_a_verified_negative
+    positive_records: {NORM: 11172, MI: 138, STTC: 3030, CD: 1510, HYP: 113}
+    positive_patients: {NORM: 10874, MI: 131, STTC: 2947, CD: 1453, HYP: 110}
+  no_ambiguous_mapped:
+    selection: primary_mapped and no ambiguous_unmapped_primary_codes present
+    records: 15563
+    patients: 15066
+    removed_records: 135
+    removed_patients: 134
+    positive_records: {NORM: 11172, MI: 131, STTC: 2981, CD: 1470, HYP: 64}
+    positive_patients: {NORM: 10874, MI: 124, STTC: 2899, CD: 1417, HYP: 63}
+  integrity_expectations:
+    norm_plus_direct_abnormal_conflicts: 0
+    duplicate_ecg_ids: 0
+    missing_patient_ids: 0
+
+frozen_models:
+  refit_bundle:
+    path: runs/release/ptbxl_matched_equal_budget_v1/refit_bundle.json
+    file_sha256: sha256:533e50c14e79c2b3b7ac909e7887e91ff2a5e48ca1420c804f229baa58febcf1
+    artifact_sha256: sha256:7a0bbd07bfeec1cfb68599829921fee0ad4a3d97968520c43c952f1ea3bb59dd
+  calibration_bundle:
+    path: runs/release/ptbxl_matched_equal_budget_v1/calibration_bundle.json
+    file_sha256: sha256:0f448aa06c581275f3bb2e7b00c1e28aaceb941059254372cae4c79a1aabdffc
+    artifact_sha256: sha256:12b63f0ca20c0c8a901166ff3fa3bc8ed707cecb467413326e057d69c588b0ec
+  runtime_lineage:
+    required_loader: load_completed_audit_runtime
+    read_only: true
+    protocol:
+      path: configs/protocol.yaml
+      file_sha256: sha256:d630ccb99569513082ccaaafe1b0117f5fe1567a505c600add9c0a79b64c51c8
+      protocol_hash: sha256:ebfdb588615bfa22eedc6d936d7b0155a33702878cbe0258ebb84aaa88567e09
+    final_evaluation_spec:
+      path: runs/release/ptbxl_matched_equal_budget_v1/final_evaluation_spec.json
+      file_sha256: sha256:143770b44871129b6d00efba9e67c3c16f58dd9117d9b4cd3eef5d3f896d621d
+      artifact_sha256: sha256:1f73c021a544ffeb119ffe8e490a16e32ec84247e30bce1ffd895fcffed6c762
+    opening_ledger:
+      path: runs/release/.final-test-openings/1f73c021a544ffeb119ffe8e490a16e32ec84247e30bce1ffd895fcffed6c762.opening-ledger.json
+      file_sha256: sha256:73b6ccc7076f2d01621b7c442fe7ee7f249479a4447e3cb9c716bb4074293e53
+      ledger_sha256: sha256:3bb83554a08832212989ea8f3ea212f6af42c08460edbde9ba130065b1115a57
+  members:
+    - resnet1d-seed2026
+    - resnet1d-seed2027
+    - resnet1d-seed2028
+    - ecg_transformer-seed2026
+    - ecg_transformer-seed2027
+    - ecg_transformer-seed2028
+  temperatures: frozen_fold9_per_member
+  label_thresholds: frozen_fold9_per_member
+  entropy_gates: frozen_fold9_per_member
+  coverage_targets: [1.0, 0.9, 0.8, 0.7, 0.5]
+  tuning_on_sph: false
+  model_selection_on_sph: false
+  recalibration_on_sph: false
+  threshold_fitting_on_sph: false
+  gate_fitting_on_sph: false
+
+runtime:
+  inference_passes: 1
+  device: cuda:0
+  allow_auto_device_resolution: false
+  allow_cpu_fallback: false
+  precision: bf16
+  bf16_required: true
+  batch_size: 128
+  batch_size_basis: minimum_of_sealed_member_loader_plans
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  shuffle: false
+  drop_last: false
+  failure_policy: fail_closed_without_in_place_setting_changes
+  out_of_memory_policy: fail_closed
+  changed_runtime_policy: new_protocol_and_new_output_root
+
+evaluation:
+  probability_views: [raw_sigmoid, frozen_temperature_calibrated]
+  per_label_metrics: [prevalence, roc_auc, average_precision, brier_score, ece]
+  macro_metrics: [roc_auc, average_precision, brier_score, ece]
+  ece_bins: 15
+  frozen_threshold_metrics: [hamming_risk, exact_match_accuracy]
+  frozen_gate_metrics: [observed_coverage, hamming_risk, exact_match_accuracy]
+  report_each_member: true
+  architecture_summary:
+    seeds: [2026, 2027, 2028]
+    statistics: [values, mean, sample_standard_deviation]
+  paired_architecture_comparison:
+    pairing: within_seed_same_sph_patients
+    direction: ecg_transformer_minus_resnet1d
+    metrics: [roc_auc, average_precision, brier_score, ece]
+  sensitivities: [broad_exact10, no_ambiguous_mapped]
+  performance_pass_fail_gate: none
+  multiplicity_adjustment: none_exploratory
+
+bootstrap:
+  unit: patient_cluster
+  method: percentile
+  confidence: 0.95
+  resamples: 1000
+  minimum_valid_resamples: 500
+  base_seed: 20260816
+  member_seed_rule: base_seed_plus_cohort_offset_plus_model_seed
+  cohort_seed_offsets:
+    primary_mapped: 0
+    broad_exact10: 100000
+    no_ambiguous_mapped: 200000
+  paired_architecture_draws: identical_within_seed_and_cohort
+
+integrity_gates:
+  fail_closed: true
+  require_source_size_and_hash_match: true
+  require_archive_safe_paths: true
+  require_metadata_record_set_match: true
+  require_expected_cohort_counts: true
+  require_expected_positive_counts: true
+  require_signal_contract: true
+  require_normalization_hash_match: true
+  require_refit_bundle_hash_match: true
+  require_calibration_bundle_hash_match: true
+  require_runtime_lineage_hash_match: true
+  require_runtime_exact_match: true
+  require_clean_execution_revision_recorded: true
+  require_output_root_absent_or_empty: true
+
+outputs:
+  root: runs/external_transport/sph_figshare_v1
+  mode: immutable_content_addressed
+  overwrite: false
+  if_populated: fail_closed
+  privacy:
+    raw_run_visibility: local_private_gitignored
+    private_alignment_artifact: cohort_manifest.parquet
+    private_fields:
+      - ECG_ID
+      - Patient_ID
+      - ecg_id
+      - patient_id
+      - record_path
+      - AHA_Code
+      - raw_aha_codes
+      - primary_codes
+      - modifier_codes
+      - ambiguous_primary_codes
+      - age
+      - sex
+      - acquisition_date
+    public_row_identifiers_allowed: false
+    public_paths_or_codes_allowed: false
+    public_row_permutation_seed: 2026081601
+    public_row_permutation_purpose: deterministic_reproducibility_ordering
+    public_row_permutation_is_confidentiality_mechanism: false
+    public_alignment_binding: sha256_of_private_alignment_artifact_only
+    public_snapshot_policy: separately_generated_sanitized_aggregate_or_identifier_free_aligned_arrays
+    automatic_publication: false
+  required_artifacts:
+    - protocol.snapshot.yaml
+    - source_inventory.json
+    - cohort_manifest.parquet
+    - cohort_summary.json
+    - member_predictions
+    - member_reports
+    - architecture_summaries
+    - paired_bootstrap_reports
+    - FINAL_RESULTS.md
+    - RUN_LOG.md
+    - derived_artifacts.manifest.json
+  manifest_rule: hash_every_generated_file_and_every_bound_input
+  failed_run_rule: preserve_and_supersede_in_a_new_output_root
+
+reporting_language:
+  required_phrases:
+    - exploratory external transport stress test
+    - no tuning or recalibration on SPH
+    - not clinical validation
+    - research only
+  prohibited_claims:
+    - clinically validated
+    - safe for diagnosis
+    - deployment ready
+    - externally validated medical device
