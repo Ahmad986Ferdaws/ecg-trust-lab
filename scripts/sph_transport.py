@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the frozen, identifier-separated SPH external-transport study."""
+"""Run the frozen r2, identifier-separated SPH external-transport study."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from ecg_trust.audit_runtime import AuditRuntimeError
 from ecg_trust.data.sph import SPHMetadataValidationError, SPHRecordValidationError
 from ecg_trust.protocol import ProtocolValidationError
 from ecg_trust.sph_transport import (
+    SPH_TRANSPORT_CONFIG,
     SPHTransportError,
     load_sph_transport_spec,
     run_sph_transport,
@@ -25,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     project_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
         description=(
-            "Run the preregistered SPH exploratory external-transport stress test. "
+            "Run the preregistered r2 SPH exploratory external-transport stress test. "
             "All scientific settings come from the frozen YAML; no fitting or "
             "scientific command-line overrides are available."
         )
@@ -33,8 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config",
         type=Path,
-        default=project_root / "configs" / "external_transport_sph_frozen.yaml",
-        help="Path to the frozen SPH protocol YAML.",
+        default=project_root / SPH_TRANSPORT_CONFIG,
+        help="Path to the frozen SPH r2 protocol YAML.",
     )
     return parser
 

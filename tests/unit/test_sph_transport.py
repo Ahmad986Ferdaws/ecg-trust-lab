@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
 import tarfile
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, cast
@@ -13,11 +15,14 @@ import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
 import pytest
 import torch
+import yaml  # type: ignore[import-untyped]
 from torch import Tensor, nn
 from torch.utils.data import Dataset
 
+import ecg_trust.sph_transport as sph_transport_module
 from ecg_trust.audit_artifacts import load_audit_array_artifact
 from ecg_trust.audit_runtime import EXPECTED_AUDIT_MEMBER_IDS, CompletedAuditRuntime
+from ecg_trust.constants import LEADS
 from ecg_trust.protocol import LABEL_ORDER
 from ecg_trust.sph_transport import (
     SPHFrozenMemberOutput,
@@ -27,12 +32,20 @@ from ecg_trust.sph_transport import (
     SPHTransportIntegrityError,
     SPHTransportSpec,
     _architecture_summaries,
+    _bound_input_snapshot,
+    _canonical_payload_sha256,
+    _plain_json_mapping,
+    _scientific_contract_projection,
+    _source_inventory,
+    _verify_bound_inputs_unchanged,
     apply_frozen_member_decisions,
     assert_identifier_free_public_outputs,
     infer_sph_transport,
+    load_sph_inference_checkpoint,
     load_sph_transport_spec,
     record_sph_attempt_failure,
     reserve_sph_transport_attempt,
+    run_sph_transport,
     save_sph_transport_outputs,
     verify_sph_archive_safety,
 )
@@ -145,10 +158,11 @@ def _fake_runtime() -> SimpleNamespace:
 def _output_spec(tmp_path: Path, output_name: str = "run") -> SPHTransportSpec:
     config = tmp_path / f"{output_name}-frozen.yaml"
     config.write_text("protocol_id: test\n", encoding="utf-8")
-    return SPHTransportSpec(
+    config_sha256 = "sha256:" + hashlib.sha256(config.read_bytes()).hexdigest()
+    spec = SPHTransportSpec(
         path=config,
         project_root=tmp_path,
-        file_sha256="sha256:" + "a" * 64,
+        file_sha256=config_sha256,
         metadata_path=tmp_path / "metadata.csv",
         code_dictionary_path=tmp_path / "code.csv",
         rule_path=tmp_path / "rule.pdf",
@@ -164,6 +178,21 @@ def _output_spec(tmp_path: Path, output_name: str = "run") -> SPHTransportSpec:
         public_row_permutation_seed=2_026_081_601,
         _payload_json="{}",
     )
+    spec.records_dir.mkdir(exist_ok=True)
+    for path in (
+        spec.metadata_path,
+        spec.code_dictionary_path,
+        spec.rule_path,
+        spec.records_archive_path,
+        spec.normalization_path,
+        spec.refit_bundle_path,
+        spec.calibration_bundle_path,
+        spec.final_evaluation_spec_path,
+        spec.opening_ledger_path,
+        spec.protocol_path,
+    ):
+        path.write_bytes(f"synthetic bound input: {path.name}\n".encode())
+    return spec
 
 
 def test_one_data_pass_fans_out_to_exact_six_and_preserves_alignment() -> None:
@@ -241,12 +270,17 @@ def test_private_alignment_and_identifier_free_public_outputs_are_immutable(
     )
     inference = SPHTransportInference(
         targets=targets,
-        raw_logits=MappingProxyType({}),
+        raw_logits=MappingProxyType(
+            {
+                member_id: np.zeros((count, len(LABEL_ORDER)), dtype=np.float64)
+                for member_id in EXPECTED_AUDIT_MEMBER_IDS
+            }
+        ),
         per_record_max_abs_mv=np.arange(1, count + 1, dtype=np.float64),
         per_record_lead_max_abs_mv=np.ones((count, 12), dtype=np.float64),
         physical_signal_sha256="sha256:" + "c" * 64,
         per_lead_qc=MappingProxyType(
-            {lead: MappingProxyType({"sample_mean_mv": 0.0}) for lead in range(12)}
+            {lead: MappingProxyType({"sample_mean_mv": 0.0}) for lead in LEADS}
         ),
     )
     runtime = _fake_runtime()
@@ -325,14 +359,16 @@ def test_private_alignment_and_identifier_free_public_outputs_are_immutable(
         member_outputs=MappingProxyType(outputs),
         member_reports=MappingProxyType(member_reports),
         paired_reports=MappingProxyType(paired_reports),
-        architecture_summaries=MappingProxyType({}),
+        architecture_summaries=MappingProxyType(_architecture_summaries(member_reports)),
     )
 
+    source_inventory = MappingProxyType({"status": "synthetic_test"})
+    execution_state = MappingProxyType({"git_worktree_clean": np.bool_(True)})
     attempt = reserve_sph_transport_attempt(
         spec,
         cast(CompletedAuditRuntime, runtime),
-        source_inventory={"status": "synthetic_test"},
-        execution_state={"git_worktree_clean": True},
+        source_inventory=source_inventory,
+        execution_state=execution_state,
     )
     committed = save_sph_transport_outputs(
         spec,
@@ -347,13 +383,25 @@ def test_private_alignment_and_identifier_free_public_outputs_are_immutable(
     public = load_audit_array_artifact(
         output_root / "public" / "member_predictions" / "resnet1d-seed2026.npz"
     )
+    checkpoint = load_sph_inference_checkpoint(
+        output_root / "private" / "inference_checkpoint.npz",
+        spec,
+        cast(CompletedAuditRuntime, runtime),
+        cohorts,
+        private_alignment_sha256=committed.private_alignment_sha256,
+    )
     assert {"ecg_id", "patient_id"} <= set(private.arrays)
     assert "ecg_id" not in public.arrays and "patient_id" not in public.arrays
+    assert tuple(checkpoint.raw_logits) == EXPECTED_AUDIT_MEMBER_IDS
+    assert np.array_equal(checkpoint.targets, targets)
     assert committed.public_manifest_path.is_file()
     for relative in (
         "private/protocol.snapshot.yaml",
         "private/source_inventory.json",
+        "private/bound_inputs.preinference.json",
         "private/cohort_manifest.parquet",
+        "private/inference_checkpoint.npz",
+        "private/inference_checkpoint.json",
         "private/RUN_LOG.md",
         "private/derived_artifacts.manifest.json",
         "public/cohort_summary.json",
@@ -370,6 +418,34 @@ def test_private_alignment_and_identifier_free_public_outputs_are_immutable(
     assert "| 1.0 | resnet1d |" in rendered
     assert "| 0.5 | ecg_transformer |" in rendered
     assert_identifier_free_public_outputs(output_root / "public")
+
+    mutated_spec = _output_spec(tmp_path, "mutated-finalization")
+    mutated_attempt = reserve_sph_transport_attempt(
+        mutated_spec,
+        cast(CompletedAuditRuntime, runtime),
+        source_inventory=source_inventory,
+        execution_state=execution_state,
+    )
+    mutated_prepared = sph_transport_module.prepare_sph_transport_outputs(
+        mutated_spec,
+        cast(CompletedAuditRuntime, runtime),
+        cohorts,
+        attempt=mutated_attempt,
+        source_inventory=source_inventory,
+    )
+    mutated_spec.normalization_path.write_text("concurrently changed\n", encoding="utf-8")
+    with pytest.raises(SPHTransportIntegrityError, match="changed after pre-inference"):
+        save_sph_transport_outputs(
+            mutated_spec,
+            cast(CompletedAuditRuntime, runtime),
+            cohorts,
+            inference,
+            evaluation,
+            attempt=mutated_attempt,
+            prepared=mutated_prepared,
+        )
+    assert not (mutated_spec.output_root / "private" / "derived_artifacts.manifest.json").exists()
+
     with pytest.raises(SPHTransportIntegrityError, match="unexpected state"):
         save_sph_transport_outputs(
             spec,
@@ -382,10 +458,10 @@ def test_private_alignment_and_identifier_free_public_outputs_are_immutable(
 
 
 def test_malformed_or_unfrozen_protocol_fails_before_source_access(tmp_path: Path) -> None:
-    config = tmp_path / "configs" / "external_transport_sph_frozen.yaml"
+    config = tmp_path / "configs" / "external_transport_sph_frozen_r2.yaml"
     config.parent.mkdir()
     config.write_text(
-        "schema_version: 1\nprotocol_id: sph-external-transport-v1\nstatus: draft\n",
+        "schema_version: 1\nprotocol_id: sph-external-transport-v1-r2\nstatus: draft\n",
         encoding="utf-8",
     )
     with pytest.raises(SPHTransportIntegrityError, match="not frozen"):
@@ -464,15 +540,38 @@ def test_attempt_reservation_and_failure_receipt_make_failed_run_visible(
         execution_state={"git_worktree_clean": True},
     )
     assert attempt.marker_path.is_file()
+    marker = json.loads(attempt.marker_path.read_text(encoding="utf-8"))
+    assert marker["bound_inputs_sha256"] == attempt.bound_inputs_sha256
+    assert marker["bound_inputs"] == [dict(entry) for entry in attempt.bound_inputs]
 
-    failure = record_sph_attempt_failure(attempt, RuntimeError("synthetic OOM"))
+    phase_state = {
+        "sph_inference_started": True,
+        "sph_inference_completed": False,
+        "sph_predictions_generated": False,
+        "inference_checkpoint_committed": False,
+        "sph_metrics_started": False,
+        "sph_metrics_completed": False,
+        "output_commit_started": True,
+        "output_commit_completed": False,
+    }
+    failure = record_sph_attempt_failure(
+        attempt,
+        RuntimeError("synthetic OOM"),
+        failure_phase="sph_model_inference",
+        phase_state=phase_state,
+    )
 
     payload = json.loads(failure.read_text(encoding="utf-8"))
     assert payload["artifact_type"] == "ecg_trust.sph_transport_attempt_failure"
     assert payload["exception_type"] == "builtins.RuntimeError"
     assert payload["exception_message"] == "synthetic OOM"
+    assert payload["failure_phase"] == "sph_model_inference"
+    assert payload["phase_state"] == phase_state
+    assert payload["protocol_sha256"] == spec.file_sha256
+    assert payload["planned_attempt_sha256"] == attempt.marker_sha256
+    assert payload["attempt_sha256"] == attempt.marker_sha256
     assert any(spec.output_root.iterdir())
-    with pytest.raises(FileExistsError, match="refusing attempt"):
+    with pytest.raises(FileExistsError, match="permanently spent"):
         reserve_sph_transport_attempt(
             spec,
             cast(CompletedAuditRuntime, runtime),
@@ -480,7 +579,395 @@ def test_attempt_reservation_and_failure_receipt_make_failed_run_visible(
             execution_state={"git_worktree_clean": True},
         )
     with pytest.raises(FileExistsError):
-        record_sph_attempt_failure(attempt, RuntimeError("second failure"))
+        record_sph_attempt_failure(
+            attempt,
+            RuntimeError("second failure"),
+            failure_phase="sph_model_inference",
+            phase_state=phase_state,
+        )
+
+
+def test_bound_input_mutation_fails_the_finalization_identity_gate(tmp_path: Path) -> None:
+    spec = _output_spec(tmp_path, "mutated-bound-input")
+    bound_inputs, bound_inputs_sha256 = _bound_input_snapshot(spec, require_all=True)
+    prepared = SimpleNamespace(
+        bound_inputs=bound_inputs,
+        bound_inputs_sha256=bound_inputs_sha256,
+    )
+    spec.normalization_path.write_text("concurrently changed\n", encoding="utf-8")
+
+    with pytest.raises(SPHTransportIntegrityError, match="changed after pre-inference"):
+        _verify_bound_inputs_unchanged(spec, cast(Any, prepared))
+
+
+def test_attempt_reservation_rejects_an_existing_empty_root(tmp_path: Path) -> None:
+    spec = _output_spec(tmp_path, "empty-spent-root")
+    spec.output_root.mkdir()
+
+    with pytest.raises(FileExistsError, match="permanently spent"):
+        reserve_sph_transport_attempt(
+            spec,
+            cast(CompletedAuditRuntime, _fake_runtime()),
+            source_inventory={"status": "synthetic_test"},
+            execution_state={"git_worktree_clean": True},
+        )
+    assert not any(spec.output_root.iterdir())
+
+
+def test_concurrent_attempt_reservation_has_exactly_one_winner(tmp_path: Path) -> None:
+    spec = _output_spec(tmp_path, "concurrent-root")
+    runtime = cast(CompletedAuditRuntime, _fake_runtime())
+
+    def reserve() -> object:
+        try:
+            return reserve_sph_transport_attempt(
+                spec,
+                runtime,
+                source_inventory=MappingProxyType(
+                    {"archive_audit": MappingProxyType({"safe_paths": True})}
+                ),
+                execution_state={"git_worktree_clean": True},
+            )
+        except FileExistsError as error:
+            return error
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _index: reserve(), range(2)))
+
+    assert sum(not isinstance(result, FileExistsError) for result in results) == 1
+    assert sum(isinstance(result, FileExistsError) for result in results) == 1
+    assert (spec.output_root / "private" / "attempt-start.json").is_file()
+
+
+def test_production_shaped_source_inventory_and_nested_immutable_json_normalize(
+    tmp_path: Path,
+) -> None:
+    spec = _output_spec(tmp_path, "production-shaped-inventory")
+    for path in (
+        spec.metadata_path,
+        spec.code_dictionary_path,
+        spec.rule_path,
+        spec.records_archive_path,
+    ):
+        path.write_bytes(path.name.encode("ascii"))
+    cohort_shell = SimpleNamespace(
+        alignment_sha256="sha256:" + "a" * 64,
+        summaries=MappingProxyType(
+            {
+                "primary_mapped": MappingProxyType(
+                    {"records": np.int64(4), "positive_records": (1, 2, 3, 4, 5)}
+                )
+            }
+        ),
+    )
+    inventory = _source_inventory(
+        spec,
+        cast(SPHTransportCohorts, cohort_shell),
+        MappingProxyType(
+            {
+                "safe_paths": np.bool_(True),
+                "quantiles": (np.float32(0.5), np.float64(1.25)),
+            }
+        ),
+    )
+
+    normalized = _plain_json_mapping(inventory, context="production source inventory")
+
+    assert isinstance(inventory, MappingProxyType)
+    assert normalized["archive_audit"] == {
+        "safe_paths": True,
+        "quantiles": [0.5, 1.25],
+    }
+    assert _canonical_payload_sha256(inventory, context="production source inventory").startswith(
+        "sha256:"
+    )
+    attempt = reserve_sph_transport_attempt(
+        spec,
+        cast(CompletedAuditRuntime, _fake_runtime()),
+        source_inventory=inventory,
+        execution_state=MappingProxyType({"git": MappingProxyType({"clean": np.bool_(True)})}),
+    )
+    assert attempt.marker_path.is_file()
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [Path("private.txt"), np.asarray([1.0]), float("nan"), float("inf"), float("-inf")],
+)
+def test_deep_json_normalizer_rejects_implicit_or_nonfinite_values(
+    invalid: object,
+) -> None:
+    with pytest.raises(SPHTransportIntegrityError):
+        _plain_json_mapping(
+            MappingProxyType({"nested": MappingProxyType({"invalid": invalid})}),
+            context="invalid protocol artifact",
+        )
+
+
+def test_invalid_marker_payload_is_rejected_before_output_root_creation(
+    tmp_path: Path,
+) -> None:
+    spec = _output_spec(tmp_path, "prevalidation-failure")
+
+    with pytest.raises(SPHTransportIntegrityError, match="non-finite"):
+        reserve_sph_transport_attempt(
+            spec,
+            cast(CompletedAuditRuntime, _fake_runtime()),
+            source_inventory=MappingProxyType(
+                {"nested": MappingProxyType({"invalid": float("nan")})}
+            ),
+            execution_state={"git_worktree_clean": True},
+        )
+
+    assert not spec.output_root.exists()
+
+
+def test_marker_commit_failure_spends_root_and_records_pre_inference_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = _output_spec(tmp_path, "marker-io-failure")
+    original_writer = sph_transport_module.write_new_hashed_json
+    original = OSError("synthetic marker I/O failure")
+    planned_sha256: str | None = None
+
+    def fail_marker(
+        path: str | Path,
+        payload: Mapping[str, object],
+        *,
+        hash_field: str,
+    ) -> tuple[Path, str]:
+        nonlocal planned_sha256
+        if Path(path).name == "attempt-start.json":
+            planned_sha256 = _canonical_payload_sha256(payload, context="captured attempt marker")
+            raise original
+        return original_writer(path, payload, hash_field=hash_field)
+
+    monkeypatch.setattr(sph_transport_module, "write_new_hashed_json", fail_marker)
+
+    with pytest.raises(OSError) as caught:
+        reserve_sph_transport_attempt(
+            spec,
+            cast(CompletedAuditRuntime, _fake_runtime()),
+            source_inventory={"safe_paths": True},
+            execution_state={"git_worktree_clean": True},
+        )
+
+    assert caught.value is original
+    receipt = json.loads(
+        (spec.output_root / "private" / "attempt-failure.json").read_text(encoding="utf-8")
+    )
+    assert receipt["failure_phase"] == "attempt_marker_commit"
+    assert receipt["protocol_sha256"] == spec.file_sha256
+    assert receipt["attempt_sha256"] is None
+    assert receipt["planned_attempt_sha256"] == planned_sha256
+    assert not any(cast(dict[str, bool], receipt["phase_state"]).values())
+    assert spec.output_root.exists()
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "expected_phase", "expected_true_fields"),
+    [
+        (
+            "prepare",
+            "outcome_independent_output_commit",
+            {"output_commit_started"},
+        ),
+        (
+            "inference",
+            "sph_model_inference",
+            {"output_commit_started", "sph_inference_started"},
+        ),
+        (
+            "checkpoint",
+            "private_inference_checkpoint_commit",
+            {
+                "output_commit_started",
+                "sph_inference_started",
+                "sph_inference_completed",
+                "sph_predictions_generated",
+            },
+        ),
+        (
+            "source_reverification",
+            "post_inference_source_reverification",
+            {
+                "output_commit_started",
+                "sph_inference_started",
+                "sph_inference_completed",
+                "sph_predictions_generated",
+                "inference_checkpoint_committed",
+            },
+        ),
+        (
+            "metrics",
+            "sph_metrics",
+            {
+                "output_commit_started",
+                "sph_inference_started",
+                "sph_inference_completed",
+                "sph_predictions_generated",
+                "inference_checkpoint_committed",
+                "sph_metrics_started",
+            },
+        ),
+        (
+            "output",
+            "final_output_commit",
+            {
+                "output_commit_started",
+                "sph_inference_started",
+                "sph_inference_completed",
+                "sph_predictions_generated",
+                "inference_checkpoint_committed",
+                "sph_metrics_started",
+                "sph_metrics_completed",
+            },
+        ),
+    ],
+)
+def test_run_preserves_phase_accurate_failure_receipt_and_original_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+    expected_phase: str,
+    expected_true_fields: set[str],
+) -> None:
+    spec = _output_spec(tmp_path, f"phase-{failure_stage}")
+    runtime = _fake_runtime()
+    cohorts = SimpleNamespace(
+        manifest=pd.DataFrame({"ecg_id": ["A00001"]}),
+        targets=np.zeros((1, len(LABEL_ORDER)), dtype=np.int8),
+    )
+    inference = SimpleNamespace(raw_logits={})
+    evaluation = SimpleNamespace()
+    prepared = SimpleNamespace(private_alignment_sha256="sha256:" + "a" * 64)
+    original = RuntimeError(f"original {failure_stage} failure")
+
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.verify_clean_git_execution",
+        lambda _spec: MappingProxyType({"git_worktree_clean": True}),
+    )
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.prepare_sph_transport_cohorts", lambda _spec: cohorts
+    )
+    archive_audit_calls = 0
+
+    def audit_source(*_args: object) -> Mapping[str, object]:
+        nonlocal archive_audit_calls
+        archive_audit_calls += 1
+        if failure_stage == "source_reverification" and archive_audit_calls == 2:
+            raise original
+        return MappingProxyType({"safe_paths": True})
+
+    monkeypatch.setattr("ecg_trust.sph_transport.verify_sph_archive_safety", audit_source)
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport._source_inventory",
+        lambda _spec, _cohorts, _audit: MappingProxyType(
+            {"archive_audit": MappingProxyType({"safe_paths": True})}
+        ),
+    )
+    monkeypatch.setattr("ecg_trust.sph_transport.load_sph_completed_runtime", lambda _spec: runtime)
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.assert_frozen_sph_runtime",
+        lambda _spec, _runtime: None,
+    )
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.SPHExternalTransportDataset",
+        lambda _manifest, _records, *, allow_all_zero: object(),
+    )
+
+    def prepare(*_args: object, **_kwargs: object) -> object:
+        assert (spec.output_root / "private" / "attempt-start.json").is_file()
+        if failure_stage == "prepare":
+            raise original
+        return prepared
+
+    def infer(*_args: object, **_kwargs: object) -> object:
+        assert (spec.output_root / "private" / "attempt-start.json").is_file()
+        if failure_stage == "inference":
+            raise original
+        return inference
+
+    def checkpoint(*_args: object, **_kwargs: object) -> None:
+        if failure_stage == "checkpoint":
+            raise original
+
+    def evaluate(*_args: object, **_kwargs: object) -> object:
+        if failure_stage == "metrics":
+            raise original
+        return evaluation
+
+    def save(*_args: object, **_kwargs: object) -> object:
+        if failure_stage == "output":
+            raise original
+        return SimpleNamespace()
+
+    monkeypatch.setattr("ecg_trust.sph_transport.prepare_sph_transport_outputs", prepare)
+    monkeypatch.setattr("ecg_trust.sph_transport.infer_sph_transport", infer)
+    monkeypatch.setattr("ecg_trust.sph_transport.save_sph_inference_checkpoint", checkpoint)
+    monkeypatch.setattr("ecg_trust.sph_transport.evaluate_all_sph_cohorts", evaluate)
+    monkeypatch.setattr("ecg_trust.sph_transport.save_sph_transport_outputs", save)
+
+    with pytest.raises(RuntimeError) as caught:
+        run_sph_transport(spec)
+
+    assert caught.value is original
+    receipt = json.loads(
+        (spec.output_root / "private" / "attempt-failure.json").read_text(encoding="utf-8")
+    )
+    assert receipt["failure_phase"] == expected_phase
+    phase_state = cast(dict[str, bool], receipt["phase_state"])
+    assert {name for name, value in phase_state.items() if value} == expected_true_fields
+
+
+def test_failure_receipt_error_does_not_mask_original_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = _output_spec(tmp_path, "receipt-write-failure")
+    runtime = _fake_runtime()
+    cohorts = SimpleNamespace(
+        manifest=pd.DataFrame({"ecg_id": ["A00001"]}),
+        targets=np.zeros((1, len(LABEL_ORDER)), dtype=np.int8),
+    )
+    original = RuntimeError("original inference failure")
+
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.verify_clean_git_execution", lambda _spec: {"clean": True}
+    )
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.prepare_sph_transport_cohorts", lambda _spec: cohorts
+    )
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.verify_sph_archive_safety",
+        lambda _spec, _cohorts: {"safe_paths": True},
+    )
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport._source_inventory",
+        lambda *_args: MappingProxyType({"safe_paths": True}),
+    )
+    monkeypatch.setattr("ecg_trust.sph_transport.load_sph_completed_runtime", lambda _spec: runtime)
+    monkeypatch.setattr("ecg_trust.sph_transport.assert_frozen_sph_runtime", lambda *_args: None)
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.SPHExternalTransportDataset", lambda *_args, **_kwargs: object()
+    )
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.prepare_sph_transport_outputs",
+        lambda *_args, **_kwargs: SimpleNamespace(private_alignment_sha256="sha256:" + "a" * 64),
+    )
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.infer_sph_transport",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(original),
+    )
+    monkeypatch.setattr(
+        "ecg_trust.sph_transport.record_sph_attempt_failure",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("receipt disk failure")),
+    )
+
+    with pytest.raises(RuntimeError) as caught:
+        run_sph_transport(spec)
+
+    assert caught.value is original
+    assert any("receipt disk failure" in note for note in getattr(original, "__notes__", []))
 
 
 def test_public_privacy_scan_rejects_identity_in_markdown(tmp_path: Path) -> None:
@@ -542,5 +1029,31 @@ def test_cli_exposes_no_scientific_overrides() -> None:
     parser = build_parser()
     destinations = {action.dest for action in parser._actions}  # noqa: SLF001
     assert destinations == {"help", "config"}
+    args = parser.parse_args([])
+    assert args.config.name == "external_transport_sph_frozen_r2.yaml"
     with pytest.raises(SystemExit):
         parser.parse_args(["--bootstrap-resamples", "2"])
+
+
+def test_r2_protocol_preserves_the_v1_scientific_projection() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    v1_path = project_root / "configs" / "external_transport_sph_frozen.yaml"
+    r2_path = project_root / "configs" / "external_transport_sph_frozen_r2.yaml"
+    v1 = cast(dict[str, object], yaml.safe_load(v1_path.read_text(encoding="utf-8")))
+    r2 = cast(dict[str, object], yaml.safe_load(r2_path.read_text(encoding="utf-8")))
+
+    v1_projection = _scientific_contract_projection(v1)
+    r2_projection = _scientific_contract_projection(r2)
+
+    assert r2_projection == v1_projection
+    assert r2["scientific_contract_sha256"] == _canonical_payload_sha256(
+        v1_projection, context="v1 scientific projection"
+    )
+    supersession = cast(dict[str, object], r2["supersession"])
+    assert supersession["superseded_execution_git_revision"] == (
+        "724a510b03eb539eda2add6de359855f3ffaf2b5"
+    )
+    assert supersession["attempt_start_marker_created"] is False
+    assert supersession["sph_model_inference_started"] is False
+    assert supersession["ptb_fold10_clean_equivalence_inference_ran"] is True
+    assert r2["protocol_id"] == "sph-external-transport-v1-r2"

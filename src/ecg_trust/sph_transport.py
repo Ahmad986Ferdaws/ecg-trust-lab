@@ -10,13 +10,15 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
-import shutil
 import subprocess
 import tarfile
+import tempfile
 from collections.abc import Callable, Mapping, Sequence, Sized
+from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
 from typing import Any, cast
 
@@ -28,7 +30,11 @@ from numpy.typing import NDArray
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from ecg_trust.audit_artifacts import save_audit_array_artifact
+from ecg_trust.audit_artifacts import (
+    AuditArrayFiles,
+    load_audit_array_artifact,
+    save_audit_array_artifact,
+)
 from ecg_trust.audit_runtime import (
     EXPECTED_AUDIT_MEMBER_IDS,
     AuditMemberRuntime,
@@ -61,11 +67,39 @@ from ecg_trust.sph_transport_metrics import (
 from ecg_trust.training import seed_dataloader_worker
 
 SPH_TRANSPORT_SCHEMA_VERSION = 1
-SPH_TRANSPORT_PROTOCOL_ID = "sph-external-transport-v1"
-SPH_TRANSPORT_CONFIG = Path("configs/external_transport_sph_frozen.yaml")
+SPH_TRANSPORT_PROTOCOL_ID = "sph-external-transport-v1-r2"
+SPH_TRANSPORT_CONFIG = Path("configs/external_transport_sph_frozen_r2.yaml")
+SPH_TRANSPORT_OUTPUT_ROOT = Path("runs/external_transport/sph_figshare_v1__attempt-r2")
+SPH_TRANSPORT_SUPERSESSION = {
+    "supersedes_protocol_id": "sph-external-transport-v1",
+    "superseded_protocol_path": "configs/external_transport_sph_frozen.yaml",
+    "superseded_protocol_file_sha256": (
+        "sha256:6beebf9fc95c90591d5f63b3985ff14fbff403a75862b5690201b1c7d6ff2669"
+    ),
+    "superseded_execution_git_revision": "724a510b03eb539eda2add6de359855f3ffaf2b5",
+    "superseded_output_root": "runs/external_transport/sph_figshare_v1",
+    "failure_phase": "pre_inference_attempt_reservation_payload_serialization",
+    "failure_type": "nested_mapping_not_canonical_json_serializable",
+    "failed_root_originally_contained_only_empty_private_directory": True,
+    "attempt_start_marker_created": False,
+    "sph_model_inference_started": False,
+    "sph_predictions_generated": False,
+    "sph_metrics_or_results_generated": False,
+    "ptb_fold10_clean_equivalence_inference_ran": True,
+    "post_failure_receipt_appended_by_operator": True,
+    "receipt_wording_corrected_before_r2_freeze": True,
+    "failed_root_byte_for_byte_run_preservation_claimed": False,
+    "failure_record": {
+        "path": "runs/external_transport/sph_figshare_v1/private/PRE_INFERENCE_FAILURE.md",
+        "size_bytes": 874,
+        "sha256": ("sha256:26cbd6f8a1679faf1ec362712aa63334dd81904666ca4c9de8d8aa5013840a74"),
+    },
+    "scientific_contract_change": "none",
+}
 SPH_TRANSPORT_PREDICTION_TYPE = "ecg_trust.sph_transport_predictions"
 SPH_TRANSPORT_ALIGNMENT_TYPE = "ecg_trust.sph_transport_private_alignment"
 SPH_TRANSPORT_QC_TYPE = "ecg_trust.sph_transport_signal_qc"
+SPH_TRANSPORT_INFERENCE_CHECKPOINT_TYPE = "ecg_trust.sph_transport_private_inference_checkpoint"
 COHORT_ORDER = ("primary_mapped", "broad_exact10", "no_ambiguous_mapped")
 EXPECTED_COHORT_COUNTS = {
     "primary_mapped": (15_698, 15_193),
@@ -219,6 +253,25 @@ class SPHTransportAttempt:
     output_root: Path
     marker_path: Path
     marker_sha256: str
+    protocol_sha256: str
+    planned_attempt_sha256: str
+    bound_inputs: tuple[Mapping[str, object], ...]
+    bound_inputs_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class SPHTransportPreparedOutput:
+    """Outcome-independent artifacts committed before any SPH model call."""
+
+    output_root: Path
+    private_alignment_sha256: str
+    source_inventory_path: Path
+    bound_inputs_path: Path
+    bound_inputs_artifact_sha256: str
+    bound_inputs: tuple[Mapping[str, object], ...]
+    bound_inputs_sha256: str
+    publication_order: NDArray[np.int64]
+    internal_to_public: NDArray[np.int64]
 
 
 class _IndexedDataset(Dataset[tuple[Tensor, Tensor, Tensor]]):
@@ -246,10 +299,11 @@ def load_sph_transport_spec(path: str | Path = SPH_TRANSPORT_CONFIG) -> SPHTrans
         raise SPHTransportIntegrityError("unsupported SPH protocol schema_version")
     if payload.get("protocol_id") != SPH_TRANSPORT_PROTOCOL_ID:
         raise SPHTransportIntegrityError("unexpected SPH transport protocol_id")
-    if payload.get("status") != "frozen_before_first_inference":
-        raise SPHTransportIntegrityError("SPH protocol was not frozen before inference")
+    if payload.get("status") != "frozen_before_first_sph_model_inference":
+        raise SPHTransportIntegrityError("SPH r2 protocol was not frozen before SPH inference")
 
     project_root = source.parent.parent.resolve()
+    _validate_supersession_contract(payload, project_root)
     purpose = _mapping(payload.get("purpose"), "purpose")
     if (
         purpose.get("target_order") != list(LABEL_ORDER)
@@ -314,9 +368,21 @@ def load_sph_transport_spec(path: str | Path = SPH_TRANSPORT_CONFIG) -> SPHTrans
     ):
         raise SPHTransportIntegrityError("canonical PTB protocol hash differs")
     outputs = _mapping(payload.get("outputs"), "outputs")
-    if outputs.get("overwrite") is not False or outputs.get("if_populated") != "fail_closed":
+    if (
+        outputs.get("mode") != "immutable_versioned"
+        or outputs.get("overwrite") is not False
+        or outputs.get("if_populated") != "fail_closed"
+    ):
         raise SPHTransportIntegrityError("SPH output immutability contract differs")
+    integrity = _mapping(payload.get("integrity_gates"), "integrity_gates")
+    if (
+        integrity.get("require_output_root_absent") is not True
+        or "require_output_root_absent_or_empty" in integrity
+    ):
+        raise SPHTransportIntegrityError("SPH r2 absent-only root contract differs")
     output_root = _resolve_bound_path(outputs.get("root"), project_root, "outputs.root")
+    if output_root != (project_root / SPH_TRANSPORT_OUTPUT_ROOT).resolve():
+        raise SPHTransportIntegrityError("SPH r2 output root differs")
     privacy = _mapping(outputs.get("privacy"), "outputs.privacy")
     permutation_seed = _integer(
         privacy.get("public_row_permutation_seed"),
@@ -328,6 +394,31 @@ def load_sph_transport_spec(path: str | Path = SPH_TRANSPORT_CONFIG) -> SPHTrans
         or privacy.get("public_paths_or_codes_allowed") is not False
     ):
         raise SPHTransportIntegrityError("public row privacy/ordering contract differs")
+    checkpoint = _mapping(outputs.get("inference_checkpoint"), "outputs.inference_checkpoint")
+    if checkpoint != {
+        "visibility": "local_private_gitignored",
+        "timing": "immediately_after_complete_sph_inference_before_metrics",
+        "required_before_metrics": True,
+        "recovery_policy": (
+            "resume_metrics_and_finalization_from_exact_logits_without_second_sph_model_pass"
+        ),
+    }:
+        raise SPHTransportIntegrityError("SPH r2 inference checkpoint contract differs")
+    required_artifacts = outputs.get("required_artifacts")
+    if not isinstance(required_artifacts, list) or not {
+        "bound_inputs.preinference.json",
+        "inference_checkpoint.npz",
+        "inference_checkpoint.json",
+    }.issubset(required_artifacts):
+        raise SPHTransportIntegrityError("SPH r2 immutable artifacts are not required")
+    bound_snapshot = _mapping(outputs.get("bound_input_snapshot"), "outputs.bound_input_snapshot")
+    if bound_snapshot != {
+        "visibility": "local_private_gitignored",
+        "timing": "before_first_sph_model_inference",
+        "attempt_marker_binding": "complete_list_and_sha256",
+        "final_reverification": "exact_list_and_sha256_before_derived_manifest",
+    }:
+        raise SPHTransportIntegrityError("SPH r2 bound-input snapshot contract differs")
 
     return SPHTransportSpec(
         path=source,
@@ -442,7 +533,9 @@ def prepare_sph_transport_cohorts(spec: SPHTransportSpec) -> SPHTransportCohorts
         masks=MappingProxyType(
             {name: cast(BoolArray, _readonly(mask)) for name, mask in masks.items()}
         ),
-        alignment_sha256=canonical_sha256(alignment_payload),
+        alignment_sha256=_canonical_payload_sha256(
+            alignment_payload, context="private alignment identity"
+        ),
         summaries=MappingProxyType(summaries),
     )
 
@@ -753,45 +846,92 @@ def reserve_sph_transport_attempt(
 ) -> SPHTransportAttempt:
     """Reserve the official root before inference so failed attempts remain visible."""
 
-    root = spec.output_root
-    if root.exists() and any(root.iterdir()):
-        raise FileExistsError(f"SPH output root is populated; refusing attempt: {root}")
-    root.mkdir(parents=True, exist_ok=True)
-    private_root = root / "private"
-    if private_root.exists():
-        raise FileExistsError("empty output root unexpectedly contains private state")
-    private_root.mkdir()
-    marker_path, marker_sha = write_new_hashed_json(
-        private_root / "attempt-start.json",
+    plain_inventory = _plain_json_mapping(source_inventory, context="attempt source_inventory")
+    plain_execution_state = _plain_json_mapping(execution_state, context="attempt execution_state")
+    bound_inputs, bound_inputs_sha256 = _bound_input_snapshot(spec, require_all=True)
+    marker_payload = _plain_json_mapping(
         {
             "schema_version": 1,
             "artifact_type": "ecg_trust.sph_transport_attempt_start",
             "protocol_sha256": spec.file_sha256,
             "member_ids": [member.member_id for member in runtime.members],
             "clean_equivalence": [item.to_dict() for item in runtime.clean_equivalence],
-            "source_inventory_sha256": canonical_sha256(source_inventory),
-            "execution_state": dict(execution_state),
+            "source_inventory_sha256": _canonical_payload_sha256(
+                plain_inventory, context="attempt source_inventory"
+            ),
+            "bound_inputs": list(bound_inputs),
+            "bound_inputs_sha256": bound_inputs_sha256,
+            "execution_state": plain_execution_state,
             "state": "reserved_before_first_sph_model_inference",
         },
-        hash_field="attempt_sha256",
+        context="attempt marker",
     )
+    prevalidated_marker_sha = _canonical_payload_sha256(marker_payload, context="attempt marker")
+    root = spec.output_root
+    root.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        root.mkdir(exist_ok=False)
+    except FileExistsError as error:
+        raise FileExistsError(
+            f"SPH output root already exists and is permanently spent: {root}"
+        ) from error
+    private_root = root / "private"
+    try:
+        private_root.mkdir(exist_ok=False)
+        marker_path, marker_sha = _write_new_sph_json(
+            private_root / "attempt-start.json",
+            marker_payload,
+            hash_field="attempt_sha256",
+            context="attempt marker",
+        )
+        if marker_sha != prevalidated_marker_sha:  # pragma: no cover - deterministic invariant
+            raise SPHTransportIntegrityError("attempt marker changed after prevalidation")
+    except BaseException as error:
+        state = _empty_failure_state()
+        try:
+            _write_sph_failure_receipt(
+                private_root,
+                error,
+                attempt_sha256=None,
+                protocol_sha256=spec.file_sha256,
+                planned_attempt_sha256=prevalidated_marker_sha,
+                failure_phase="attempt_marker_commit",
+                phase_state=state,
+            )
+        except BaseException as receipt_error:
+            error.add_note(f"failure receipt could not be committed: {receipt_error}")
+        raise
     return SPHTransportAttempt(
         output_root=root,
         marker_path=marker_path,
         marker_sha256=marker_sha,
+        protocol_sha256=spec.file_sha256,
+        planned_attempt_sha256=prevalidated_marker_sha,
+        bound_inputs=bound_inputs,
+        bound_inputs_sha256=bound_inputs_sha256,
     )
 
 
 def _verify_reserved_attempt(spec: SPHTransportSpec, attempt: SPHTransportAttempt) -> None:
     root = spec.output_root.resolve()
     marker = (root / "private" / "attempt-start.json").resolve()
-    if attempt.output_root.resolve() != root or attempt.marker_path.resolve() != marker:
-        raise SPHTransportIntegrityError("attempt reservation belongs to another output root")
-    if not marker.is_file() or {path.name for path in root.iterdir()} != {"private"}:
+    _verify_attempt_marker(spec, attempt)
+    if {path.name for path in root.iterdir()} != {"private"}:
         raise SPHTransportIntegrityError("reserved output root contains unexpected state")
     private_files = {path.name for path in marker.parent.iterdir()}
     if private_files != {marker.name}:
         raise SPHTransportIntegrityError("reserved private root contains unexpected state")
+
+
+def _verify_attempt_marker(
+    spec: SPHTransportSpec, attempt: SPHTransportAttempt
+) -> Mapping[str, object]:
+    root = spec.output_root.resolve()
+    marker = (root / "private" / "attempt-start.json").resolve()
+    if attempt.output_root.resolve() != root or attempt.marker_path.resolve() != marker:
+        raise SPHTransportIntegrityError("attempt reservation belongs to another output root")
+    if not marker.is_file():
+        raise SPHTransportIntegrityError("attempt marker is missing")
     try:
         decoded: object = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -802,70 +942,179 @@ def _verify_reserved_attempt(spec: SPHTransportSpec, attempt: SPHTransportAttemp
     del unhashed["attempt_sha256"]
     if (
         stored != attempt.marker_sha256
-        or canonical_sha256(unhashed) != stored
+        or attempt.protocol_sha256 != spec.file_sha256
+        or attempt.planned_attempt_sha256 != attempt.marker_sha256
+        or _canonical_payload_sha256(unhashed, context="stored attempt marker") != stored
         or payload.get("protocol_sha256") != spec.file_sha256
+        or payload.get("bound_inputs") != list(attempt.bound_inputs)
+        or payload.get("bound_inputs_sha256") != attempt.bound_inputs_sha256
         or payload.get("state") != "reserved_before_first_sph_model_inference"
     ):
         raise SPHTransportIntegrityError("attempt marker integrity differs")
+    return payload
 
 
-def record_sph_attempt_failure(attempt: SPHTransportAttempt, error: BaseException) -> Path:
+def record_sph_attempt_failure(
+    attempt: SPHTransportAttempt,
+    error: BaseException,
+    *,
+    failure_phase: str,
+    phase_state: Mapping[str, object],
+) -> Path:
     """Commit a non-overwriting private failure receipt and preserve partial output."""
 
     marker = attempt.marker_path
     if not marker.is_file():
         raise SPHTransportIntegrityError("cannot record failure without attempt marker")
-    path, _ = write_new_hashed_json(
-        marker.parent / "attempt-failure.json",
+    return _write_sph_failure_receipt(
+        marker.parent,
+        error,
+        attempt_sha256=attempt.marker_sha256,
+        protocol_sha256=attempt.protocol_sha256,
+        planned_attempt_sha256=attempt.planned_attempt_sha256,
+        failure_phase=failure_phase,
+        phase_state=phase_state,
+    )
+
+
+def _write_sph_failure_receipt(
+    private_root: Path,
+    error: BaseException,
+    *,
+    attempt_sha256: str | None,
+    protocol_sha256: str,
+    planned_attempt_sha256: str,
+    failure_phase: str,
+    phase_state: Mapping[str, object],
+) -> Path:
+    if not failure_phase or not isinstance(failure_phase, str):
+        raise SPHTransportIntegrityError("failure phase must be a non-empty string")
+    protocol_sha256 = _prefixed_hash(protocol_sha256, "failure protocol_sha256")
+    planned_attempt_sha256 = _prefixed_hash(
+        planned_attempt_sha256, "failure planned_attempt_sha256"
+    )
+    if attempt_sha256 is not None:
+        attempt_sha256 = _prefixed_hash(attempt_sha256, "failure attempt_sha256")
+        if attempt_sha256 != planned_attempt_sha256:
+            raise SPHTransportIntegrityError("committed and planned attempt identities differ")
+    normalized_state = _validated_failure_state(phase_state)
+    path, _ = _write_new_sph_json(
+        private_root / "attempt-failure.json",
         {
             "schema_version": 1,
             "artifact_type": "ecg_trust.sph_transport_attempt_failure",
-            "attempt_sha256": attempt.marker_sha256,
+            "attempt_sha256": attempt_sha256,
+            "protocol_sha256": protocol_sha256,
+            "planned_attempt_sha256": planned_attempt_sha256,
             "exception_type": f"{type(error).__module__}.{type(error).__qualname__}",
             "exception_message": str(error),
-            "state": "failed_after_attempt_reservation",
+            "failure_phase": failure_phase,
+            "phase_state": normalized_state,
+            "state": "failed_after_atomic_output_root_acquisition",
             "retry_policy": "new_frozen_protocol_and_new_output_root",
         },
         hash_field="failure_sha256",
+        context="attempt failure receipt",
     )
     return path
 
 
-def save_sph_transport_outputs(
+def _empty_failure_state() -> dict[str, object]:
+    return {
+        "sph_inference_started": False,
+        "sph_inference_completed": False,
+        "sph_predictions_generated": False,
+        "inference_checkpoint_committed": False,
+        "sph_metrics_started": False,
+        "sph_metrics_completed": False,
+        "output_commit_started": False,
+        "output_commit_completed": False,
+    }
+
+
+def _validated_failure_state(state: Mapping[str, object]) -> dict[str, object]:
+    expected = _empty_failure_state()
+    normalized = _plain_json_mapping(state, context="failure phase state")
+    if set(normalized) != set(expected) or any(
+        not isinstance(value, bool) for value in normalized.values()
+    ):
+        raise SPHTransportIntegrityError("failure phase state differs from r2 contract")
+    return normalized
+
+
+def prepare_sph_transport_outputs(
     spec: SPHTransportSpec,
     runtime: CompletedAuditRuntime,
     cohorts: SPHTransportCohorts,
-    inference: SPHTransportInference,
-    evaluation: SPHTransportEvaluation,
     *,
     attempt: SPHTransportAttempt,
-    source_inventory: Mapping[str, object] | None = None,
-    execution_state: Mapping[str, object] | None = None,
-) -> SPHTransportRun:
-    """Commit private alignment and identifier-free public outputs without overwrite."""
+    source_inventory: Mapping[str, object],
+) -> SPHTransportPreparedOutput:
+    """Commit all outcome-independent identity artifacts before SPH inference."""
 
-    root = spec.output_root
     _verify_reserved_attempt(spec, attempt)
+    marker_payload = _verify_attempt_marker(spec, attempt)
+    member_ids = [member.member_id for member in runtime.members]
+    plain_inventory = _plain_json_mapping(source_inventory, context="prepared source inventory")
+    bound_inputs, bound_inputs_sha256 = _bound_input_snapshot(spec, require_all=True)
+    if marker_payload.get("member_ids") != member_ids or marker_payload.get(
+        "source_inventory_sha256"
+    ) != _canonical_payload_sha256(plain_inventory, context="prepared source inventory"):
+        raise SPHTransportIntegrityError(
+            "prepared runtime or source inventory differs from attempt marker"
+        )
+    if (
+        bound_inputs != attempt.bound_inputs
+        or bound_inputs_sha256 != attempt.bound_inputs_sha256
+        or marker_payload.get("bound_inputs") != list(bound_inputs)
+        or marker_payload.get("bound_inputs_sha256") != bound_inputs_sha256
+    ):
+        raise SPHTransportIntegrityError("a bound input changed after attempt reservation")
+    root = spec.output_root
     private_root = root / "private"
     public_root = root / "public"
-    if public_root.exists():
-        raise FileExistsError("reserved SPH attempt already contains public output")
-    public_root.mkdir()
-    (public_root / "member_predictions").mkdir()
-    (public_root / "member_reports").mkdir()
-    (public_root / "paired_bootstrap_reports").mkdir()
-    (public_root / "architecture_summaries").mkdir()
-    shutil.copyfile(spec.path, private_root / "protocol.snapshot.yaml")
+    public_root.mkdir(exist_ok=False)
+    for name in (
+        "member_predictions",
+        "member_reports",
+        "paired_bootstrap_reports",
+        "architecture_summaries",
+    ):
+        (public_root / name).mkdir(exist_ok=False)
 
-    inventory_path, _ = write_new_hashed_json(
+    try:
+        protocol_bytes = spec.path.read_bytes()
+    except OSError as error:
+        raise SPHTransportIntegrityError(f"could not snapshot r2 protocol: {error}") from error
+    snapshot_path = private_root / "protocol.snapshot.yaml"
+    _write_new_bytes(snapshot_path, protocol_bytes)
+    if _prefixed_file_sha256(snapshot_path) != spec.file_sha256:
+        raise SPHTransportIntegrityError("r2 protocol snapshot differs from loaded protocol")
+
+    bound_inputs_path, bound_inputs_artifact_sha256 = _write_new_sph_json(
+        private_root / "bound_inputs.preinference.json",
+        {
+            "schema_version": 1,
+            "artifact_type": "ecg_trust.sph_transport_bound_inputs_preinference",
+            "protocol_sha256": spec.file_sha256,
+            "bound_inputs_sha256": bound_inputs_sha256,
+            "bound_inputs": list(bound_inputs),
+            "timing": "before_first_sph_model_inference",
+        },
+        hash_field="artifact_sha256",
+        context="pre-inference bound-input artifact",
+    )
+
+    inventory_path, _ = _write_new_sph_json(
         private_root / "source_inventory.json",
         {
             "schema_version": 1,
             "artifact_type": "ecg_trust.sph_transport_source_inventory",
             "protocol_sha256": spec.file_sha256,
-            "inventory": dict(source_inventory or {"status": "synthetic_test"}),
+            "inventory": plain_inventory,
         },
         hash_field="artifact_sha256",
+        context="source inventory artifact",
     )
 
     publication_order = np.random.default_rng(spec.public_row_permutation_seed).permutation(
@@ -883,11 +1132,9 @@ def save_sph_transport_outputs(
                 lambda value: json.dumps(list(value), separators=(",", ":"))
             )
     parquet_path = private_root / "cohort_manifest.parquet"
-    if parquet_path.exists():
-        raise FileExistsError(f"private cohort manifest already exists: {parquet_path}")
-    private_manifest.to_parquet(parquet_path, index=False)
+    _write_new_parquet(parquet_path, private_manifest)
     private_alignment_sha = _prefixed_file_sha256(parquet_path)
-    save_audit_array_artifact(
+    _save_sph_array_artifact(
         private_root / "cohort_alignment.npz",
         artifact_type=SPH_TRANSPORT_ALIGNMENT_TYPE,
         arrays={
@@ -905,6 +1152,340 @@ def save_sph_transport_outputs(
             "n_samples": len(cohorts.ecg_ids),
             "visibility": "local_private_gitignored",
         },
+        context="private cohort alignment",
+    )
+    return SPHTransportPreparedOutput(
+        output_root=root,
+        private_alignment_sha256=private_alignment_sha,
+        source_inventory_path=inventory_path,
+        bound_inputs_path=bound_inputs_path,
+        bound_inputs_artifact_sha256=bound_inputs_artifact_sha256,
+        bound_inputs=bound_inputs,
+        bound_inputs_sha256=bound_inputs_sha256,
+        publication_order=cast(NDArray[np.int64], _readonly(publication_order)),
+        internal_to_public=cast(NDArray[np.int64], _readonly(internal_to_public)),
+    )
+
+
+def save_sph_inference_checkpoint(
+    spec: SPHTransportSpec,
+    runtime: CompletedAuditRuntime,
+    cohorts: SPHTransportCohorts,
+    inference: SPHTransportInference,
+    *,
+    private_alignment_sha256: str,
+) -> AuditArrayFiles:
+    """Persist the completed one-pass logits before any SPH metric computation."""
+
+    member_ids = tuple(member.member_id for member in runtime.members)
+    if member_ids != EXPECTED_AUDIT_MEMBER_IDS or tuple(inference.raw_logits) != member_ids:
+        raise SPHTransportIntegrityError("inference checkpoint is not the ordered exact six")
+    if not np.array_equal(inference.targets, cohorts.targets):
+        raise SPHTransportIntegrityError("inference checkpoint target alignment differs")
+    logit_arrays = {
+        member_id: f"{member_id.replace('-', '_')}_raw_logits" for member_id in member_ids
+    }
+    arrays: dict[str, NDArray[np.generic]] = {
+        "targets": inference.targets,
+        "per_record_max_abs_mv": inference.per_record_max_abs_mv,
+        "per_record_lead_max_abs_mv": inference.per_record_lead_max_abs_mv,
+    }
+    arrays.update(
+        {
+            array_name: inference.raw_logits[member_id]
+            for member_id, array_name in logit_arrays.items()
+        }
+    )
+    return _save_sph_array_artifact(
+        spec.output_root / "private" / "inference_checkpoint.npz",
+        artifact_type=SPH_TRANSPORT_INFERENCE_CHECKPOINT_TYPE,
+        arrays=arrays,
+        metadata={
+            "protocol_sha256": spec.file_sha256,
+            "private_alignment_sha256": private_alignment_sha256,
+            "broad_alignment_sha256": cohorts.alignment_sha256,
+            "physical_signal_sha256": inference.physical_signal_sha256,
+            "member_ids": list(member_ids),
+            "logit_arrays": logit_arrays,
+            "label_order": list(LABEL_ORDER),
+            "n_samples": len(cohorts.ecg_ids),
+            "per_lead_qc": inference.per_lead_qc,
+            "inference_passes": 1,
+            "checkpoint_timing": "before_sph_metrics",
+            "recovery_policy": ("resume_metrics_and_finalization_without_second_sph_model_pass"),
+        },
+        context="private inference checkpoint",
+    )
+
+
+def load_sph_inference_checkpoint(
+    path: str | Path,
+    spec: SPHTransportSpec,
+    runtime: CompletedAuditRuntime,
+    cohorts: SPHTransportCohorts,
+    *,
+    private_alignment_sha256: str,
+) -> SPHTransportInference:
+    """Load exact frozen logits only after verifying checkpoint provenance and arrays."""
+
+    member_ids = tuple(member.member_id for member in runtime.members)
+    if member_ids != EXPECTED_AUDIT_MEMBER_IDS:
+        raise SPHTransportIntegrityError("checkpoint runtime is not the ordered exact six")
+    logit_arrays = {
+        member_id: f"{member_id.replace('-', '_')}_raw_logits" for member_id in member_ids
+    }
+    artifact = load_audit_array_artifact(
+        path,
+        expected_artifact_type=SPH_TRANSPORT_INFERENCE_CHECKPOINT_TYPE,
+    )
+    metadata = artifact.metadata
+    expected_metadata = {
+        "protocol_sha256": spec.file_sha256,
+        "private_alignment_sha256": private_alignment_sha256,
+        "broad_alignment_sha256": cohorts.alignment_sha256,
+        "member_ids": list(member_ids),
+        "logit_arrays": logit_arrays,
+        "label_order": list(LABEL_ORDER),
+        "n_samples": len(cohorts.ecg_ids),
+        "inference_passes": 1,
+        "checkpoint_timing": "before_sph_metrics",
+        "recovery_policy": "resume_metrics_and_finalization_without_second_sph_model_pass",
+    }
+    for key, value in expected_metadata.items():
+        if metadata.get(key) != value:
+            raise SPHTransportIntegrityError(f"inference checkpoint {key} differs")
+    expected_arrays = {
+        "targets",
+        "per_record_max_abs_mv",
+        "per_record_lead_max_abs_mv",
+        *logit_arrays.values(),
+    }
+    if set(artifact.arrays) != expected_arrays:
+        raise SPHTransportIntegrityError("inference checkpoint array set differs")
+    targets = np.asarray(artifact.arrays["targets"])
+    if targets.shape != cohorts.targets.shape or not np.array_equal(targets, cohorts.targets):
+        raise SPHTransportIntegrityError("inference checkpoint targets differ")
+    n_samples = len(cohorts.ecg_ids)
+    raw_logits: dict[str, FloatArray] = {}
+    for member_id, array_name in logit_arrays.items():
+        logits = np.asarray(artifact.arrays[array_name], dtype=np.float64)
+        if logits.shape != (n_samples, len(LABEL_ORDER)) or not np.all(np.isfinite(logits)):
+            raise SPHTransportIntegrityError(f"inference checkpoint logits differ for {member_id}")
+        raw_logits[member_id] = cast(FloatArray, _readonly(logits))
+    record_max = np.asarray(artifact.arrays["per_record_max_abs_mv"], dtype=np.float64)
+    lead_max = np.asarray(artifact.arrays["per_record_lead_max_abs_mv"], dtype=np.float64)
+    if record_max.shape != (n_samples,) or lead_max.shape != (n_samples, len(LEADS)):
+        raise SPHTransportIntegrityError("inference checkpoint QC array shape differs")
+    physical_sha = _prefixed_hash(
+        metadata.get("physical_signal_sha256"),
+        "inference checkpoint physical_signal_sha256",
+    )
+    per_lead = _mapping(metadata.get("per_lead_qc"), "inference checkpoint per_lead_qc")
+    return SPHTransportInference(
+        targets=cast(IntArray, _readonly(targets.astype(np.int8, copy=False))),
+        raw_logits=MappingProxyType(raw_logits),
+        per_record_max_abs_mv=cast(FloatArray, _readonly(record_max)),
+        per_record_lead_max_abs_mv=cast(FloatArray, _readonly(lead_max)),
+        physical_signal_sha256=physical_sha,
+        per_lead_qc=MappingProxyType(
+            {
+                lead: MappingProxyType(dict(_mapping(values, f"per_lead_qc.{lead}")))
+                for lead, values in per_lead.items()
+            }
+        ),
+    )
+
+
+def _ensure_sph_inference_checkpoint(
+    spec: SPHTransportSpec,
+    runtime: CompletedAuditRuntime,
+    cohorts: SPHTransportCohorts,
+    inference: SPHTransportInference,
+    *,
+    private_alignment_sha256: str,
+) -> None:
+    checkpoint = spec.output_root / "private" / "inference_checkpoint.npz"
+    sidecar = checkpoint.with_suffix(".json")
+    if checkpoint.exists() != sidecar.exists():
+        raise SPHTransportIntegrityError("inference checkpoint pair is incomplete")
+    if not checkpoint.exists():
+        save_sph_inference_checkpoint(
+            spec,
+            runtime,
+            cohorts,
+            inference,
+            private_alignment_sha256=private_alignment_sha256,
+        )
+        return
+    loaded = load_sph_inference_checkpoint(
+        checkpoint,
+        spec,
+        runtime,
+        cohorts,
+        private_alignment_sha256=private_alignment_sha256,
+    )
+    if (
+        loaded.physical_signal_sha256 != inference.physical_signal_sha256
+        or not np.array_equal(loaded.targets, inference.targets)
+        or not np.array_equal(loaded.per_record_max_abs_mv, inference.per_record_max_abs_mv)
+        or not np.array_equal(
+            loaded.per_record_lead_max_abs_mv,
+            inference.per_record_lead_max_abs_mv,
+        )
+        or any(
+            not np.array_equal(loaded.raw_logits[member_id], inference.raw_logits[member_id])
+            for member_id in EXPECTED_AUDIT_MEMBER_IDS
+        )
+        or _plain_json_mapping(loaded.per_lead_qc, context="loaded checkpoint QC")
+        != _plain_json_mapping(inference.per_lead_qc, context="in-memory checkpoint QC")
+    ):
+        raise SPHTransportIntegrityError("stored inference checkpoint differs from inference")
+
+
+def _verify_prepared_output(
+    spec: SPHTransportSpec,
+    cohorts: SPHTransportCohorts,
+    attempt: SPHTransportAttempt,
+    prepared: SPHTransportPreparedOutput,
+) -> None:
+    _verify_attempt_marker(spec, attempt)
+    if prepared.output_root.resolve() != spec.output_root.resolve():
+        raise SPHTransportIntegrityError("prepared output belongs to another root")
+    private_root = prepared.output_root / "private"
+    for path in (
+        private_root / "protocol.snapshot.yaml",
+        prepared.source_inventory_path,
+        prepared.bound_inputs_path,
+        private_root / "cohort_manifest.parquet",
+        private_root / "cohort_alignment.npz",
+        private_root / "cohort_alignment.json",
+    ):
+        if not path.is_file():
+            raise SPHTransportIntegrityError(f"prepared output is missing {path.name}")
+    if (
+        _prefixed_file_sha256(private_root / "protocol.snapshot.yaml") != spec.file_sha256
+        or _prefixed_file_sha256(private_root / "cohort_manifest.parquet")
+        != prepared.private_alignment_sha256
+    ):
+        raise SPHTransportIntegrityError("prepared protocol or alignment identity differs")
+    _verify_prepared_bound_inputs(spec, attempt, prepared)
+    expected_order = np.random.default_rng(spec.public_row_permutation_seed).permutation(
+        len(cohorts.ecg_ids)
+    )
+    expected_inverse = np.empty(len(expected_order), dtype=np.int64)
+    expected_inverse[expected_order] = np.arange(len(expected_order), dtype=np.int64)
+    if not np.array_equal(prepared.publication_order, expected_order) or not np.array_equal(
+        prepared.internal_to_public, expected_inverse
+    ):
+        raise SPHTransportIntegrityError("prepared publication permutation differs")
+    public_root = prepared.output_root / "public"
+    expected_directories = {
+        "member_predictions",
+        "member_reports",
+        "paired_bootstrap_reports",
+        "architecture_summaries",
+    }
+    if (
+        not public_root.is_dir()
+        or {path.name for path in public_root.iterdir()} != expected_directories
+        or any(any(path.iterdir()) for path in public_root.iterdir())
+    ):
+        raise SPHTransportIntegrityError("prepared public layout contains unexpected state")
+
+
+def _verify_prepared_bound_inputs(
+    spec: SPHTransportSpec,
+    attempt: SPHTransportAttempt,
+    prepared: SPHTransportPreparedOutput,
+) -> None:
+    expected_path = (prepared.output_root / "private" / "bound_inputs.preinference.json").resolve()
+    if prepared.bound_inputs_path.resolve() != expected_path:
+        raise SPHTransportIntegrityError("prepared bound-input artifact path differs")
+    if (
+        prepared.bound_inputs != attempt.bound_inputs
+        or prepared.bound_inputs_sha256 != attempt.bound_inputs_sha256
+        or _bound_inputs_sha256(prepared.bound_inputs) != prepared.bound_inputs_sha256
+    ):
+        raise SPHTransportIntegrityError("prepared bound-input identity differs")
+    try:
+        decoded: object = json.loads(prepared.bound_inputs_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise SPHTransportIntegrityError(
+            f"could not verify prepared bound-input artifact: {error}"
+        ) from error
+    payload = _mapping(decoded, "prepared bound-input artifact")
+    stored = _prefixed_hash(payload.get("artifact_sha256"), "bound-input artifact SHA-256")
+    unhashed = dict(payload)
+    del unhashed["artifact_sha256"]
+    if (
+        stored != prepared.bound_inputs_artifact_sha256
+        or _canonical_payload_sha256(unhashed, context="prepared bound-input artifact") != stored
+        or payload.get("protocol_sha256") != spec.file_sha256
+        or payload.get("bound_inputs_sha256") != prepared.bound_inputs_sha256
+        or payload.get("bound_inputs") != list(prepared.bound_inputs)
+        or payload.get("timing") != "before_first_sph_model_inference"
+    ):
+        raise SPHTransportIntegrityError("prepared bound-input artifact integrity differs")
+
+
+def _verify_bound_inputs_unchanged(
+    spec: SPHTransportSpec,
+    prepared: SPHTransportPreparedOutput,
+) -> list[dict[str, object]]:
+    current, current_sha256 = _bound_input_snapshot(spec, require_all=True)
+    if current != prepared.bound_inputs or current_sha256 != prepared.bound_inputs_sha256:
+        raise SPHTransportIntegrityError("a bound input changed after pre-inference binding")
+    return [dict(entry) for entry in current]
+
+
+def save_sph_transport_outputs(
+    spec: SPHTransportSpec,
+    runtime: CompletedAuditRuntime,
+    cohorts: SPHTransportCohorts,
+    inference: SPHTransportInference,
+    evaluation: SPHTransportEvaluation,
+    *,
+    attempt: SPHTransportAttempt,
+    prepared: SPHTransportPreparedOutput | None = None,
+    source_inventory: Mapping[str, object] | None = None,
+    execution_state: Mapping[str, object] | None = None,
+) -> SPHTransportRun:
+    """Commit private alignment and identifier-free public outputs without overwrite."""
+
+    if prepared is None:
+        resolved_inventory: Mapping[str, object] = source_inventory or {"status": "synthetic_test"}
+        prepared = prepare_sph_transport_outputs(
+            spec,
+            runtime,
+            cohorts,
+            attempt=attempt,
+            source_inventory=resolved_inventory,
+        )
+    _verify_prepared_output(spec, cohorts, attempt, prepared)
+    marker_payload = _verify_attempt_marker(spec, attempt)
+    marker_execution_state = _plain_json_mapping(
+        _mapping(marker_payload.get("execution_state"), "attempt execution_state"),
+        context="attempt execution_state",
+    )
+    state = (
+        marker_execution_state
+        if execution_state is None
+        else _plain_json_mapping(execution_state, context="run log execution state")
+    )
+    if state != marker_execution_state:
+        raise SPHTransportIntegrityError("run-log execution state differs from attempt marker")
+    root = prepared.output_root
+    private_root = root / "private"
+    public_root = root / "public"
+    private_alignment_sha = prepared.private_alignment_sha256
+    inventory_path = prepared.source_inventory_path
+    publication_order = prepared.publication_order
+    _ensure_sph_inference_checkpoint(
+        spec,
+        runtime,
+        cohorts,
+        inference,
+        private_alignment_sha256=private_alignment_sha,
     )
 
     safe_masks = {
@@ -912,7 +1493,7 @@ def save_sph_transport_outputs(
         for name, mask in cohorts.masks.items()
     }
     public_entries: list[dict[str, object]] = []
-    qc_files = save_audit_array_artifact(
+    qc_files = _save_sph_array_artifact(
         public_root / "signal_qc.npz",
         artifact_type=SPH_TRANSPORT_QC_TYPE,
         arrays={
@@ -928,12 +1509,13 @@ def save_sph_transport_outputs(
             "per_lead_qc": {lead: dict(values) for lead, values in inference.per_lead_qc.items()},
             "outlier_policy": "retain_without_clipping_rejection_or_rescaling",
         },
+        context="public signal QC",
     )
     public_entries.extend(_array_file_entries(qc_files, public_root))
 
     for member in runtime.members:
         output = evaluation.member_outputs[member.member_id]
-        files = save_audit_array_artifact(
+        files = _save_sph_array_artifact(
             public_root / "member_predictions" / f"{member.member_id}.npz",
             artifact_type=SPH_TRANSPORT_PREDICTION_TYPE,
             arrays={
@@ -967,12 +1549,13 @@ def save_sph_transport_outputs(
                     "row ordering is not a confidentiality mechanism"
                 ),
             },
+            context=f"public member predictions {member.member_id}",
         )
         public_entries.extend(_array_file_entries(files, public_root))
 
     for key, report in evaluation.member_reports.items():
         cohort_name, member_id = key.split("/", maxsplit=1)
-        path, _ = write_new_hashed_json(
+        path, _ = _write_new_sph_json(
             public_root / "member_reports" / f"{cohort_name}__{member_id}.json",
             {
                 "schema_version": 1,
@@ -981,17 +1564,18 @@ def save_sph_transport_outputs(
                 "private_alignment_sha256": private_alignment_sha,
                 "cohort": cohort_name,
                 "member_id": member_id,
-                "report": dict(report),
+                "report": report,
                 "interpretation": "exploratory external transport stress test",
                 "sph_fitting_performed": False,
                 "clinical_validation": False,
             },
             hash_field="artifact_sha256",
+            context=f"member report {cohort_name}/{member_id}",
         )
         public_entries.append(_file_entry(path, public_root))
     for key, report in evaluation.paired_reports.items():
         cohort_name, seed_name = key.split("/", maxsplit=1)
-        path, _ = write_new_hashed_json(
+        path, _ = _write_new_sph_json(
             public_root / "paired_bootstrap_reports" / f"{cohort_name}__{seed_name}.json",
             {
                 "schema_version": 1,
@@ -1001,26 +1585,28 @@ def save_sph_transport_outputs(
                 "cohort": cohort_name,
                 "seed_pair": seed_name,
                 "direction": "ecg_transformer_minus_resnet1d",
-                "report": dict(report),
+                "report": report,
             },
             hash_field="artifact_sha256",
+            context=f"paired report {cohort_name}/{seed_name}",
         )
         public_entries.append(_file_entry(path, public_root))
     for key, summary in evaluation.architecture_summaries.items():
-        path, _ = write_new_hashed_json(
+        path, _ = _write_new_sph_json(
             public_root / "architecture_summaries" / f"{key}.json",
             {
                 "schema_version": 1,
                 "artifact_type": "ecg_trust.sph_transport_architecture_summary",
                 "protocol_sha256": spec.file_sha256,
                 "private_alignment_sha256": private_alignment_sha,
-                "summary": dict(summary),
+                "summary": summary,
             },
             hash_field="artifact_sha256",
+            context=f"architecture summary {key}",
         )
         public_entries.append(_file_entry(path, public_root))
 
-    summary_path, _ = write_new_hashed_json(
+    summary_path, _ = _write_new_sph_json(
         public_root / "cohort_summary.json",
         {
             "schema_version": 1,
@@ -1032,6 +1618,7 @@ def save_sph_transport_outputs(
             "norm_plus_direct_abnormal_conflicts": 0,
         },
         hash_field="artifact_sha256",
+        context="cohort summary",
     )
     public_entries.append(_file_entry(summary_path, public_root))
     results_path = public_root / "FINAL_RESULTS.md"
@@ -1041,7 +1628,7 @@ def save_sph_transport_outputs(
     )
     public_entries.append(_file_entry(results_path, public_root))
     public_entries = sorted(public_entries, key=lambda item: cast(str, item["file"]))
-    manifest_path, manifest_sha = write_new_hashed_json(
+    manifest_path, manifest_sha = _write_new_sph_json(
         public_root / "manifest.json",
         {
             "schema_version": 1,
@@ -1058,10 +1645,10 @@ def save_sph_transport_outputs(
             "files": public_entries,
         },
         hash_field="artifact_sha256",
+        context="public manifest",
     )
     assert_identifier_free_public_outputs(public_root)
 
-    state = dict(execution_state or {"status": "synthetic_test"})
     _write_new_text(
         private_root / "RUN_LOG.md",
         (
@@ -1075,21 +1662,22 @@ def save_sph_transport_outputs(
             f"- Execution state: `{json.dumps(state, sort_keys=True)}`\n"
         ),
     )
+    verified_bound_inputs = _verify_bound_inputs_unchanged(spec, prepared)
     generated_before_manifest = sorted(path for path in root.rglob("*") if path.is_file())
-    bound_inputs = _bound_input_entries(spec, require_all=source_inventory is not None)
-    write_new_hashed_json(
+    _write_new_sph_json(
         private_root / "derived_artifacts.manifest.json",
         {
             "schema_version": 1,
             "artifact_type": "ecg_trust.sph_transport_derived_manifest",
             "protocol_sha256": spec.file_sha256,
             "generated_files": [_file_entry(path, root) for path in generated_before_manifest],
-            "bound_inputs": bound_inputs,
+            "bound_inputs": verified_bound_inputs,
             "public_manifest_sha256": manifest_sha,
             "private_alignment_sha256": private_alignment_sha,
             "source_inventory_file_sha256": _prefixed_file_sha256(inventory_path),
         },
         hash_field="artifact_sha256",
+        context="derived artifact manifest",
     )
     return SPHTransportRun(
         output_root=root,
@@ -1107,9 +1695,9 @@ def run_sph_transport(
     """Execute the preregistered study without scientific command-line overrides."""
 
     emit = progress or (lambda _message: None)
-    if spec.output_root.exists() and any(spec.output_root.iterdir()):
+    if spec.output_root.exists():
         raise FileExistsError(
-            f"SPH output root is populated; use a new frozen protocol: {spec.output_root}"
+            f"SPH output root already exists and is permanently spent: {spec.output_root}"
         )
     emit("verifying clean Git execution revision")
     execution_state = verify_clean_git_execution(spec)
@@ -1129,24 +1717,71 @@ def run_sph_transport(
         source_inventory=source_inventory,
         execution_state=execution_state,
     )
+    phase_state = _empty_failure_state()
+    failure_phase = "outcome_independent_output_commit"
     try:
+        phase_state["output_commit_started"] = True
+        emit("committing outcome-independent private identity and output layout")
+        prepared = prepare_sph_transport_outputs(
+            spec,
+            runtime,
+            cohorts,
+            attempt=attempt,
+            source_inventory=source_inventory,
+        )
+        failure_phase = "sph_model_inference"
+        phase_state["sph_inference_started"] = True
         emit("running one broad exact-10-second SPH pass through all six frozen members")
         inference = infer_sph_transport(runtime, dataset, expected_targets=cohorts.targets)
+        phase_state["sph_inference_completed"] = True
+        phase_state["sph_predictions_generated"] = True
+        failure_phase = "private_inference_checkpoint_commit"
+        emit("checkpointing exact logits before any SPH metric computation")
+        save_sph_inference_checkpoint(
+            spec,
+            runtime,
+            cohorts,
+            inference,
+            private_alignment_sha256=prepared.private_alignment_sha256,
+        )
+        phase_state["inference_checkpoint_committed"] = True
+        failure_phase = "post_inference_source_reverification"
+        emit("re-verifying source archive and extracted records after inference")
+        post_inference_archive_audit = verify_sph_archive_safety(spec, cohorts)
+        if _plain_json_mapping(
+            post_inference_archive_audit, context="post-inference archive audit"
+        ) != _plain_json_mapping(archive_audit, context="pre-inference archive audit"):
+            raise SPHTransportIntegrityError("SPH source identity changed during inference")
+        failure_phase = "sph_metrics"
+        phase_state["sph_metrics_started"] = True
         emit("evaluating primary and two sensitivity cohorts with frozen decisions")
         evaluation = evaluate_all_sph_cohorts(spec, runtime, cohorts, inference)
-        emit("committing private alignment and identifier-free public artifacts")
-        return save_sph_transport_outputs(
+        phase_state["sph_metrics_completed"] = True
+        failure_phase = "final_output_commit"
+        emit("committing identifier-free public artifacts and final manifests")
+        result = save_sph_transport_outputs(
             spec,
             runtime,
             cohorts,
             inference,
             evaluation,
             attempt=attempt,
+            prepared=prepared,
             source_inventory=source_inventory,
             execution_state=execution_state,
         )
+        phase_state["output_commit_completed"] = True
+        return result
     except BaseException as error:
-        record_sph_attempt_failure(attempt, error)
+        try:
+            record_sph_attempt_failure(
+                attempt,
+                error,
+                failure_phase=failure_phase,
+                phase_state=phase_state,
+            )
+        except BaseException as receipt_error:
+            error.add_note(f"failure receipt could not be committed: {receipt_error}")
         raise
 
 
@@ -1342,21 +1977,57 @@ def _bound_input_entries(spec: SPHTransportSpec, *, require_all: bool) -> list[d
     )
     if require_all and any(not path.is_file() for path in paths):
         raise SPHTransportIntegrityError("a bound input disappeared before manifesting")
-    return [
-        {
-            "path": str(path),
-            "size_bytes": path.stat().st_size,
-            "sha256": _prefixed_file_sha256(path),
-        }
-        for path in paths
-        if path.is_file()
-    ]
+    entries: list[dict[str, object]] = []
+    try:
+        for path in paths:
+            if path.is_file():
+                entries.append(
+                    {
+                        "path": str(path),
+                        "size_bytes": path.stat().st_size,
+                        "sha256": _prefixed_file_sha256(path),
+                    }
+                )
+    except OSError as error:
+        raise SPHTransportIntegrityError(f"could not bind every input: {error}") from error
+    if require_all and len(entries) != len(paths):  # concurrent disappearance
+        raise SPHTransportIntegrityError("a bound input disappeared while hashing inputs")
+    return entries
+
+
+def _bound_input_snapshot(
+    spec: SPHTransportSpec,
+    *,
+    require_all: bool,
+) -> tuple[tuple[Mapping[str, object], ...], str]:
+    normalized = _plain_finite_json(
+        _bound_input_entries(spec, require_all=require_all),
+        context="bound-input snapshot",
+    )
+    if not isinstance(normalized, list):  # pragma: no cover - helper invariant
+        raise SPHTransportIntegrityError("bound-input snapshot must be a list")
+    entries = tuple(
+        MappingProxyType(dict(_mapping(entry, "bound-input snapshot entry")))
+        for entry in normalized
+    )
+    if require_all and (
+        not entries
+        or entries[0].get("path") != str(spec.path)
+        or entries[0].get("sha256") != spec.file_sha256
+    ):
+        raise SPHTransportIntegrityError("loaded SPH protocol changed before input binding")
+    return entries, _bound_inputs_sha256(entries)
+
+
+def _bound_inputs_sha256(entries: Sequence[Mapping[str, object]]) -> str:
+    return _canonical_payload_sha256(
+        {"bound_inputs": list(entries)},
+        context="bound-input snapshot identity",
+    )
 
 
 def _write_new_text(path: Path, content: str) -> None:
-    if path.exists():
-        raise FileExistsError(f"immutable text artifact already exists: {path}")
-    path.write_text(content, encoding="utf-8", newline="\n")
+    _write_new_bytes(path, content.replace("\r\n", "\n").encode("utf-8"))
 
 
 def _final_results_markdown(
@@ -1612,6 +2283,90 @@ def _format_mean_sd(values: Sequence[float]) -> str:
 def _format_optional(value: object) -> str:
     number = _optional_number(value)
     return "NA" if number is None else f"{number:.6f}"
+
+
+def _validate_supersession_contract(payload: Mapping[str, object], project_root: Path) -> None:
+    supersession = _mapping(payload.get("supersession"), "supersession")
+    if dict(supersession) != SPH_TRANSPORT_SUPERSESSION:
+        raise SPHTransportIntegrityError("SPH r2 supersession lineage differs")
+    predecessor_path = _resolve_bound_path(
+        supersession.get("superseded_protocol_path"),
+        project_root,
+        "supersession.superseded_protocol_path",
+    )
+    expected_predecessor_sha = _prefixed_hash(
+        supersession.get("superseded_protocol_file_sha256"),
+        "supersession.superseded_protocol_file_sha256",
+    )
+    if (
+        not predecessor_path.is_file()
+        or _prefixed_file_sha256(predecessor_path) != expected_predecessor_sha
+    ):
+        raise SPHTransportIntegrityError("superseded v1 protocol file identity differs")
+    try:
+        predecessor_decoded: object = yaml.safe_load(predecessor_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as error:
+        raise SPHTransportIntegrityError(
+            f"could not load superseded v1 protocol: {error}"
+        ) from error
+    predecessor = _mapping(predecessor_decoded, "superseded v1 protocol")
+    if predecessor.get("protocol_id") != "sph-external-transport-v1":
+        raise SPHTransportIntegrityError("superseded protocol ID differs")
+
+    failure_record = _mapping(supersession.get("failure_record"), "failure_record")
+    failure_path = _resolve_bound_path(
+        failure_record.get("path"), project_root, "supersession.failure_record.path"
+    )
+    if (
+        not failure_path.is_file()
+        or failure_path.stat().st_size
+        != _integer(failure_record.get("size_bytes"), "failure_record.size_bytes")
+        or _prefixed_file_sha256(failure_path)
+        != _prefixed_hash(failure_record.get("sha256"), "failure_record.sha256")
+    ):
+        raise SPHTransportIntegrityError("authoritative v1 failure receipt identity differs")
+
+    projection = _scientific_contract_projection(payload)
+    predecessor_projection = _scientific_contract_projection(predecessor)
+    if projection != predecessor_projection:
+        raise SPHTransportIntegrityError("r2 scientific contract differs from frozen v1")
+    observed_hash = _canonical_payload_sha256(
+        projection, context="r2 scientific contract projection"
+    )
+    if observed_hash != _prefixed_hash(
+        payload.get("scientific_contract_sha256"), "scientific_contract_sha256"
+    ):
+        raise SPHTransportIntegrityError("r2 scientific contract projection hash differs")
+
+
+def _scientific_contract_projection(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    outputs = _mapping(payload.get("outputs"), "outputs")
+    label_contract = dict(_mapping(payload.get("label_contract"), "label_contract"))
+    ambiguous = label_contract.get("ambiguous_unmapped_primary_codes")
+    if not isinstance(ambiguous, Mapping):
+        raise SPHTransportIntegrityError("ambiguous_unmapped_primary_codes must be a mapping")
+    label_contract["ambiguous_unmapped_primary_codes"] = {
+        str(key): value for key, value in ambiguous.items()
+    }
+    projection = {
+        key: payload.get(key)
+        for key in (
+            "purpose",
+            "source",
+            "signal_contract",
+            "cohorts",
+            "frozen_models",
+            "runtime",
+            "evaluation",
+            "bootstrap",
+            "reporting_language",
+        )
+    }
+    projection["label_contract"] = label_contract
+    projection["outputs_privacy"] = outputs.get("privacy")
+    return _plain_json_mapping(projection, context="scientific contract projection")
 
 
 def _validate_signal_and_label_contract(payload: Mapping[str, object]) -> None:
@@ -1963,9 +2718,123 @@ def _optional_number(value: object) -> float | None:
     return number
 
 
+def _plain_finite_json(value: object, *, context: str) -> object:
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise SPHTransportIntegrityError(f"{context} contains a non-finite float")
+        return value
+    if isinstance(value, np.generic):
+        return _plain_finite_json(value.item(), context=context)
+    if isinstance(value, PurePath):
+        raise SPHTransportIntegrityError(
+            f"{context} contains a path; stringify it intentionally at the call site"
+        )
+    if isinstance(value, np.ndarray):
+        raise SPHTransportIntegrityError(
+            f"{context} contains an ndarray; encode it as an audit array artifact"
+        )
+    if isinstance(value, Mapping):
+        if not all(isinstance(key, str) for key in value):
+            raise SPHTransportIntegrityError(f"{context} contains a non-string mapping key")
+        return {
+            key: _plain_finite_json(item, context=f"{context}.{key}") for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [
+            _plain_finite_json(item, context=f"{context}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    raise SPHTransportIntegrityError(
+        f"{context} contains unsupported JSON value {type(value).__name__}"
+    )
+
+
+def _plain_json_mapping(value: Mapping[str, object], *, context: str) -> dict[str, object]:
+    normalized = _plain_finite_json(value, context=context)
+    if not isinstance(normalized, dict):  # pragma: no cover - input annotation invariant
+        raise SPHTransportIntegrityError(f"{context} must be a mapping")
+    return cast(dict[str, object], normalized)
+
+
+def _canonical_payload_sha256(payload: Mapping[str, object], *, context: str) -> str:
+    return canonical_sha256(_plain_json_mapping(payload, context=context))
+
+
+def _write_new_sph_json(
+    path: Path,
+    payload: Mapping[str, object],
+    *,
+    hash_field: str,
+    context: str,
+) -> tuple[Path, str]:
+    normalized = _plain_json_mapping(payload, context=context)
+    _canonical_payload_sha256(normalized, context=context)
+    return write_new_hashed_json(path, normalized, hash_field=hash_field)
+
+
+def _write_new_bytes(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, raw_temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(raw_temporary)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError as error:
+            raise FileExistsError(f"immutable artifact already exists: {path}") from error
+    finally:
+        with suppress(OSError):
+            temporary.unlink(missing_ok=True)
+
+
+def _write_new_parquet(path: Path, frame: pd.DataFrame) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, raw_temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp.parquet", dir=path.parent
+    )
+    os.close(descriptor)
+    temporary = Path(raw_temporary)
+    try:
+        frame.to_parquet(temporary, index=False)
+        with temporary.open("r+b") as handle:
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError as error:
+            raise FileExistsError(f"immutable Parquet artifact already exists: {path}") from error
+    finally:
+        with suppress(OSError):
+            temporary.unlink(missing_ok=True)
+
+
+def _save_sph_array_artifact(
+    path: Path,
+    *,
+    artifact_type: str,
+    arrays: Mapping[str, NDArray[np.generic]],
+    metadata: Mapping[str, object],
+    context: str,
+) -> AuditArrayFiles:
+    normalized_metadata = _plain_json_mapping(metadata, context=f"{context}.metadata")
+    return save_audit_array_artifact(
+        path,
+        artifact_type=artifact_type,
+        arrays=arrays,
+        metadata=normalized_metadata,
+    )
+
+
 def _canonical_json(value: Mapping[str, object]) -> str:
+    normalized = _plain_json_mapping(value, context="canonical JSON")
     return json.dumps(
-        value,
+        normalized,
         allow_nan=False,
         ensure_ascii=True,
         separators=(",", ":"),
@@ -1987,6 +2856,10 @@ __all__ = [
     "EXPECTED_BOOTSTRAP_RESAMPLES",
     "EXPECTED_COHORT_COUNTS",
     "EXPECTED_GATE_TARGETS",
+    "SPH_TRANSPORT_CONFIG",
+    "SPH_TRANSPORT_INFERENCE_CHECKPOINT_TYPE",
+    "SPH_TRANSPORT_OUTPUT_ROOT",
+    "SPH_TRANSPORT_PROTOCOL_ID",
     "SPHFrozenMemberOutput",
     "SPHTransportAttempt",
     "SPHTransportCohorts",
@@ -1994,6 +2867,7 @@ __all__ = [
     "SPHTransportEvaluation",
     "SPHTransportInference",
     "SPHTransportIntegrityError",
+    "SPHTransportPreparedOutput",
     "SPHTransportRun",
     "SPHTransportSpec",
     "apply_frozen_member_decisions",
@@ -2001,10 +2875,13 @@ __all__ = [
     "evaluate_all_sph_cohorts",
     "infer_sph_transport",
     "load_sph_completed_runtime",
+    "load_sph_inference_checkpoint",
     "load_sph_transport_spec",
     "prepare_sph_transport_cohorts",
+    "prepare_sph_transport_outputs",
     "record_sph_attempt_failure",
     "reserve_sph_transport_attempt",
     "run_sph_transport",
+    "save_sph_inference_checkpoint",
     "save_sph_transport_outputs",
 ]
