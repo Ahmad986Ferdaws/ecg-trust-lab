@@ -9,7 +9,7 @@
 | Architectures | Capacity-matched 1D ResNet and ECG transformer |
 | Operational demo default | ResNet, seed 2026, frozen fold-9 0.8-coverage gate |
 | Dataset | PTB-XL 1.0.3, canonical 100 Hz five-superclass manifest |
-| Evidence status | Sealed fold-10 comparison complete; post-evaluation descriptive audits complete |
+| Evidence status | Sealed fold-10 comparison complete; post-evaluation descriptive audits complete; later frozen SPH transport stress test complete |
 | Preregistered/completed seeds | `2026, 2027, 2028` / `2026, 2027, 2028` for both architectures |
 | Sealed-evaluation Git revision | `b0334730d8ab287a364f5978003dbe961770867c` |
 | r3 analysis Git revision | `731753796e3c26d68bfff072583c5ea54851e8c1` |
@@ -44,12 +44,18 @@ precision, and Brier score for all three paired seeds. The ECE difference was
 not resolved, and important subgroup-coverage, corruption-sensitivity, and
 explanation limitations prevent any clinical-safety or fairness claim.
 
+After r3 was finalized, the same six members were transported unchanged to a
+frozen retrospective SPH cohort. That separate exploratory experiment did not
+alter the r3 models, policies, results, or interpretation of fold 10. It adds
+limited transport evidence, not prospective or clinical validation.
+
 ## Intended use and prohibited use
 
 Intended uses are reproducible PTB-XL benchmark research, controlled
-architecture comparison, study of uncertainty and abstention behavior, and a
-local research viewer for compatible ECGs. The viewer may display model-output
-probabilities, an accept/defer state, and target-specific sensitivity overlays.
+architecture comparison, study of uncertainty and abstention behavior,
+pre-specified retrospective transport stress testing, and a local research
+viewer for compatible ECGs. The viewer may display model-output probabilities,
+an accept/defer state, and target-specific sensitivity overlays.
 
 The system is not intended for diagnosis, treatment, triage, emergency
 decisions, patient management, autonomous decision-making, or use as a medical
@@ -161,8 +167,10 @@ At the nominal 0.8 gate, age-80+ coverage was approximately 0.60-0.65, compared
 with approximately 0.93-0.95 below age 40. Age 80+ also had the lowest
 age-band AUROC for all six members: about 0.881-0.885 for the ResNet and
 0.834-0.857 for the transformer. These gaps make global coverage unsuitable as
-a fairness claim. Small groups, broad age bins, limited metadata, internal
-sampling, and absence of external validation constrain interpretation.
+a fairness claim. Small groups, broad age bins, limited metadata, and internal
+sampling constrain interpretation. The later SPH stress test did not reproduce
+these demographic subgroup analyses and therefore does not validate subgroup
+fairness or transportability.
 
 ## Robustness audit
 
@@ -199,6 +207,36 @@ The cohort has no clinical localization ground truth. These methods show model
 sensitivity under a signed correct-status score; they do not show causality,
 physiological relevance, or clinician reasoning.
 
+## Exploratory SPH external transport evidence
+
+This evidence was generated after the r3 PTB-XL analysis and is not part of
+the sealed fold-10 result. Under protocol `sph-external-transport-v1-r2`, all
+six frozen members were run once on the exact-10-second SPH cohort with the PTB
+training-fold normalization, fold-9 temperatures, thresholds, and entropy gates
+unchanged. No SPH statistic was used for model or seed selection, fine-tuning,
+normalization, recalibration, threshold fitting, gate fitting, exclusion, or
+cohort selection.
+
+The primary directly mapped cohort contained 15,698 ECGs from 15,193 patients;
+the broad exact-10-second cohort contained 18,842 ECGs from 18,157 patients,
+and the pre-specified no-ambiguous sensitivity cohort contained 15,563 ECGs
+from 15,066 patients.
+
+| Architecture | Calibrated macro AUROC | Macro AP | Brier | ECE |
+|---|---:|---:|---:|---:|
+| 1D ResNet | `0.930912 +/- 0.000964` | `0.698955 +/- 0.006752` | `0.061301 +/- 0.000248` | `0.052477 +/- 0.000877` |
+| ECG transformer | `0.924088 +/- 0.001231` | `0.657838 +/- 0.007557` | `0.064153 +/- 0.003962` | `0.061480 +/- 0.006313` |
+
+Values are mean +/- sample standard deviation across seeds on the primary
+cohort. Within each seed, paired patient-bootstrap AUROC intervals favored the
+ResNet. This is an **exploratory external transport stress test**, conducted
+with **no tuning or recalibration on SPH**, and is **not clinical validation**.
+The conservative AHA-to-PTB-superclass map was not reviewed by a cardiologist,
+MI and HYP have few positive patients, and the retrospective source does not
+establish prospective safety, utility, or device readiness. See the
+[sanitized result](../publication/external_transport_sph_r2/FINAL_RESULTS.md)
+and [artifact audit](../reports/SPH_EXTERNAL_TRANSPORT_AUDIT.md).
+
 ## Audit lineage and reproducibility anchors
 
 The complete post-evaluation package is r3. r1 failed because decimal case IDs
@@ -232,8 +270,13 @@ one-time opening and recovery history.
 
 ## Limitations and safety considerations
 
-- PTB-XL is a retrospective, historical, single-source cohort; no external,
-  prospective, contemporary, multi-site, or multi-device validation was done.
+- The r3 PTB-XL result is an internal retrospective, historical,
+  single-source evaluation. A later frozen SPH experiment supplies limited
+  retrospective external-transport evidence, but no prospective, clinical,
+  contemporary, or deployment validation was done.
+- The SPH AHA-to-PTB-superclass bridge was not clinically adjudicated, and MI
+  and HYP are rare; favorable aggregate transport metrics cannot establish
+  label validity, safety, or clinical benefit.
 - Targets are broad report-derived benchmark labels, not prospective
   adjudicated diagnoses. Macro metrics can hide label, subtype, and subgroup
   failures.
@@ -248,8 +291,10 @@ one-time opening and recovery history.
   localization ground truth.
 - Public fold 10 must not be reused for iterative tuning. Any change motivated
   by these results is exploratory and cannot replace this confirmatory record.
-- The final August 9 repository gate passed all 434 tests, Ruff, and strict
-  mypy. Pytest emitted one upstream Starlette/httpx deprecation warning.
+- The historical August 9 r3 repository gate passed all 434 tests, Ruff, and
+  strict mypy. The current post-SPH repository gate separately passed all 494
+  tests, Ruff, and strict mypy. Pytest emitted one upstream Starlette/httpx
+  deprecation warning.
 - The r3 demo binding is materialized. Isolated Chromium verified the model
   health state, five label-free examples, ordinary inference, calibrated and
   raw probabilities, the frozen gate, all 12 rendered waveform leads, and a
@@ -273,3 +318,6 @@ to the canonical sequence.
 - [Final-evaluation run log](../reports/FINAL_EVALUATION_RUN_LOG.md)
 - [Post-evaluation run log](../reports/POST_EVALUATION_RUN_LOG.md)
 - [Required protocol deviations](../reports/PROTOCOL_DEVIATIONS.md)
+- [Frozen SPH transport protocol](EXTERNAL_TRANSPORT_SPH_R2.md)
+- [Sanitized SPH result](../publication/external_transport_sph_r2/FINAL_RESULTS.md)
+- [SPH external-transport audit](../reports/SPH_EXTERNAL_TRANSPORT_AUDIT.md)

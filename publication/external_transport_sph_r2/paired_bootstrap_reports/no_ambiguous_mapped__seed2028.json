@@ -1,0 +1,641 @@
+{
+  "artifact_sha256": "sha256:9b88d925280200bc27c36e3318ca9728cb193efcb90723eca983bb4f537ad3df",
+  "artifact_type": "ecg_trust.sph_transport_paired_report",
+  "cohort": "no_ambiguous_mapped",
+  "direction": "ecg_transformer_minus_resnet1d",
+  "private_alignment_sha256": "sha256:ab3d8dc16c74690bb3ccd7f35cb6990c651e54ea8cb6e51f85782e2ce8f3d3f4",
+  "protocol_sha256": "sha256:840acb758d50dbf1a04bf704b16a58d4d29d668370ce7ef91ef7a44860bf311b",
+  "report": {
+    "analysis_kind": "exploratory_external_transport_stress_test",
+    "clinical_validation": false,
+    "difference_direction": "ecg_transformer_minus_resnet1d",
+    "ece_bins": 15,
+    "frozen_temperatures": {
+      "ecg_transformer": 1.35043972703422,
+      "resnet1d": 1.2985847530722312
+    },
+    "label_order": [
+      "NORM",
+      "MI",
+      "STTC",
+      "CD",
+      "HYP"
+    ],
+    "n_samples": 15563,
+    "probability_views": {
+      "frozen_temperature_calibrated": {
+        "completed_resamples": 1000,
+        "confidence_level": 0.95,
+        "difference_direction": "model_a_minus_model_b",
+        "ece_bins": 15,
+        "label_order": [
+          "NORM",
+          "MI",
+          "STTC",
+          "CD",
+          "HYP"
+        ],
+        "macro": {
+          "average_precision": {
+            "confidence_level": 0.95,
+            "estimate": -0.03458659374057316,
+            "higher_is_better": true,
+            "invalid_resamples": 0,
+            "lower": -0.05883561903779166,
+            "metric": "average_precision",
+            "status": "ok",
+            "upper": -0.013825195855020653,
+            "valid_resamples": 1000
+          },
+          "brier_score": {
+            "confidence_level": 0.95,
+            "estimate": 0.0007805261492295559,
+            "higher_is_better": false,
+            "invalid_resamples": 0,
+            "lower": -0.00018075308766461748,
+            "metric": "brier_score",
+            "status": "ok",
+            "upper": 0.0017991388641956732,
+            "valid_resamples": 1000
+          },
+          "ece": {
+            "confidence_level": 0.95,
+            "estimate": 0.0038484369585709763,
+            "higher_is_better": false,
+            "invalid_resamples": 0,
+            "lower": 0.002203118506811988,
+            "metric": "ece",
+            "status": "ok",
+            "upper": 0.0055659770694517635,
+            "valid_resamples": 1000
+          },
+          "roc_auc": {
+            "confidence_level": 0.95,
+            "estimate": -0.006004607977537324,
+            "higher_is_better": true,
+            "invalid_resamples": 0,
+            "lower": -0.011702953148876408,
+            "metric": "roc_auc",
+            "status": "ok",
+            "upper": -0.0007662026896261808,
+            "valid_resamples": 1000
+          }
+        },
+        "method": "paired_patient_cluster_percentile_bootstrap",
+        "minimum_valid_resamples": 500,
+        "model_a": "ecg_transformer",
+        "model_b": "resnet1d",
+        "n_patients": 15066,
+        "n_samples": 15563,
+        "per_label": [
+          {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": 0.001138649214841303,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.0025977701997899633,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": 0.004739130133884191,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": 0.0006714599532784554,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.0014864664881103918,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": 0.0030877530415545956,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": -0.010248311831907927,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.014129486584972116,
+              "metric": "ece",
+              "status": "ok",
+              "upper": -0.0052891083036944566,
+              "valid_resamples": 1000
+            },
+            "label": "NORM",
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": -0.0013030551131383294,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.004959785879483313,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": 0.002496675674904872,
+              "valid_resamples": 1000
+            }
+          },
+          {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": -0.10050218655152371,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.17132729448452336,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": -0.029700896729281615,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": 0.00634584853323026,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.0046636802710752715,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": 0.007968180259466282,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": 0.021587658893371595,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.019571952886058223,
+              "metric": "ece",
+              "status": "ok",
+              "upper": 0.02359206521788672,
+              "valid_resamples": 1000
+            },
+            "label": "MI",
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": -0.021044553005749922,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.040630512464492986,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": -0.0029176015562030117,
+              "valid_resamples": 1000
+            }
+          },
+          {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": -0.01927729551842161,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.02930206501879225,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": -0.009750418989952936,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": 0.0018079318763230962,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.00013931810058335532,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": 0.0034646595296459314,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": -0.0004886573685259979,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.004824406312708004,
+              "metric": "ece",
+              "status": "ok",
+              "upper": 0.003691578033642096,
+              "valid_resamples": 1000
+            },
+            "label": "STTC",
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": -0.0047809416187541975,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.008133929354565824,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": -0.001499249748880863,
+              "valid_resamples": 1000
+            }
+          },
+          {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": -0.014060679046669078,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.02962495833439969,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": 0.0012471578511281665,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": 0.0028053312636116615,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.0011929900351789035,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": 0.004382079885212776,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": 0.019257166929563335,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.017465107967080753,
+              "metric": "ece",
+              "status": "ok",
+              "upper": 0.021160068039891195,
+              "valid_resamples": 1000
+            },
+            "label": "CD",
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": -0.0013701982602449814,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.009713555407092605,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": 0.006603154917278666,
+              "valid_resamples": 1000
+            }
+          },
+          {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": -0.04023145680109319,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.12189682506231603,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": 0.0334697355322958,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": -0.007727940880295717,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.008858841550394061,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": -0.006675644665585871,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": -0.010865671829646137,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.01219115171577805,
+              "metric": "ece",
+              "status": "ok",
+              "upper": -0.009636530120367994,
+              "valid_resamples": 1000
+            },
+            "label": "HYP",
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": -0.0015242918897994118,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.018360199277704093,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": 0.016473334109141487,
+              "valid_resamples": 1000
+            }
+          }
+        ],
+        "requested_resamples": 1000,
+        "seed": 20462844,
+        "status": "ok"
+      },
+      "raw_sigmoid": {
+        "completed_resamples": 1000,
+        "confidence_level": 0.95,
+        "difference_direction": "model_a_minus_model_b",
+        "ece_bins": 15,
+        "label_order": [
+          "NORM",
+          "MI",
+          "STTC",
+          "CD",
+          "HYP"
+        ],
+        "macro": {
+          "average_precision": {
+            "confidence_level": 0.95,
+            "estimate": -0.03458659374057316,
+            "higher_is_better": true,
+            "invalid_resamples": 0,
+            "lower": -0.05883561903779166,
+            "metric": "average_precision",
+            "status": "ok",
+            "upper": -0.013825195855020653,
+            "valid_resamples": 1000
+          },
+          "brier_score": {
+            "confidence_level": 0.95,
+            "estimate": 0.0005843996890839143,
+            "higher_is_better": false,
+            "invalid_resamples": 0,
+            "lower": -0.0005483475969276805,
+            "metric": "brier_score",
+            "status": "ok",
+            "upper": 0.0017359839481571825,
+            "valid_resamples": 1000
+          },
+          "ece": {
+            "confidence_level": 0.95,
+            "estimate": 0.0002229858941788787,
+            "higher_is_better": false,
+            "invalid_resamples": 0,
+            "lower": -0.001680237150332587,
+            "metric": "ece",
+            "status": "ok",
+            "upper": 0.0018449463964411521,
+            "valid_resamples": 1000
+          },
+          "roc_auc": {
+            "confidence_level": 0.95,
+            "estimate": -0.006004607977537324,
+            "higher_is_better": true,
+            "invalid_resamples": 0,
+            "lower": -0.011702953148876408,
+            "metric": "roc_auc",
+            "status": "ok",
+            "upper": -0.0007662026896261808,
+            "valid_resamples": 1000
+          }
+        },
+        "method": "paired_patient_cluster_percentile_bootstrap",
+        "minimum_valid_resamples": 500,
+        "model_a": "ecg_transformer",
+        "model_b": "resnet1d",
+        "n_patients": 15066,
+        "n_samples": 15563,
+        "per_label": [
+          {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": 0.001138649214841303,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.0025977701997899633,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": 0.004739130133884191,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": 0.0019953884494045143,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.0005561013904166009,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": 0.0047531802750186095,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": -0.000995194729594917,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.005778514440917577,
+              "metric": "ece",
+              "status": "ok",
+              "upper": 0.0036978302220091936,
+              "valid_resamples": 1000
+            },
+            "label": "NORM",
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": -0.0013030551131383294,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.004959785879483313,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": 0.002496675674904872,
+              "valid_resamples": 1000
+            }
+          },
+          {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": -0.10050218655152371,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.17132729448452336,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": -0.029700896729281615,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": 0.005080060744415998,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.0031952757067870907,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": 0.0069604655757775045,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": 0.01343779807984892,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.011139985382207179,
+              "metric": "ece",
+              "status": "ok",
+              "upper": 0.0156356741071681,
+              "valid_resamples": 1000
+            },
+            "label": "MI",
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": -0.021044553005749922,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.040630512464492986,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": -0.0029176015562030117,
+              "valid_resamples": 1000
+            }
+          },
+          {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": -0.01927729551842161,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.02930206501879225,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": -0.009750418989952936,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": 0.0027702116425284556,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.0008144270099755587,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": 0.004674902677694142,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": 0.005280917338135925,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.0014952589826327557,
+              "metric": "ece",
+              "status": "ok",
+              "upper": 0.009543034617755835,
+              "valid_resamples": 1000
+            },
+            "label": "STTC",
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": -0.0047809416187541975,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.008133929354565824,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": -0.001499249748880863,
+              "valid_resamples": 1000
+            }
+          },
+          {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": -0.014060679046669078,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.02962495833439969,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": 0.0012471578511281665,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": 0.0015109340109282915,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.00030949271454255574,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": 0.0032989492448133907,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": -0.002530484111536408,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.006532836309260522,
+              "metric": "ece",
+              "status": "ok",
+              "upper": 0.0004844388739554396,
+              "valid_resamples": 1000
+            },
+            "label": "CD",
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": -0.0013701982602449814,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.009713555407092605,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": 0.006603154917278666,
+              "valid_resamples": 1000
+            }
+          },
+          {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": -0.04023145680109319,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.12189682506231603,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": 0.0334697355322958,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": -0.008434596401857621,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.00971813612673141,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": -0.007264360143879832,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": -0.014078107105959133,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": -0.015545385868870205,
+              "metric": "ece",
+              "status": "ok",
+              "upper": -0.01281770160469903,
+              "valid_resamples": 1000
+            },
+            "label": "HYP",
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": -0.0015242918897994118,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": -0.018360199277704093,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": 0.016473334109141487,
+              "valid_resamples": 1000
+            }
+          }
+        ],
+        "requested_resamples": 1000,
+        "seed": 20462844,
+        "status": "ok"
+      }
+    },
+    "tuning_or_recalibration_on_sph": false
+  },
+  "schema_version": 1,
+  "seed_pair": "seed2028"
+}

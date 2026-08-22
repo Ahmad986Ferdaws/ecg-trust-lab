@@ -1,0 +1,986 @@
+{
+  "artifact_sha256": "sha256:05cb7963ee4074df1ee5ad5ea71a26c6d81fdfd6aad7c35973d4e44e2c09e2e7",
+  "artifact_type": "ecg_trust.sph_transport_member_report",
+  "clinical_validation": false,
+  "cohort": "no_ambiguous_mapped",
+  "interpretation": "exploratory external transport stress test",
+  "member_id": "resnet1d-seed2026",
+  "private_alignment_sha256": "sha256:ab3d8dc16c74690bb3ccd7f35cb6990c651e54ea8cb6e51f85782e2ce8f3d3f4",
+  "protocol_sha256": "sha256:840acb758d50dbf1a04bf704b16a58d4d29d668370ce7ef91ef7a44860bf311b",
+  "report": {
+    "analysis_kind": "exploratory_external_transport_stress_test",
+    "clinical_validation": false,
+    "ece_bins": 15,
+    "frozen_entropy_gates": [
+      {
+        "abstained_count": 0,
+        "exact_match_accuracy": 0.6996722996851507,
+        "hamming_risk": 0.09868277324423312,
+        "maximum_entropy": 1.0,
+        "observed_coverage": 1.0,
+        "selected_count": 15563,
+        "status": "ok",
+        "target_coverage": 1.0
+      },
+      {
+        "abstained_count": 538,
+        "exact_match_accuracy": 0.7198003327787021,
+        "hamming_risk": 0.09118136439267886,
+        "maximum_entropy": 0.6646051381456796,
+        "observed_coverage": 0.9654308295315813,
+        "selected_count": 15025,
+        "status": "ok",
+        "target_coverage": 0.9
+      },
+      {
+        "abstained_count": 1387,
+        "exact_match_accuracy": 0.7477426636568849,
+        "hamming_risk": 0.08147573363431151,
+        "maximum_entropy": 0.592128917815961,
+        "observed_coverage": 0.9108783653537236,
+        "selected_count": 14176,
+        "status": "ok",
+        "target_coverage": 0.8
+      },
+      {
+        "abstained_count": 2512,
+        "exact_match_accuracy": 0.7830051337062294,
+        "hamming_risk": 0.06981840471994483,
+        "maximum_entropy": 0.5294273800954843,
+        "observed_coverage": 0.8385915311957849,
+        "selected_count": 13051,
+        "status": "ok",
+        "target_coverage": 0.7
+      },
+      {
+        "abstained_count": 5278,
+        "exact_match_accuracy": 0.859212445308702,
+        "hamming_risk": 0.04635877491492465,
+        "maximum_entropy": 0.4194811329493738,
+        "observed_coverage": 0.6608623016127996,
+        "selected_count": 10285,
+        "status": "ok",
+        "target_coverage": 0.5
+      }
+    ],
+    "frozen_policy": {
+      "entropy_gates": [
+        {
+          "maximum_entropy": 1.0,
+          "target_coverage": 1.0
+        },
+        {
+          "maximum_entropy": 0.6646051381456796,
+          "target_coverage": 0.9
+        },
+        {
+          "maximum_entropy": 0.592128917815961,
+          "target_coverage": 0.8
+        },
+        {
+          "maximum_entropy": 0.5294273800954843,
+          "target_coverage": 0.7
+        },
+        {
+          "maximum_entropy": 0.4194811329493738,
+          "target_coverage": 0.5
+        }
+      ],
+      "temperature": 1.3437670674182405,
+      "thresholds": [
+        0.6128472712009004,
+        0.3947664353123169,
+        0.35727713844471964,
+        0.33881125549431373,
+        0.2655285147518369
+      ]
+    },
+    "frozen_threshold_decisions": {
+      "exact_match_accuracy": 0.6996722996851507,
+      "hamming_risk": 0.09868277324423312
+    },
+    "label_order": [
+      "NORM",
+      "MI",
+      "STTC",
+      "CD",
+      "HYP"
+    ],
+    "n_samples": 15563,
+    "probability_views": {
+      "frozen_temperature_calibrated": {
+        "metrics": {
+          "ece_bins": 15,
+          "label_order": [
+            "NORM",
+            "MI",
+            "STTC",
+            "CD",
+            "HYP"
+          ],
+          "macro": {
+            "average_precision": 0.6713869698073796,
+            "average_precision_labels": 5,
+            "brier_score": 0.06098021032536427,
+            "ece": 0.05293826868722803,
+            "roc_auc": 0.9276185140350119,
+            "roc_auc_labels": 5
+          },
+          "n_samples": 15563,
+          "per_label": [
+            {
+              "average_precision": 0.9366091837943664,
+              "brier_score": 0.11970824361937023,
+              "degenerate_reason": null,
+              "ece": 0.06750015080973303,
+              "label": "NORM",
+              "negatives": 4391,
+              "positives": 11172,
+              "prevalence": 0.7178564544111032,
+              "roc_auc": 0.8836707806377054
+            },
+            {
+              "average_precision": 0.6233127968877304,
+              "brier_score": 0.034080458391007554,
+              "degenerate_reason": null,
+              "ece": 0.09111144935251528,
+              "label": "MI",
+              "negatives": 15432,
+              "positives": 131,
+              "prevalence": 0.008417400244168862,
+              "roc_auc": 0.9813943664201283
+            },
+            {
+              "average_precision": 0.7644278810373544,
+              "brier_score": 0.08161134781873924,
+              "degenerate_reason": null,
+              "ece": 0.01784699125991054,
+              "label": "STTC",
+              "negatives": 12582,
+              "positives": 2981,
+              "prevalence": 0.19154404677761358,
+              "roc_auc": 0.9188865890479688
+            },
+            {
+              "average_precision": 0.6920399121263979,
+              "brier_score": 0.05321558583384063,
+              "degenerate_reason": null,
+              "ece": 0.040693881302378186,
+              "label": "CD",
+              "negatives": 14093,
+              "positives": 1470,
+              "prevalence": 0.0944547966330399,
+              "roc_auc": 0.8900609942408809
+            },
+            {
+              "average_precision": 0.3405450751910492,
+              "brier_score": 0.016285415963863657,
+              "degenerate_reason": null,
+              "ece": 0.04753887071160313,
+              "label": "HYP",
+              "negatives": 15499,
+              "positives": 64,
+              "prevalence": 0.004112317676540513,
+              "roc_auc": 0.964079839828376
+            }
+          ]
+        },
+        "patient_cluster_bootstrap": {
+          "completed_resamples": 1000,
+          "confidence_level": 0.95,
+          "ece_bins": 15,
+          "label_order": [
+            "NORM",
+            "MI",
+            "STTC",
+            "CD",
+            "HYP"
+          ],
+          "macro": {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": 0.6713869698073796,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": 0.6452587089122421,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": 0.7048843870800114,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": 0.06098021032536427,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.05953329324262533,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": 0.06252189329286079,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": 0.05293826868722803,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.051149406079785284,
+              "metric": "ece",
+              "status": "ok",
+              "upper": 0.05550732979548354,
+              "valid_resamples": 1000
+            },
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": 0.9276185140350119,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": 0.922445188325,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": 0.9324704246726537,
+              "valid_resamples": 1000
+            }
+          },
+          "method": "patient_cluster_percentile_bootstrap",
+          "minimum_valid_resamples": 500,
+          "n_patients": 15066,
+          "n_samples": 15563,
+          "per_label": [
+            {
+              "average_precision": {
+                "confidence_level": 0.95,
+                "estimate": 0.9366091837943664,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.9318006121654663,
+                "metric": "average_precision",
+                "status": "ok",
+                "upper": 0.9416126329251386,
+                "valid_resamples": 1000
+              },
+              "brier_score": {
+                "confidence_level": 0.95,
+                "estimate": 0.11970824361937023,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.11592027504813673,
+                "metric": "brier_score",
+                "status": "ok",
+                "upper": 0.12326478462922391,
+                "valid_resamples": 1000
+              },
+              "ece": {
+                "confidence_level": 0.95,
+                "estimate": 0.06750015080973303,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.062081978464475475,
+                "metric": "ece",
+                "status": "ok",
+                "upper": 0.07351820011114547,
+                "valid_resamples": 1000
+              },
+              "label": "NORM",
+              "prevalence": {
+                "confidence_level": 0.95,
+                "estimate": 0.7178564544111032,
+                "higher_is_better": null,
+                "invalid_resamples": 0,
+                "lower": 0.7101526420527181,
+                "metric": "prevalence",
+                "status": "ok",
+                "upper": 0.7251796397114652,
+                "valid_resamples": 1000
+              },
+              "roc_auc": {
+                "confidence_level": 0.95,
+                "estimate": 0.8836707806377054,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.8772438848081086,
+                "metric": "roc_auc",
+                "status": "ok",
+                "upper": 0.8902421617691981,
+                "valid_resamples": 1000
+              }
+            },
+            {
+              "average_precision": {
+                "confidence_level": 0.95,
+                "estimate": 0.6233127968877304,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.5360306994297883,
+                "metric": "average_precision",
+                "status": "ok",
+                "upper": 0.7078623327721432,
+                "valid_resamples": 1000
+              },
+              "brier_score": {
+                "confidence_level": 0.95,
+                "estimate": 0.034080458391007554,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.03225876560409822,
+                "metric": "brier_score",
+                "status": "ok",
+                "upper": 0.035816366090499804,
+                "valid_resamples": 1000
+              },
+              "ece": {
+                "confidence_level": 0.95,
+                "estimate": 0.09111144935251528,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.08841891102125668,
+                "metric": "ece",
+                "status": "ok",
+                "upper": 0.09366581731839987,
+                "valid_resamples": 1000
+              },
+              "label": "MI",
+              "prevalence": {
+                "confidence_level": 0.95,
+                "estimate": 0.008417400244168862,
+                "higher_is_better": null,
+                "invalid_resamples": 0,
+                "lower": 0.0070001701904384775,
+                "metric": "prevalence",
+                "status": "ok",
+                "upper": 0.01009982192493778,
+                "valid_resamples": 1000
+              },
+              "roc_auc": {
+                "confidence_level": 0.95,
+                "estimate": 0.9813943664201283,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.972735701938997,
+                "metric": "roc_auc",
+                "status": "ok",
+                "upper": 0.9886103426610695,
+                "valid_resamples": 1000
+              }
+            },
+            {
+              "average_precision": {
+                "confidence_level": 0.95,
+                "estimate": 0.7644278810373544,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.748733612759648,
+                "metric": "average_precision",
+                "status": "ok",
+                "upper": 0.7792123323855737,
+                "valid_resamples": 1000
+              },
+              "brier_score": {
+                "confidence_level": 0.95,
+                "estimate": 0.08161134781873924,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.07864694653940563,
+                "metric": "brier_score",
+                "status": "ok",
+                "upper": 0.08459345627891866,
+                "valid_resamples": 1000
+              },
+              "ece": {
+                "confidence_level": 0.95,
+                "estimate": 0.01784699125991054,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.01479819296066562,
+                "metric": "ece",
+                "status": "ok",
+                "upper": 0.02329493174831835,
+                "valid_resamples": 1000
+              },
+              "label": "STTC",
+              "prevalence": {
+                "confidence_level": 0.95,
+                "estimate": 0.19154404677761358,
+                "higher_is_better": null,
+                "invalid_resamples": 0,
+                "lower": 0.18511323488864473,
+                "metric": "prevalence",
+                "status": "ok",
+                "upper": 0.19793551153335523,
+                "valid_resamples": 1000
+              },
+              "roc_auc": {
+                "confidence_level": 0.95,
+                "estimate": 0.9188865890479688,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.9131436248081962,
+                "metric": "roc_auc",
+                "status": "ok",
+                "upper": 0.9245604160955866,
+                "valid_resamples": 1000
+              }
+            },
+            {
+              "average_precision": {
+                "confidence_level": 0.95,
+                "estimate": 0.6920399121263979,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.6709493383935412,
+                "metric": "average_precision",
+                "status": "ok",
+                "upper": 0.7133812249371442,
+                "valid_resamples": 1000
+              },
+              "brier_score": {
+                "confidence_level": 0.95,
+                "estimate": 0.05321558583384063,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.05062783284553259,
+                "metric": "brier_score",
+                "status": "ok",
+                "upper": 0.0557406899798914,
+                "valid_resamples": 1000
+              },
+              "ece": {
+                "confidence_level": 0.95,
+                "estimate": 0.040693881302378186,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.03727586541312636,
+                "metric": "ece",
+                "status": "ok",
+                "upper": 0.04456510186013495,
+                "valid_resamples": 1000
+              },
+              "label": "CD",
+              "prevalence": {
+                "confidence_level": 0.95,
+                "estimate": 0.0944547966330399,
+                "higher_is_better": null,
+                "invalid_resamples": 0,
+                "lower": 0.08978545757905114,
+                "metric": "prevalence",
+                "status": "ok",
+                "upper": 0.09962081424563468,
+                "valid_resamples": 1000
+              },
+              "roc_auc": {
+                "confidence_level": 0.95,
+                "estimate": 0.8900609942408809,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.8803507711760937,
+                "metric": "roc_auc",
+                "status": "ok",
+                "upper": 0.9008463569051222,
+                "valid_resamples": 1000
+              }
+            },
+            {
+              "average_precision": {
+                "confidence_level": 0.95,
+                "estimate": 0.3405450751910492,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.23200484330473625,
+                "metric": "average_precision",
+                "status": "ok",
+                "upper": 0.4802897083340364,
+                "valid_resamples": 1000
+              },
+              "brier_score": {
+                "confidence_level": 0.95,
+                "estimate": 0.016285415963863657,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.015049594626151063,
+                "metric": "brier_score",
+                "status": "ok",
+                "upper": 0.017652231541552033,
+                "valid_resamples": 1000
+              },
+              "ece": {
+                "confidence_level": 0.95,
+                "estimate": 0.04753887071160313,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.04566369750788944,
+                "metric": "ece",
+                "status": "ok",
+                "upper": 0.04945506452273649,
+                "valid_resamples": 1000
+              },
+              "label": "HYP",
+              "prevalence": {
+                "confidence_level": 0.95,
+                "estimate": 0.004112317676540513,
+                "higher_is_better": null,
+                "invalid_resamples": 0,
+                "lower": 0.0031496670554906413,
+                "metric": "prevalence",
+                "status": "ok",
+                "upper": 0.005219165546803632,
+                "valid_resamples": 1000
+              },
+              "roc_auc": {
+                "confidence_level": 0.95,
+                "estimate": 0.964079839828376,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.9454179177906906,
+                "metric": "roc_auc",
+                "status": "ok",
+                "upper": 0.9802663174181331,
+                "valid_resamples": 1000
+              }
+            }
+          ],
+          "requested_resamples": 1000,
+          "seed": 20462842,
+          "status": "ok"
+        }
+      },
+      "raw_sigmoid": {
+        "metrics": {
+          "ece_bins": 15,
+          "label_order": [
+            "NORM",
+            "MI",
+            "STTC",
+            "CD",
+            "HYP"
+          ],
+          "macro": {
+            "average_precision": 0.6713869698073796,
+            "average_precision_labels": 5,
+            "brier_score": 0.06147266150264476,
+            "ece": 0.050861076502701275,
+            "roc_auc": 0.9276185140350119,
+            "roc_auc_labels": 5
+          },
+          "n_samples": 15563,
+          "per_label": [
+            {
+              "average_precision": 0.9366091837943664,
+              "brier_score": 0.12373250272909948,
+              "degenerate_reason": null,
+              "ece": 0.08568918783119134,
+              "label": "NORM",
+              "negatives": 4391,
+              "positives": 11172,
+              "prevalence": 0.7178564544111032,
+              "roc_auc": 0.8836707806377054
+            },
+            {
+              "average_precision": 0.6233127968877304,
+              "brier_score": 0.03199459973702823,
+              "degenerate_reason": null,
+              "ece": 0.0688112999961352,
+              "label": "MI",
+              "negatives": 15432,
+              "positives": 131,
+              "prevalence": 0.008417400244168862,
+              "roc_auc": 0.9813943664201283
+            },
+            {
+              "average_precision": 0.7644278810373544,
+              "brier_score": 0.08323799657390644,
+              "degenerate_reason": null,
+              "ece": 0.03913587210996943,
+              "label": "STTC",
+              "negatives": 12582,
+              "positives": 2981,
+              "prevalence": 0.19154404677761358,
+              "roc_auc": 0.9188865890479688
+            },
+            {
+              "average_precision": 0.6920399121263979,
+              "brier_score": 0.053369994361232846,
+              "degenerate_reason": null,
+              "ece": 0.028057077257483496,
+              "label": "CD",
+              "negatives": 14093,
+              "positives": 1470,
+              "prevalence": 0.0944547966330399,
+              "roc_auc": 0.8900609942408809
+            },
+            {
+              "average_precision": 0.3405450751910492,
+              "brier_score": 0.01502821411195678,
+              "degenerate_reason": null,
+              "ece": 0.032611945318726916,
+              "label": "HYP",
+              "negatives": 15499,
+              "positives": 64,
+              "prevalence": 0.004112317676540513,
+              "roc_auc": 0.964079839828376
+            }
+          ]
+        },
+        "patient_cluster_bootstrap": {
+          "completed_resamples": 1000,
+          "confidence_level": 0.95,
+          "ece_bins": 15,
+          "label_order": [
+            "NORM",
+            "MI",
+            "STTC",
+            "CD",
+            "HYP"
+          ],
+          "macro": {
+            "average_precision": {
+              "confidence_level": 0.95,
+              "estimate": 0.6713869698073796,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": 0.6452587089122421,
+              "metric": "average_precision",
+              "status": "ok",
+              "upper": 0.7048843870800114,
+              "valid_resamples": 1000
+            },
+            "brier_score": {
+              "confidence_level": 0.95,
+              "estimate": 0.06147266150264476,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.05986346136441104,
+              "metric": "brier_score",
+              "status": "ok",
+              "upper": 0.06322170761710953,
+              "valid_resamples": 1000
+            },
+            "ece": {
+              "confidence_level": 0.95,
+              "estimate": 0.050861076502701275,
+              "higher_is_better": false,
+              "invalid_resamples": 0,
+              "lower": 0.048996763940037054,
+              "metric": "ece",
+              "status": "ok",
+              "upper": 0.053145585487438,
+              "valid_resamples": 1000
+            },
+            "roc_auc": {
+              "confidence_level": 0.95,
+              "estimate": 0.9276185140350119,
+              "higher_is_better": true,
+              "invalid_resamples": 0,
+              "lower": 0.922445188325,
+              "metric": "roc_auc",
+              "status": "ok",
+              "upper": 0.9324704246726537,
+              "valid_resamples": 1000
+            }
+          },
+          "method": "patient_cluster_percentile_bootstrap",
+          "minimum_valid_resamples": 500,
+          "n_patients": 15066,
+          "n_samples": 15563,
+          "per_label": [
+            {
+              "average_precision": {
+                "confidence_level": 0.95,
+                "estimate": 0.9366091837943664,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.9318006121654663,
+                "metric": "average_precision",
+                "status": "ok",
+                "upper": 0.9416126329251386,
+                "valid_resamples": 1000
+              },
+              "brier_score": {
+                "confidence_level": 0.95,
+                "estimate": 0.12373250272909948,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.11953574682469026,
+                "metric": "brier_score",
+                "status": "ok",
+                "upper": 0.1277723243567811,
+                "valid_resamples": 1000
+              },
+              "ece": {
+                "confidence_level": 0.95,
+                "estimate": 0.08568918783119134,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.08059540536693832,
+                "metric": "ece",
+                "status": "ok",
+                "upper": 0.0912299766931068,
+                "valid_resamples": 1000
+              },
+              "label": "NORM",
+              "prevalence": {
+                "confidence_level": 0.95,
+                "estimate": 0.7178564544111032,
+                "higher_is_better": null,
+                "invalid_resamples": 0,
+                "lower": 0.7101526420527181,
+                "metric": "prevalence",
+                "status": "ok",
+                "upper": 0.7251796397114652,
+                "valid_resamples": 1000
+              },
+              "roc_auc": {
+                "confidence_level": 0.95,
+                "estimate": 0.8836707806377054,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.8772438848081086,
+                "metric": "roc_auc",
+                "status": "ok",
+                "upper": 0.8902421617691981,
+                "valid_resamples": 1000
+              }
+            },
+            {
+              "average_precision": {
+                "confidence_level": 0.95,
+                "estimate": 0.6233127968877304,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.5360306994297883,
+                "metric": "average_precision",
+                "status": "ok",
+                "upper": 0.7078623327721432,
+                "valid_resamples": 1000
+              },
+              "brier_score": {
+                "confidence_level": 0.95,
+                "estimate": 0.03199459973702823,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.0299788446640769,
+                "metric": "brier_score",
+                "status": "ok",
+                "upper": 0.03389171492221178,
+                "valid_resamples": 1000
+              },
+              "ece": {
+                "confidence_level": 0.95,
+                "estimate": 0.0688112999961352,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.06602086046731072,
+                "metric": "ece",
+                "status": "ok",
+                "upper": 0.07141585345938022,
+                "valid_resamples": 1000
+              },
+              "label": "MI",
+              "prevalence": {
+                "confidence_level": 0.95,
+                "estimate": 0.008417400244168862,
+                "higher_is_better": null,
+                "invalid_resamples": 0,
+                "lower": 0.0070001701904384775,
+                "metric": "prevalence",
+                "status": "ok",
+                "upper": 0.01009982192493778,
+                "valid_resamples": 1000
+              },
+              "roc_auc": {
+                "confidence_level": 0.95,
+                "estimate": 0.9813943664201283,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.972735701938997,
+                "metric": "roc_auc",
+                "status": "ok",
+                "upper": 0.9886103426610695,
+                "valid_resamples": 1000
+              }
+            },
+            {
+              "average_precision": {
+                "confidence_level": 0.95,
+                "estimate": 0.7644278810373544,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.748733612759648,
+                "metric": "average_precision",
+                "status": "ok",
+                "upper": 0.7792123323855737,
+                "valid_resamples": 1000
+              },
+              "brier_score": {
+                "confidence_level": 0.95,
+                "estimate": 0.08323799657390644,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.08002469358831572,
+                "metric": "brier_score",
+                "status": "ok",
+                "upper": 0.0865914262450454,
+                "valid_resamples": 1000
+              },
+              "ece": {
+                "confidence_level": 0.95,
+                "estimate": 0.03913587210996943,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.03516291496883438,
+                "metric": "ece",
+                "status": "ok",
+                "upper": 0.043723960745958544,
+                "valid_resamples": 1000
+              },
+              "label": "STTC",
+              "prevalence": {
+                "confidence_level": 0.95,
+                "estimate": 0.19154404677761358,
+                "higher_is_better": null,
+                "invalid_resamples": 0,
+                "lower": 0.18511323488864473,
+                "metric": "prevalence",
+                "status": "ok",
+                "upper": 0.19793551153335523,
+                "valid_resamples": 1000
+              },
+              "roc_auc": {
+                "confidence_level": 0.95,
+                "estimate": 0.9188865890479688,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.9131436248081962,
+                "metric": "roc_auc",
+                "status": "ok",
+                "upper": 0.9245604160955866,
+                "valid_resamples": 1000
+              }
+            },
+            {
+              "average_precision": {
+                "confidence_level": 0.95,
+                "estimate": 0.6920399121263979,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.6709493383935412,
+                "metric": "average_precision",
+                "status": "ok",
+                "upper": 0.7133812249371442,
+                "valid_resamples": 1000
+              },
+              "brier_score": {
+                "confidence_level": 0.95,
+                "estimate": 0.053369994361232846,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.05052109543282242,
+                "metric": "brier_score",
+                "status": "ok",
+                "upper": 0.05615911490503915,
+                "valid_resamples": 1000
+              },
+              "ece": {
+                "confidence_level": 0.95,
+                "estimate": 0.028057077257483496,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.024880961393526246,
+                "metric": "ece",
+                "status": "ok",
+                "upper": 0.0318492472020436,
+                "valid_resamples": 1000
+              },
+              "label": "CD",
+              "prevalence": {
+                "confidence_level": 0.95,
+                "estimate": 0.0944547966330399,
+                "higher_is_better": null,
+                "invalid_resamples": 0,
+                "lower": 0.08978545757905114,
+                "metric": "prevalence",
+                "status": "ok",
+                "upper": 0.09962081424563468,
+                "valid_resamples": 1000
+              },
+              "roc_auc": {
+                "confidence_level": 0.95,
+                "estimate": 0.8900609942408809,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.8803507711760937,
+                "metric": "roc_auc",
+                "status": "ok",
+                "upper": 0.9008463569051222,
+                "valid_resamples": 1000
+              }
+            },
+            {
+              "average_precision": {
+                "confidence_level": 0.95,
+                "estimate": 0.3405450751910492,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.23200484330473625,
+                "metric": "average_precision",
+                "status": "ok",
+                "upper": 0.4802897083340364,
+                "valid_resamples": 1000
+              },
+              "brier_score": {
+                "confidence_level": 0.95,
+                "estimate": 0.01502821411195678,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.013673480679910694,
+                "metric": "brier_score",
+                "status": "ok",
+                "upper": 0.016505047130353456,
+                "valid_resamples": 1000
+              },
+              "ece": {
+                "confidence_level": 0.95,
+                "estimate": 0.032611945318726916,
+                "higher_is_better": false,
+                "invalid_resamples": 0,
+                "lower": 0.030783845239932384,
+                "metric": "ece",
+                "status": "ok",
+                "upper": 0.034473925721239675,
+                "valid_resamples": 1000
+              },
+              "label": "HYP",
+              "prevalence": {
+                "confidence_level": 0.95,
+                "estimate": 0.004112317676540513,
+                "higher_is_better": null,
+                "invalid_resamples": 0,
+                "lower": 0.0031496670554906413,
+                "metric": "prevalence",
+                "status": "ok",
+                "upper": 0.005219165546803632,
+                "valid_resamples": 1000
+              },
+              "roc_auc": {
+                "confidence_level": 0.95,
+                "estimate": 0.964079839828376,
+                "higher_is_better": true,
+                "invalid_resamples": 0,
+                "lower": 0.9454179177906906,
+                "metric": "roc_auc",
+                "status": "ok",
+                "upper": 0.9802663174181331,
+                "valid_resamples": 1000
+              }
+            }
+          ],
+          "requested_resamples": 1000,
+          "seed": 20462842,
+          "status": "ok"
+        }
+      }
+    },
+    "tuning_or_recalibration_on_sph": false
+  },
+  "schema_version": 1,
+  "sph_fitting_performed": false
+}

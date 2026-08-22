@@ -1,0 +1,773 @@
+{
+  "artifact_sha256": "sha256:2a005cc9f33d9013b40d865233c850c74ea0ca1e4562465a582d1d7dd19e5b4b",
+  "artifact_type": "ecg_trust.sph_transport_architecture_summary",
+  "private_alignment_sha256": "sha256:ab3d8dc16c74690bb3ccd7f35cb6990c651e54ea8cb6e51f85782e2ce8f3d3f4",
+  "protocol_sha256": "sha256:840acb758d50dbf1a04bf704b16a58d4d29d668370ce7ef91ef7a44860bf311b",
+  "schema_version": 1,
+  "summary": {
+    "architecture": "ecg_transformer",
+    "cohort": "primary_mapped",
+    "members": [
+      "ecg_transformer-seed2026",
+      "ecg_transformer-seed2027",
+      "ecg_transformer-seed2028"
+    ],
+    "seeds": [
+      2026,
+      2027,
+      2028
+    ],
+    "statistics": {
+      "frozen_entropy_gates.target_0p5.exact_match_accuracy": {
+        "mean": 0.8595790823388593,
+        "sample_standard_deviation": 0.0033316867172940154,
+        "valid_members": 3,
+        "values": [
+          0.862643391521197,
+          0.8600612870275791,
+          0.8560325684678016
+        ]
+      },
+      "frozen_entropy_gates.target_0p5.hamming_risk": {
+        "mean": 0.04821896308924234,
+        "sample_standard_deviation": 0.000848008160191999,
+        "valid_members": 3,
+        "values": [
+          0.04801995012468828,
+          0.0474881604605813,
+          0.04914877868245744
+        ]
+      },
+      "frozen_entropy_gates.target_0p5.observed_coverage": {
+        "mean": 0.671040896929545,
+        "sample_standard_deviation": 0.02810791381062188,
+        "valid_members": 3,
+        "values": [
+          0.638616384252771,
+          0.6860109568097846,
+          0.6884953497260797
+        ]
+      },
+      "frozen_entropy_gates.target_0p7.exact_match_accuracy": {
+        "mean": 0.7789133367795689,
+        "sample_standard_deviation": 0.0025069431841331555,
+        "valid_members": 3,
+        "values": [
+          0.7779158254387327,
+          0.7817654926437807,
+          0.7770586922561928
+        ]
+      },
+      "frozen_entropy_gates.target_0p7.hamming_risk": {
+        "mean": 0.07169965934194299,
+        "sample_standard_deviation": 0.001120269105945198,
+        "valid_members": 3,
+        "values": [
+          0.072992700729927,
+          0.071020954079358,
+          0.07108532321654393
+        ]
+      },
+      "frozen_entropy_gates.target_0p7.observed_coverage": {
+        "mean": 0.844672357412834,
+        "sample_standard_deviation": 0.02106116116662624,
+        "valid_members": 3,
+        "values": [
+          0.8203592814371258,
+          0.8573066632692062,
+          0.8563511275321697
+        ]
+      },
+      "frozen_entropy_gates.target_0p8.exact_match_accuracy": {
+        "mean": 0.7469283259823712,
+        "sample_standard_deviation": 0.0013937960310514811,
+        "valid_members": 3,
+        "values": [
+          0.7459436379163108,
+          0.7485231487841737,
+          0.7463181912466293
+        ]
+      },
+      "frozen_entropy_gates.target_0p8.hamming_risk": {
+        "mean": 0.08209820932743948,
+        "sample_standard_deviation": 0.0013525442510927764,
+        "valid_members": 3,
+        "values": [
+          0.08354682607458012,
+          0.08187937903558182,
+          0.08086842287215654
+        ]
+      },
+      "frozen_entropy_gates.target_0p8.observed_coverage": {
+        "mean": 0.9146175733639105,
+        "sample_standard_deviation": 0.01713230938465197,
+        "valid_members": 3,
+        "values": [
+          0.8951458784558542,
+          0.9273792839852211,
+          0.9213275576506561
+        ]
+      },
+      "frozen_entropy_gates.target_0p9.exact_match_accuracy": {
+        "mean": 0.721289934353976,
+        "sample_standard_deviation": 0.0028374838021237654,
+        "valid_members": 3,
+        "values": [
+          0.7180222859811837,
+          0.7227159848385832,
+          0.7231315322421613
+        ]
+      },
+      "frozen_entropy_gates.target_0p9.hamming_risk": {
+        "mean": 0.09131759362242513,
+        "sample_standard_deviation": 0.002339162789960727,
+        "valid_members": 3,
+        "values": [
+          0.0936678454660706,
+          0.09129525552215396,
+          0.0889896798790508
+        ]
+      },
+      "frozen_entropy_gates.target_0p9.observed_coverage": {
+        "mean": 0.9661952690363953,
+        "sample_standard_deviation": 0.010344594825786127,
+        "valid_members": 3,
+        "values": [
+          0.9547076060644668,
+          0.9747738565422347,
+          0.9691043445024844
+        ]
+      },
+      "frozen_entropy_gates.target_1p0.exact_match_accuracy": {
+        "mean": 0.7034017072238501,
+        "sample_standard_deviation": 0.007922947806859596,
+        "valid_members": 3,
+        "values": [
+          0.6942922665307683,
+          0.7086890049687858,
+          0.7072238501719964
+        ]
+      },
+      "frozen_entropy_gates.target_1p0.hamming_risk": {
+        "mean": 0.09841168726377032,
+        "sample_standard_deviation": 0.004305872686942955,
+        "valid_members": 3,
+        "values": [
+          0.10327430245891196,
+          0.09687858325901388,
+          0.09508217607338515
+        ]
+      },
+      "frozen_entropy_gates.target_1p0.observed_coverage": {
+        "mean": 1.0,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "frozen_temperature_calibrated.macro.average_precision": {
+        "mean": 0.6578379043808723,
+        "sample_standard_deviation": 0.0075566211341626475,
+        "valid_members": 3,
+        "values": [
+          0.6494368580381302,
+          0.6640803232953209,
+          0.6599965318091661
+        ]
+      },
+      "frozen_temperature_calibrated.macro.brier_score": {
+        "mean": 0.06415346162562238,
+        "sample_standard_deviation": 0.003961953111522269,
+        "valid_members": 3,
+        "values": [
+          0.06870883573022778,
+          0.06151040143087629,
+          0.06224114771576309
+        ]
+      },
+      "frozen_temperature_calibrated.macro.ece": {
+        "mean": 0.06148026485985322,
+        "sample_standard_deviation": 0.006313134681399347,
+        "valid_members": 3,
+        "values": [
+          0.06850892789510728,
+          0.05964047550596145,
+          0.056291391178490933
+        ]
+      },
+      "frozen_temperature_calibrated.macro.roc_auc": {
+        "mean": 0.9240878088972436,
+        "sample_standard_deviation": 0.0012311428010531064,
+        "valid_members": 3,
+        "values": [
+          0.9227157208575502,
+          0.9244517606863825,
+          0.9250959451477984
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.CD.average_precision": {
+        "mean": 0.6932355641054503,
+        "sample_standard_deviation": 0.02633765801760196,
+        "valid_members": 3,
+        "values": [
+          0.6745476668943435,
+          0.7233579655702154,
+          0.6818010598517918
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.CD.brier_score": {
+        "mean": 0.055301919318684306,
+        "sample_standard_deviation": 0.0030305389689374842,
+        "valid_members": 3,
+        "values": [
+          0.05856714680300387,
+          0.052579404870505046,
+          0.05475920628254399
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.CD.ece": {
+        "mean": 0.05871811232251717,
+        "sample_standard_deviation": 0.006850552288695,
+        "valid_members": 3,
+        "values": [
+          0.06566147437591602,
+          0.05852855853386169,
+          0.051964304057773796
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.CD.prevalence": {
+        "mean": 0.09619059752834756,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          0.09619059752834756,
+          0.09619059752834756,
+          0.09619059752834756
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.CD.roc_auc": {
+        "mean": 0.8935084743442053,
+        "sample_standard_deviation": 0.007894437141769187,
+        "valid_members": 3,
+        "values": [
+          0.8906208165841109,
+          0.9024401742354793,
+          0.8874644322130258
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.HYP.average_precision": {
+        "mean": 0.4591414827999876,
+        "sample_standard_deviation": 0.026028604543097328,
+        "valid_members": 3,
+        "values": [
+          0.4687526236730374,
+          0.47899778035434587,
+          0.4296740443725798
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.HYP.brier_score": {
+        "mean": 0.012868090081651233,
+        "sample_standard_deviation": 0.0007464208582108234,
+        "valid_members": 3,
+        "values": [
+          0.012019838965062021,
+          0.013424490467392518,
+          0.01315994081249916
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.HYP.ece": {
+        "mean": 0.043795112456100016,
+        "sample_standard_deviation": 0.0009425593221457935,
+        "valid_members": 3,
+        "values": [
+          0.04293593794873972,
+          0.04480330358998715,
+          0.043646095829573184
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.HYP.prevalence": {
+        "mean": 0.007198369219008791,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          0.007198369219008791,
+          0.007198369219008791,
+          0.007198369219008791
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.HYP.roc_auc": {
+        "mean": 0.9687435823909799,
+        "sample_standard_deviation": 0.0032867271630162395,
+        "valid_members": 3,
+        "values": [
+          0.9671115578003583,
+          0.9665922815505038,
+          0.9725269078220776
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.MI.average_precision": {
+        "mean": 0.46069932238194156,
+        "sample_standard_deviation": 0.040070079534898675,
+        "valid_members": 3,
+        "values": [
+          0.44385465250657286,
+          0.43180136663847646,
+          0.5064419480007754
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.MI.brier_score": {
+        "mean": 0.045393046609571046,
+        "sample_standard_deviation": 0.008321660940838579,
+        "valid_members": 3,
+        "values": [
+          0.054888799824986005,
+          0.0393711825732636,
+          0.04191915743046353
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.MI.ece": {
+        "mean": 0.11733378352351366,
+        "sample_standard_deviation": 0.016543274417602838,
+        "valid_members": 3,
+        "values": [
+          0.13571966773559724,
+          0.10365203592369021,
+          0.11262964691125354
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.MI.prevalence": {
+        "mean": 0.008790928780736399,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          0.008790928780736399,
+          0.008790928780736399,
+          0.008790928780736399
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.MI.roc_auc": {
+        "mean": 0.9586649932317476,
+        "sample_standard_deviation": 0.006363342522244502,
+        "valid_members": 3,
+        "values": [
+          0.9645192988338736,
+          0.9518923940985805,
+          0.9595832867627883
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.NORM.average_precision": {
+        "mean": 0.9355664088999474,
+        "sample_standard_deviation": 0.0019498150660551123,
+        "valid_members": 3,
+        "values": [
+          0.9342762091065433,
+          0.9346135985483437,
+          0.9378094190449552
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.NORM.brier_score": {
+        "mean": 0.12322486924130283,
+        "sample_standard_deviation": 0.006454728095288111,
+        "valid_members": 3,
+        "values": [
+          0.13059090275302382,
+          0.12052657453366404,
+          0.11855713043722058
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.NORM.ece": {
+        "mean": 0.07055062884792795,
+        "sample_standard_deviation": 0.013063351118745115,
+        "valid_members": 3,
+        "values": [
+          0.0832139236387462,
+          0.07131699992475782,
+          0.05712096298027985
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.NORM.prevalence": {
+        "mean": 0.7116830169448337,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          0.7116830169448337,
+          0.7116830169448337,
+          0.7116830169448337
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.NORM.roc_auc": {
+        "mean": 0.8839209573868386,
+        "sample_standard_deviation": 0.0037151089568005394,
+        "valid_members": 3,
+        "values": [
+          0.8798160791632512,
+          0.8848942692410592,
+          0.8870525237562057
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.STTC.average_precision": {
+        "mean": 0.7405467437170353,
+        "sample_standard_deviation": 0.013331717527730555,
+        "valid_members": 3,
+        "values": [
+          0.7257531380101544,
+          0.7516309053652235,
+          0.7442561877757281
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.STTC.brier_score": {
+        "mean": 0.08397938287690253,
+        "sample_standard_deviation": 0.0030844670610424055,
+        "valid_members": 3,
+        "values": [
+          0.08747749030506315,
+          0.08165035470955624,
+          0.08281030361608817
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.STTC.ece": {
+        "mean": 0.017003687149207275,
+        "sample_standard_deviation": 0.0025672455175983363,
+        "valid_members": 3,
+        "values": [
+          0.01501363577653717,
+          0.0199014795575104,
+          0.01609594611357425
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.STTC.prevalence": {
+        "mean": 0.19301821888138618,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          0.19301821888138618,
+          0.19301821888138618,
+          0.19301821888138618
+        ]
+      },
+      "frozen_temperature_calibrated.per_label.STTC.roc_auc": {
+        "mean": 0.915601037132447,
+        "sample_standard_deviation": 0.0037420211099131392,
+        "valid_members": 3,
+        "values": [
+          0.9115108519061569,
+          0.9164396843062897,
+          0.9188525751848946
+        ]
+      },
+      "frozen_threshold_decisions.exact_match_accuracy": {
+        "mean": 0.7034017072238501,
+        "sample_standard_deviation": 0.007922947806859596,
+        "valid_members": 3,
+        "values": [
+          0.6942922665307683,
+          0.7086890049687858,
+          0.7072238501719964
+        ]
+      },
+      "frozen_threshold_decisions.hamming_risk": {
+        "mean": 0.09841168726377032,
+        "sample_standard_deviation": 0.004305872686942955,
+        "valid_members": 3,
+        "values": [
+          0.10327430245891196,
+          0.09687858325901388,
+          0.09508217607338515
+        ]
+      },
+      "raw_sigmoid.macro.average_precision": {
+        "mean": 0.6578379043808723,
+        "sample_standard_deviation": 0.0075566211341626475,
+        "valid_members": 3,
+        "values": [
+          0.6494368580381302,
+          0.6640803232953209,
+          0.6599965318091661
+        ]
+      },
+      "raw_sigmoid.macro.brier_score": {
+        "mean": 0.06453264706768345,
+        "sample_standard_deviation": 0.004277521997875088,
+        "valid_members": 3,
+        "values": [
+          0.06944303381800283,
+          0.06161564105300292,
+          0.06253926633204461
+        ]
+      },
+      "raw_sigmoid.macro.ece": {
+        "mean": 0.055947665184813415,
+        "sample_standard_deviation": 0.004967713031553057,
+        "valid_members": 3,
+        "values": [
+          0.061671573559606195,
+          0.053411022312306086,
+          0.05276039968252796
+        ]
+      },
+      "raw_sigmoid.macro.roc_auc": {
+        "mean": 0.9240878088972436,
+        "sample_standard_deviation": 0.0012311428010531064,
+        "valid_members": 3,
+        "values": [
+          0.9227157208575502,
+          0.9244517606863825,
+          0.9250959451477984
+        ]
+      },
+      "raw_sigmoid.per_label.CD.average_precision": {
+        "mean": 0.6932355641054503,
+        "sample_standard_deviation": 0.02633765801760196,
+        "valid_members": 3,
+        "values": [
+          0.6745476668943435,
+          0.7233579655702154,
+          0.6818010598517918
+        ]
+      },
+      "raw_sigmoid.per_label.CD.brier_score": {
+        "mean": 0.05398766219619877,
+        "sample_standard_deviation": 0.002992756698799307,
+        "valid_members": 3,
+        "values": [
+          0.057159560082676454,
+          0.05121390413255088,
+          0.05358952237336897
+        ]
+      },
+      "raw_sigmoid.per_label.CD.ece": {
+        "mean": 0.029343614440379157,
+        "sample_standard_deviation": 0.00358190061391401,
+        "valid_members": 3,
+        "values": [
+          0.031934579947724154,
+          0.03084011759511826,
+          0.025256145778295064
+        ]
+      },
+      "raw_sigmoid.per_label.CD.prevalence": {
+        "mean": 0.09619059752834756,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          0.09619059752834756,
+          0.09619059752834756,
+          0.09619059752834756
+        ]
+      },
+      "raw_sigmoid.per_label.CD.roc_auc": {
+        "mean": 0.8935084743442053,
+        "sample_standard_deviation": 0.007894437141769187,
+        "valid_members": 3,
+        "values": [
+          0.8906208165841109,
+          0.9024401742354793,
+          0.8874644322130258
+        ]
+      },
+      "raw_sigmoid.per_label.HYP.average_precision": {
+        "mean": 0.4591414827999876,
+        "sample_standard_deviation": 0.026028604543097328,
+        "valid_members": 3,
+        "values": [
+          0.4687526236730374,
+          0.47899778035434587,
+          0.4296740443725798
+        ]
+      },
+      "raw_sigmoid.per_label.HYP.brier_score": {
+        "mean": 0.010893958770039564,
+        "sample_standard_deviation": 0.0009597566873258508,
+        "valid_members": 3,
+        "values": [
+          0.009797303606566863,
+          0.011580646346673966,
+          0.011303926356877863
+        ]
+      },
+      "raw_sigmoid.per_label.HYP.ece": {
+        "mean": 0.02592480092292,
+        "sample_standard_deviation": 0.0033513514063963734,
+        "valid_members": 3,
+        "values": [
+          0.022299785914984525,
+          0.028910341202788258,
+          0.026564275650987207
+        ]
+      },
+      "raw_sigmoid.per_label.HYP.prevalence": {
+        "mean": 0.007198369219008791,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          0.007198369219008791,
+          0.007198369219008791,
+          0.007198369219008791
+        ]
+      },
+      "raw_sigmoid.per_label.HYP.roc_auc": {
+        "mean": 0.9687435823909799,
+        "sample_standard_deviation": 0.0032867271630162395,
+        "valid_members": 3,
+        "values": [
+          0.9671115578003583,
+          0.9665922815505038,
+          0.9725269078220776
+        ]
+      },
+      "raw_sigmoid.per_label.MI.average_precision": {
+        "mean": 0.46069932238194156,
+        "sample_standard_deviation": 0.040070079534898675,
+        "valid_members": 3,
+        "values": [
+          0.44385465250657286,
+          0.43180136663847646,
+          0.5064419480007754
+        ]
+      },
+      "raw_sigmoid.per_label.MI.brier_score": {
+        "mean": 0.04267905624070587,
+        "sample_standard_deviation": 0.008168750999531014,
+        "valid_members": 3,
+        "values": [
+          0.05204241428505577,
+          0.03701039317999735,
+          0.03898436125706451
+        ]
+      },
+      "raw_sigmoid.per_label.MI.ece": {
+        "mean": 0.08958779417005257,
+        "sample_standard_deviation": 0.011944614487582583,
+        "valid_members": 3,
+        "values": [
+          0.10309624890866889,
+          0.0804221246620993,
+          0.08524500893938948
+        ]
+      },
+      "raw_sigmoid.per_label.MI.prevalence": {
+        "mean": 0.008790928780736399,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          0.008790928780736399,
+          0.008790928780736399,
+          0.008790928780736399
+        ]
+      },
+      "raw_sigmoid.per_label.MI.roc_auc": {
+        "mean": 0.9586649932317476,
+        "sample_standard_deviation": 0.006363342522244502,
+        "valid_members": 3,
+        "values": [
+          0.9645192988338736,
+          0.9518923940985805,
+          0.9595832867627883
+        ]
+      },
+      "raw_sigmoid.per_label.NORM.average_precision": {
+        "mean": 0.9355664088999474,
+        "sample_standard_deviation": 0.0019498150660551123,
+        "valid_members": 3,
+        "values": [
+          0.9342762091065433,
+          0.9346135985483437,
+          0.9378094190449552
+        ]
+      },
+      "raw_sigmoid.per_label.NORM.brier_score": {
+        "mean": 0.12838691697035476,
+        "sample_standard_deviation": 0.0076858203371118925,
+        "valid_members": 3,
+        "values": [
+          0.13723297942949153,
+          0.12458212394823645,
+          0.1233456475333363
+        ]
+      },
+      "raw_sigmoid.per_label.NORM.ece": {
+        "mean": 0.09035753827919625,
+        "sample_standard_deviation": 0.010836311058152123,
+        "valid_members": 3,
+        "values": [
+          0.10273366812238716,
+          0.08576609320195627,
+          0.08257285351324534
+        ]
+      },
+      "raw_sigmoid.per_label.NORM.prevalence": {
+        "mean": 0.7116830169448337,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          0.7116830169448337,
+          0.7116830169448337,
+          0.7116830169448337
+        ]
+      },
+      "raw_sigmoid.per_label.NORM.roc_auc": {
+        "mean": 0.8839209573868386,
+        "sample_standard_deviation": 0.0037151089568005394,
+        "valid_members": 3,
+        "values": [
+          0.8798160791632512,
+          0.8848942692410592,
+          0.8870525237562057
+        ]
+      },
+      "raw_sigmoid.per_label.STTC.average_precision": {
+        "mean": 0.7405467437170353,
+        "sample_standard_deviation": 0.013331717527730555,
+        "valid_members": 3,
+        "values": [
+          0.7257531380101544,
+          0.7516309053652235,
+          0.7442561877757281
+        ]
+      },
+      "raw_sigmoid.per_label.STTC.brier_score": {
+        "mean": 0.0867156411611183,
+        "sample_standard_deviation": 0.003801426643204267,
+        "valid_members": 3,
+        "values": [
+          0.09098291168622347,
+          0.08369113765755601,
+          0.0854728741395754
+        ]
+      },
+      "raw_sigmoid.per_label.STTC.ece": {
+        "mean": 0.04452457811151911,
+        "sample_standard_deviation": 0.003602157331439404,
+        "valid_members": 3,
+        "values": [
+          0.04829358490426626,
+          0.041116434899568365,
+          0.044163714530722716
+        ]
+      },
+      "raw_sigmoid.per_label.STTC.prevalence": {
+        "mean": 0.19301821888138618,
+        "sample_standard_deviation": 0.0,
+        "valid_members": 3,
+        "values": [
+          0.19301821888138618,
+          0.19301821888138618,
+          0.19301821888138618
+        ]
+      },
+      "raw_sigmoid.per_label.STTC.roc_auc": {
+        "mean": 0.915601037132447,
+        "sample_standard_deviation": 0.0037420211099131392,
+        "valid_members": 3,
+        "values": [
+          0.9115108519061569,
+          0.9164396843062897,
+          0.9188525751848946
+        ]
+      }
+    }
+  }
+}

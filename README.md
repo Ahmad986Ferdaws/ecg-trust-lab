@@ -15,7 +15,11 @@ historical pre-evaluation snapshot. A concise
 result, limitations, and résumé-ready summary without requiring ML expertise.
 The [sanitized public result snapshot](reports/FINAL_RESULTS_PUBLIC.md) links
 the identifier-free aggregate tables and figures that can safely accompany a
-source-only clone.
+source-only clone. The later [frozen SPH transport protocol](docs/EXTERNAL_TRANSPORT_SPH_R2.md),
+[sanitized SPH result](publication/external_transport_sph_r2/FINAL_RESULTS.md),
+and [independent artifact audit](reports/SPH_EXTERNAL_TRANSPORT_AUDIT.md)
+document a separate retrospective external-transport stress test of the same
+six frozen members.
 
 ## Demo walkthrough
 
@@ -49,6 +53,14 @@ demonstration, not a clinical-use demonstration.
   macro AUROC, average precision, and Brier score. All paired ECE intervals
   crossed zero, and fixed-bin bootstrap ECE requires an additional binning
   caveat; no ECE advantage is claimed.
+- The frozen r2 SPH run is complete. It evaluated the same six members once,
+  with no SPH tuning or recalibration, on 18,842 exact-10-second ECGs from
+  18,157 patients. The primary directly mapped cohort contained 15,698 ECGs
+  from 15,193 patients; calibrated macro AUROC was
+  `0.930912 +/- 0.000964` for the ResNet and `0.924088 +/- 0.001231` for the
+  transformer. This is an exploratory retrospective transport stress test,
+  not clinical validation; its cross-ontology map was not clinically
+  adjudicated, and MI and HYP are rare.
 - The immutable r3 post-evaluation package is complete: calibrated reliability,
   dense risk-coverage, subgroup coverage, 246 controlled-corruption
   member-cases, and 900 explanation-control evaluations. Age 80+ was notably
@@ -59,8 +71,10 @@ demonstration, not a clinical-use demonstration.
   Chromium replay verified ordinary inference and Grad-CAM across the rendered
   12-lead waveform with no console error or failed request; details are in the
   [post-evaluation run log](reports/POST_EVALUATION_RUN_LOG.md).
-- The final August 9 repository gate passed all 434 tests, Ruff, and strict
-  mypy. Pytest emitted one upstream Starlette/httpx deprecation warning.
+- The historical August 9 r3 repository gate passed all 434 tests, Ruff, and
+  strict mypy. The current post-SPH repository gate separately passed all 494
+  tests, Ruff, and strict mypy. Pytest emitted one upstream Starlette/httpx
+  deprecation warning.
 - [DEV-001](reports/PROTOCOL_DEVIATIONS.md) records bounded pre-evaluation
   exposure of raw fold-10 label-bearing metadata rows. No waveform,
   prediction, model metric, or exposed value informed a choice, but strict
@@ -117,6 +131,16 @@ release checksums, and required attribution. Raw PTB-XL files are not
 redistributed in this repository; the included derived waveform visualizations
 remain subject to the dataset's CC BY 4.0 attribution requirements.
 
+The external stress test uses the SPH dataset described by Liu et al.
+([paper](https://doi.org/10.1038/s41597-022-01403-5),
+[Figshare collection](https://doi.org/10.6084/m9.figshare.c.5779802.v1)). Its
+Figshare source items are marked CC0. Raw SPH files are also Git-ignored and
+not redistributed; exact source hashes are recorded in the
+[frozen transport protocol](docs/EXTERNAL_TRANSPORT_SPH_R2.md).
+
 ## Scope statement
 
-This is a research and educational system, not a medical device. Its outputs must not be described as diagnoses, clinical recommendations, or evidence of real-world clinical safety without external, prospective validation.
+This is a research and educational system, not a medical device. The SPH result
+is limited retrospective external-transport evidence, not prospective or
+clinical validation. Outputs must not be described as diagnoses, clinical
+recommendations, or evidence of real-world clinical safety.

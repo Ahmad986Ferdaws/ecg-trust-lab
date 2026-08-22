@@ -119,6 +119,11 @@ workspace `--basetemp` because the managed sandbox could not traverse the
 default installed-package or temporary-directory paths; the unrestricted test
 process itself completed normally.
 
+That 434-test result is the historical r3 gate, not the current suite count.
+After the frozen SPH transport implementation and audit were added, the current
+repository gate separately passed **494 tests**, Ruff, and strict mypy, with
+the same single upstream Starlette/httpx deprecation warning.
+
 ## 4. Acquire and verify PTB-XL
 
 Download the official PTB-XL 1.0.3 root metadata and 100 Hz WFDB records:
@@ -636,12 +641,42 @@ verified prerequisites. The r3 final report file hash is
 Use `reports/POST_EVALUATION_RUN_LOG.md` for exact r1/r2/r3 tree hashes,
 failure states, findings, and the browser-verification status.
 
+### 10.7 Complete the frozen SPH transport stress test
+
+The later SPH run is a separate post-r3 experiment governed by
+[`configs/external_transport_sph_frozen_r2.yaml`](../configs/external_transport_sph_frozen_r2.yaml)
+and the [frozen protocol narrative](EXTERNAL_TRANSPORT_SPH_R2.md). It reloads
+the exact six completed PTB members and their fold-9 policies, then performs one
+BF16 `cuda:0` inference pass over the pre-specified SPH cohort. No SPH tuning,
+recalibration, target-domain normalization, threshold fitting, gate fitting,
+model selection, or outcome-informed cohort change is permitted.
+
+The completed immutable local root is
+`runs/external_transport/sph_figshare_v1__attempt-r2/`. Its primary cohort has
+15,698 ECGs from 15,193 patients; the broad exact-10-second cohort has 18,842
+ECGs from 18,157 patients. The r2 protocol SHA-256 is
+`840acb758d50dbf1a04bf704b16a58d4d29d668370ce7ef91ef7a44860bf311b`,
+and the public-manifest artifact SHA-256 is
+`eb333e255f41beece3cd5fa413e9a605c017bf63b0c977207c28e5ac1373fc0f`.
+
+Do not rerun the command against this existing root: atomic creation spends a
+root permanently, and overwrite/reuse is forbidden. A fresh reconstruction
+must first acquire and verify the official sources exactly as specified, use a
+clean revision whose frozen hashes match, and target a newly frozen absent
+root. The identifier-free aggregate result is
+[`publication/external_transport_sph_r2/FINAL_RESULTS.md`](../publication/external_transport_sph_r2/FINAL_RESULTS.md),
+and the independent evidence review is
+[`reports/SPH_EXTERNAL_TRANSPORT_AUDIT.md`](../reports/SPH_EXTERNAL_TRANSPORT_AUDIT.md).
+This is an exploratory retrospective external-transport stress test, not
+prospective or clinical validation.
+
 ## 11. Artifact layout and provenance ledger
 
 Defaults and recommended generated paths are:
 
 ```text
 data/raw/ptb-xl/1.0.3/             official source files and 100 Hz WFDB records
+data/raw/sph/figshare-v1/           official SPH source files and extracted HDF5 records
 data/manifests/                    CSV, Parquet, summary, and SHA inventory
 artifacts/preprocessing/           folds-1-7 normalization JSON
 artifacts/benchmarks/              synthetic benchmark JSON
@@ -654,6 +689,7 @@ runs/refit/<run_name>/             frozen-refit checkpoints and metadata
 runs/release/ptbxl_matched_equal_budget_v1/  sealed fold-9/fold-10 release
 runs/release/.final-test-openings/  immutable spec-keyed opening marker/ledger
 runs/post_evaluation/<audit_root>/  immutable post-evaluation specs and outputs
+runs/external_transport/<root>/     immutable local SPH transport inputs/outputs
 reports/figures/data/              generated descriptive figures
 ```
 
@@ -679,6 +715,8 @@ Git revision / dirty-state record
   -> post-evaluation specification and supersession chain
   -> probability/robustness/explanation/demo manifest hashes
   -> derived-artifact manifest
+  -> separately frozen SPH protocol, bound inputs, inference checkpoint,
+     source re-audit, public manifest, and sanitized external result
 ```
 
 Do not mix prefixed and unprefixed hashes silently. Protocol and canonical
@@ -694,7 +732,7 @@ manifest and file hashes in run metadata are stored as the 64-character digest.
 | Manifest | Strict canonical counts, waveform existence, and patient-fold isolation pass; hash inventory matches | Complete |
 | Signal contract | Real folds 1/8/9 load as finite float32 `[12, 1000]` in canonical lead order | Complete |
 | Normalization | Provenance says folds 1-7, 14,955 records, and the selected-row hash matches | Complete |
-| Code quality | pytest, Ruff, strict mypy, and CUDA verification all exit zero | Complete; final gate: 434 tests, Ruff, and strict mypy passed; CUDA verification passed in the recorded environment gate |
+| Code quality | pytest, Ruff, strict mypy, and CUDA verification all exit zero | Complete; historical r3 gate: 434 tests; current post-SPH gate: 494 tests; Ruff and strict mypy passed; CUDA verification passed in the recorded environment gate |
 | Capacity benchmark | Finite train steps; exact matched parameter counts; descriptive compute JSON saved | Complete |
 | Smoke training | Unique run completes and writes valid best/last checkpoints; no scientific claim attached | Complete |
 | Development | `status: complete`; fold-8 selection only; all seeds/configs use equal declared budgets | Complete |
@@ -702,6 +740,7 @@ manifest and file hashes in run metadata are stored as the 64-character digest.
 | Calibration | Integrity-bound fold-9-only prediction and decision artifacts | Complete |
 | Final | Frozen choices, explicit token, fold-10-only prediction, non-overwriting report, hashes archived | Complete |
 | Post-evaluation | New immutable root for each defect; exact source verification; no reuse; final derived manifest | Complete in r3 |
+| External transport | Frozen no-adaptation SPH protocol; immutable root; source and bound-input re-verification; sanitized aggregate result and audit | Complete in r2; exploratory and not clinical validation |
 
 The literature-scale macro-AUROC near 0.92-0.93 is a contextual sanity check,
 not an automated quality gate in the current code. A discrepancy should trigger

@@ -5,7 +5,8 @@
 I built and audited a reproducible 12-lead ECG research system that compares a
 capacity-matched 1D ResNet with an ECG transformer on PTB-XL, then evaluates
 calibration, abstention, subgroup coverage, corruption sensitivity, and
-explanation controls rather than stopping at a headline AUROC.
+explanation controls before running a frozen, no-adaptation transport stress
+test on a second retrospective ECG dataset.
 
 ## The problem
 
@@ -41,6 +42,9 @@ This is benchmark research, not a diagnostic system or medical device.
 - Paired patient-cluster bootstrap comparisons, reliability and risk-coverage
   analyses, subgroup coverage audits, 246 controlled-corruption member-cases,
   and 900 explanation-control evaluations.
+- A frozen external-transport protocol that applied the same six members to
+  SPH once, without SPH-based training, model selection, preprocessing
+  adaptation, recalibration, threshold fitting, or gate fitting.
 - A local FastAPI/Plotly viewer that presents raw and calibrated probabilities,
   thresholds, the frozen gate decision, a 12-lead waveform, and optional
   Grad-CAM or Integrated Gradients sensitivity overlays.
@@ -61,6 +65,26 @@ Within each seed, paired patient-bootstrap intervals supported the ResNet for
 macro AUROC, average precision, and Brier score. Every paired ECE interval
 crossed zero, so the project makes no comparative ECE claim. AUROC is not
 classification accuracy; `0.9219` must not be described as “92% accurate.”
+
+## Exploratory SPH transport result
+
+After the PTB-XL r3 analysis was complete, the six frozen members were applied
+unchanged to the retrospective SPH dataset. The primary conservative mapping
+cohort contained 15,698 ECGs from 15,193 patients; the broader exact-10-second
+cohort contained 18,842 ECGs from 18,157 patients.
+
+| Architecture | Calibrated macro AUROC | Macro average precision | Brier score |
+|---|---:|---:|---:|
+| 1D ResNet | `0.930912 +/- 0.000964` | `0.698955 +/- 0.006752` | `0.061301 +/- 0.000248` |
+| ECG transformer | `0.924088 +/- 0.001231` | `0.657838 +/- 0.007557` | `0.064153 +/- 0.003962` |
+
+Values are mean +/- sample standard deviation across the same three seeds.
+Paired patient-cluster bootstrap intervals favored the ResNet for macro AUROC
+in all three seeds. This is only an exploratory retrospective external
+transport stress test: there was no SPH tuning or recalibration, the new
+AHA-to-PTB-superclass ontology bridge was not clinically adjudicated, and MI
+and HYP are rare. It is not prospective or clinical validation and does not
+establish diagnostic safety or deployment readiness.
 
 ## What the trustworthiness audit revealed
 
@@ -97,7 +121,8 @@ classification accuracy; `0.9219` must not be described as “92% accurate.”
 
 ## Verification record
 
-- 434 automated tests passed.
+- The historical August 9 r3 gate passed 434 automated tests.
+- The current post-SPH gate separately passed 494 automated tests.
 - Ruff and strict mypy passed.
 - A real RTX 5070 Ti CUDA/BF16 forward-and-backward smoke test passed.
 - Isolated Chromium verified ordinary inference and Grad-CAM with all 12 SVG
@@ -113,7 +138,8 @@ Built a provenance-locked PTB-XL ECG benchmark comparing capacity-matched 1D
 ResNet and transformer models across three seeds; achieved `0.9219` sealed
 macro-AUROC and added calibrated abstention, patient-bootstrap inference,
 subgroup/robustness audits, explanation sanity checks, a verified local demo,
-and 434-test reproducibility coverage.
+and a frozen no-adaptation SPH transport stress test backed by 494-test
+reproducibility coverage.
 
 ### Abstract-length summary
 
@@ -127,9 +153,12 @@ precision, and Brier score, while ECE differences remained inconclusive.
 Post-evaluation audits exposed unequal abstention coverage for age 80+,
 substantial sensitivity to destructive lead corruptions, and limited agreement
 between attribution methods despite strong repeatability. The work demonstrates
-an integrity-focused methodology for clinical-adjacent ML while explicitly
-making no claim of clinical validity, diagnostic safety, or medical-device
-performance.
+an integrity-focused methodology for clinical-adjacent ML. A later frozen
+SPH stress test retained the ResNet's mean macro-AUROC advantage on a
+conservative 15,698-ECG mapped cohort without target-domain adaptation. Because
+that bridge was unadjudicated, rare endpoints were sparse, and the study was
+retrospective, the work explicitly makes no claim of clinical validity,
+diagnostic safety, or medical-device performance.
 
 ## Authoritative evidence
 
@@ -137,3 +166,6 @@ performance.
 - [Reproducibility guide](REPRODUCIBILITY.md)
 - [Post-evaluation run log](../reports/POST_EVALUATION_RUN_LOG.md)
 - [Required protocol deviations](../reports/PROTOCOL_DEVIATIONS.md)
+- [Frozen SPH transport protocol](EXTERNAL_TRANSPORT_SPH_R2.md)
+- [Sanitized SPH result](../publication/external_transport_sph_r2/FINAL_RESULTS.md)
+- [SPH external-transport audit](../reports/SPH_EXTERNAL_TRANSPORT_AUDIT.md)

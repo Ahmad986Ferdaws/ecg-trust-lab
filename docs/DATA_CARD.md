@@ -236,6 +236,36 @@ recreated locally. The canonical local snapshot has these hashes:
 The three manifest hashes are also recorded in
 `data/manifests/ptbxl_superclasses_v1.0.3.sha256`.
 
+## Relationship to the SPH transport dataset
+
+This card's training, selection, calibration, and sealed-test contracts remain
+PTB-XL-only. After those stages and the r3 audit were complete, the same six
+frozen members were applied once to SPH as a separate exploratory retrospective
+external-transport stress test. SPH was not incorporated into the PTB-XL
+manifest and was not used for training, model or seed selection, normalization,
+fine-tuning, recalibration, threshold fitting, gate fitting, or post-result
+cohort selection.
+
+SPH is the Shandong Provincial Hospital dataset described by Liu et al.
+([Scientific Data paper](https://doi.org/10.1038/s41597-022-01403-5),
+[Figshare collection](https://doi.org/10.6084/m9.figshare.c.5779802.v1)). The
+Figshare items are marked CC0; citation remains appropriate. Raw source files
+remain Git-ignored and are not redistributed.
+
+| Frozen SPH view | ECGs | Patients | Role |
+|---|---:|---:|---|
+| `broad_exact10` | 18,842 | 18,157 | Every exact-10-second source record; mapping sensitivity only |
+| `primary_mapped` | 15,698 | 15,193 | At least one conservative direct superclass mapping; primary analysis |
+| `no_ambiguous_mapped` | 15,563 | 15,066 | Pre-specified sensitivity excluding ambiguous primary codes |
+
+The new AHA-to-PTB-superclass bridge was not clinically adjudicated. The
+primary cohort contains only 138 MI-positive and 113 HYP-positive ECGs, so
+those endpoints are particularly sparse. The [frozen protocol](EXTERNAL_TRANSPORT_SPH_R2.md),
+[sanitized result](../publication/external_transport_sph_r2/FINAL_RESULTS.md),
+and [artifact audit](../reports/SPH_EXTERNAL_TRANSPORT_AUDIT.md) preserve the
+separate source, cohort, label-map, and no-adaptation provenance. This is not
+prospective or clinical validation.
+
 ## Known limitations and risks
 
 - **Historical, single-origin cohort.** Signals were collected at PTB from
@@ -261,9 +291,12 @@ The three manifest hashes are also recorded in
 - **Metadata constraints.** Height and weight are heavily missing, age is
   censored above 89, sex is binary-coded, and dates are shifted. Missing or
   absent attributes cannot be treated as evidence of subgroup safety.
-- **No external or prospective validation.** A held-out PTB-XL fold estimates
-  internal benchmark performance only. It does not establish transportability,
-  clinical benefit, or safety.
+- **Limited retrospective transport evidence; no clinical validation.** The
+  held-out PTB-XL fold estimates internal benchmark performance. The separate
+  frozen SPH stress test probes transport without adaptation, but its
+  unadjudicated ontology bridge, sparse MI/HYP labels, retrospective design,
+  and single external source do not establish general transportability,
+  clinical benefit, prospective safety, or deployment readiness.
 
 ## Intended and prohibited uses
 
@@ -276,7 +309,8 @@ Project policy prohibits using this cohort or derived models for autonomous or
 assisted clinical diagnosis, patient triage, treatment selection, emergency
 decision-making, real-world screening, or any other medical-device function.
 It also prohibits claims of demographic fairness, device portability, or
-clinical generalization without appropriate external and prospective evidence;
+clinical generalization without appropriate independent prospective clinical
+evidence; the one exploratory SPH stress test does not satisfy that standard;
 attempts to re-identify people; and any tuning or selection after fold-10
 results have been inspected.
 
@@ -309,3 +343,6 @@ loader has been run successfully on real records from folds 1, 8, and 9,
 returning finite tensors of shape `[12, 1000]` and targets of shape `[5]`.
 Opening fold 10 is a separate, explicit final-evaluation event after all model,
 calibration, threshold, abstention, and reporting choices are frozen.
+Reproducing the later SPH transport experiment is separately governed by the
+[immutable r2 protocol](EXTERNAL_TRANSPORT_SPH_R2.md); an existing output root
+must never be overwritten or reused.

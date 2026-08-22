@@ -1,0 +1,68 @@
+{
+  "artifact_sha256": "sha256:3ffccd8724dd9680d49323fd8ed7247baa433205bfc1215a678dee383c6f463c",
+  "artifact_type": "ecg_trust.sph_transport_cohort_summary",
+  "broad_all_zero_caveat": "absent direct mapping is unknown, not a verified negative",
+  "cohorts": {
+    "broad_exact10": {
+      "all_zero_rows": 3144,
+      "patients": 18157,
+      "positive_patients": {
+        "CD": 1453,
+        "HYP": 110,
+        "MI": 131,
+        "NORM": 10874,
+        "STTC": 2947
+      },
+      "positive_records": {
+        "CD": 1510,
+        "HYP": 113,
+        "MI": 138,
+        "NORM": 11172,
+        "STTC": 3030
+      },
+      "records": 18842
+    },
+    "no_ambiguous_mapped": {
+      "all_zero_rows": 0,
+      "patients": 15066,
+      "positive_patients": {
+        "CD": 1417,
+        "HYP": 63,
+        "MI": 124,
+        "NORM": 10874,
+        "STTC": 2899
+      },
+      "positive_records": {
+        "CD": 1470,
+        "HYP": 64,
+        "MI": 131,
+        "NORM": 11172,
+        "STTC": 2981
+      },
+      "records": 15563
+    },
+    "primary_mapped": {
+      "all_zero_rows": 0,
+      "patients": 15193,
+      "positive_patients": {
+        "CD": 1453,
+        "HYP": 110,
+        "MI": 131,
+        "NORM": 10874,
+        "STTC": 2947
+      },
+      "positive_records": {
+        "CD": 1510,
+        "HYP": 113,
+        "MI": 138,
+        "NORM": 11172,
+        "STTC": 3030
+      },
+      "records": 15698
+    }
+  },
+  "norm_plus_direct_abnormal_conflicts": 0,
+  "private_alignment_sha256": "sha256:ab3d8dc16c74690bb3ccd7f35cb6990c651e54ea8cb6e51f85782e2ce8f3d3f4",
+  "protocol_sha256": "sha256:840acb758d50dbf1a04bf704b16a58d4d29d668370ce7ef91ef7a44860bf311b",
+  "schema_version": 1
+}

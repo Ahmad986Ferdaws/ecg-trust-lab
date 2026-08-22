@@ -2,7 +2,7 @@
 
 **Protocol ID:** `sph-external-transport-v1-r2`
 **Frozen configuration:** `configs/external_transport_sph_frozen_r2.yaml`
-**Status:** r2 frozen before the first SPH model inference
+**Status:** completed in the immutable r2 root; sanitized outputs independently audited
 **Scope:** exploratory external transport stress test; **not clinical validation**
 
 ## 0. Supersession and pre-inference failure lineage
@@ -382,3 +382,45 @@ Every result summary must say that this was an **exploratory external transport
 stress test**, conducted with **no tuning or recalibration on SPH**, and that it
 is **not clinical validation**. It must remain labeled research-only and must
 not claim diagnostic safety, deployment readiness, or medical-device status.
+
+## 11. Completed r2 evidence
+
+The protocol was executed once at Git revision
+`215b26e0aafe893e081a13db7117c303c7dbb438`, with scientific parent revision
+`724a510b03eb539eda2add6de359855f3ffaf2b5`. The completed immutable local root
+is `runs/external_transport/sph_figshare_v1__attempt-r2/`; it was not recovered
+from the failed v1 root. The result binds these main provenance anchors:
+
+| Anchor | SHA-256 |
+|---|---|
+| Frozen r2 protocol | `840acb758d50dbf1a04bf704b16a58d4d29d668370ce7ef91ef7a44860bf311b` |
+| Physical resampled-signal stream | `f0888fa70573084c346dc373680d6e47c8ed830390b96a40f2de62201f8ffeec` |
+| Private cohort alignment | `ab3d8dc16c74690bb3ccd7f35cb6990c651e54ea8cb6e51f85782e2ce8f3d3f4` |
+| Private derived-artifact manifest | `96cc02d2a9cd5d940ef2cd4fc06a0dccd16a8495610fd443d70d7f436bbb81c2` |
+| Public manifest | `eb333e255f41beece3cd5fa413e9a605c017bf63b0c977207c28e5ac1373fc0f` |
+
+The completed cohort counts exactly matched the freeze: 18,842 ECGs from
+18,157 patients in `broad_exact10`, 15,698 from 15,193 in `primary_mapped`, and
+15,563 from 15,066 in `no_ambiguous_mapped`.
+
+Primary calibrated results are mean +/- sample standard deviation across the
+three frozen seeds:
+
+| Architecture | Macro AUROC | Macro AP | Brier | ECE |
+|---|---:|---:|---:|---:|
+| 1D ResNet | `0.930912 +/- 0.000964` | `0.698955 +/- 0.006752` | `0.061301 +/- 0.000248` | `0.052477 +/- 0.000877` |
+| ECG transformer | `0.924088 +/- 0.001231` | `0.657838 +/- 0.007557` | `0.064153 +/- 0.003962` | `0.061480 +/- 0.006313` |
+
+Paired patient-cluster bootstrap AUROC intervals favored the ResNet in all
+three seeds. This does not change the interpretation boundary: the label bridge
+was not clinically adjudicated, MI and HYP are rare, and favorable aggregate
+metrics do not establish diagnostic validity or safety. This remains an
+**exploratory external transport stress test**, performed with **no tuning or
+recalibration on SPH**; it is **not clinical validation** and is research only.
+
+The identifier-free aggregate copy is
+[`publication/external_transport_sph_r2/FINAL_RESULTS.md`](../publication/external_transport_sph_r2/FINAL_RESULTS.md).
+The independent integrity, exact-set, hash, and privacy review is recorded in
+[`reports/SPH_EXTERNAL_TRANSPORT_AUDIT.md`](../reports/SPH_EXTERNAL_TRANSPORT_AUDIT.md).
+The historical r3 gate contained 434 tests; the current post-SPH repository
+gate separately passed 494 tests, Ruff, and strict mypy.

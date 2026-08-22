@@ -1,9 +1,10 @@
-# Public result snapshot: PTB-XL five-superclass comparison
+# Public result snapshot: PTB-XL comparison and SPH transport stress test
 
-> **Publication copy, not a new analysis.** This identifier-free summary was
-> prepared from the already finalized r3 report so the result can accompany a
-> source-only repository. It is not part of the immutable r3 derived manifest
-> and does not supersede the sealed local report.
+> **Publication copy, not a new analysis.** The PTB-XL sections were prepared
+> from the already finalized r3 report, and the separate SPH section was copied
+> from the successfully audited frozen r2 transport output. This file is not
+> part of either immutable derived manifest and does not supersede either local
+> report.
 
 ## Interpretation boundary
 
@@ -12,9 +13,10 @@ comparisons are the confirmatory sealed fold-10 results. Calibration views,
 risk-coverage analysis, subgroup coverage, corruptions, explanations, and the
 demo are post-evaluation descriptive audits of frozen models and policies.
 
-This is research-only benchmark evidence. It does not establish external or
-clinical validity, diagnostic safety, medical-device performance, fairness, or
-fitness for patient care.
+This is research-only evidence. The later SPH experiment adds limited
+retrospective external-transport evidence, but it does not establish clinical
+validity, diagnostic safety, medical-device performance, fairness, prospective
+utility, or fitness for patient care.
 
 ## Confirmatory fold-10 result
 
@@ -39,6 +41,32 @@ Within every seed, paired patient-bootstrap intervals supported the ResNet for
 macro AUROC, average precision, and Brier score. Every paired ECE interval
 crossed zero. Fixed-bin ECE also has a resampling/binning caveat, so no
 comparative ECE advantage is claimed.
+
+## Exploratory SPH external transport result
+
+After PTB-XL r3 was complete, the same six frozen members were applied once to
+SPH under a pre-specified no-adaptation protocol. The broad exact-10-second
+cohort contained 18,842 ECGs from 18,157 patients. The primary conservatively
+mapped cohort contained 15,698 ECGs from 15,193 patients, and the
+no-ambiguous sensitivity cohort contained 15,563 ECGs from 15,066 patients.
+
+Primary calibrated values are mean +/- sample standard deviation across the
+three frozen seeds.
+
+| Architecture | Macro AUROC | Macro AP | Brier | ECE |
+|---|---:|---:|---:|---:|
+| 1D ResNet | `0.930912 +/- 0.000964` | `0.698955 +/- 0.006752` | `0.061301 +/- 0.000248` | `0.052477 +/- 0.000877` |
+| ECG transformer | `0.924088 +/- 0.001231` | `0.657838 +/- 0.007557` | `0.064153 +/- 0.003962` | `0.061480 +/- 0.006313` |
+
+Within each seed, the paired patient-bootstrap macro-AUROC interval favored the
+ResNet. This result is an **exploratory external transport stress test** with
+**no tuning or recalibration on SPH**; it is **not clinical validation**. The
+AHA-to-PTB-superclass bridge was not clinically adjudicated, MI and HYP have
+few positive patients, and the study is retrospective. The complete sanitized
+tables and required limits are in the
+[SPH result snapshot](../publication/external_transport_sph_r2/FINAL_RESULTS.md),
+with the evidence review in the
+[SPH external-transport audit](SPH_EXTERNAL_TRANSPORT_AUDIT.md).
 
 ## Post-evaluation findings
 
@@ -93,6 +121,8 @@ physiological causality or clinician reasoning.
 - [Subgroup performance and coverage](../publication/results/figures/subgroup_performance_coverage.png)
 - [Identifier-free CSV tables](../publication/results/tables/)
 - [SHA-256 inventory](../publication/results/SHA256SUMS.txt)
+- [Sanitized SPH external-transport result](../publication/external_transport_sph_r2/FINAL_RESULTS.md)
+- [SPH external-transport artifact audit](SPH_EXTERNAL_TRANSPORT_AUDIT.md)
 
 The 12 published figure/table files contain aggregate results only. Raw ECGs,
 patient identifiers, record identifiers, predictions, checkpoints, and the raw
@@ -123,6 +153,8 @@ record is in the [final-evaluation run log](FINAL_EVALUATION_RUN_LOG.md).
 - r3 explanation manifest: `sha256:0803fe333b8f736d8c61babc2c50fe26194d3a75a7e06d123640ee2e1fc9733d`
 - r3 derived-manifest artifact: `sha256:fae6df30090ee59425a347034a7f4272cac5b799582a5742fff9c62b92a092f8`
 - Sealed local final-report file: `sha256:c4363d89a43c59b7e7185a01b13a22377a90e35eb356e8a640bf7517fe721d0c`
+- Frozen SPH r2 protocol: `sha256:840acb758d50dbf1a04bf704b16a58d4d29d668370ce7ef91ef7a44860bf311b`
+- SPH public manifest: `sha256:eb333e255f41beece3cd5fa413e9a605c017bf63b0c977207c28e5ac1373fc0f`
 
 The sealed local specification, manifest, and report remain in the ignored run
 tree and are verified by the reproducibility pipeline. This public snapshot
