@@ -27,45 +27,80 @@ async function render() {
   );
 }
 
-test("server-renders the complete ECG evidence experience", async () => {
+test("server-renders the complete Signal Ledger evidence experience", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>ECG Trust Lab — Results in Motion<\/title>/i);
-  assert.match(
-    html,
-    /property="og:image" content="https:\/\/results\.example\.test\/og\.png"/i,
-  );
-  assert.match(
-    html,
-    /name="twitter:image" content="https:\/\/results\.example\.test\/og\.png"/i,
-  );
-  assert.doesNotMatch(html, /localhost(?::\d+)?\/og\.png/i);
-  assert.match(html, /Trust,/);
-  assert.match(html, /One race\./);
-  assert.match(html, /Keep the model frozen\./);
-  assert.match(html, /Strong evidence\./);
-  assert.match(html, /Research system · not a medical device/);
-  assert.match(html, /0\.922/);
-  assert.match(html, /0\.931/);
+  assert.match(html, /<title>ECG Trust Lab — The Signal Ledger<\/title>/i);
+  assert.match(html, /<link rel="icon" href="data:,"\s*\/?>/i);
+  assert.doesNotMatch(html, /og:image|twitter:image|localhost(?::\d+)?\/og\.png/i);
+  assert.match(html, /A ResNet kept its ranking lead/);
+  assert.match(html, /Study sequence from training to transport/);
+  assert.match(html, /Discrimination and calibration results/);
+  assert.match(html, /Frozen-model transport from PTB-XL to SPH/);
+  assert.match(html, /no internal ECE winner is claimed/i);
+  assert.match(html, /Research system/);
+  assert.match(html, /Not a medical device/);
+  assert.match(html, /0\.9219/);
+  assert.match(html, /0\.9309/);
   assert.match(html, /15,193/);
-  assert.match(html, /494/);
-  assert.doesNotMatch(html, /codex-preview|Your site is taking shape|Building your site/i);
+  assert.match(html, /12 leads × 10 seconds/);
+  assert.match(html, /No SPH tuning/);
+  assert.doesNotMatch(
+    html,
+    /id="metric-panel-sph"[^>]*\shidden(?:=""|="hidden")?/i,
+  );
+  assert.doesNotMatch(
+    html,
+    /codex-preview|Your site is taking shape|Building your site|signal universe|neon/i,
+  );
 });
 
-test("ships the social card and frozen audited result source", async () => {
-  const [image, imageStats, resultsSource] = await Promise.all([
-    readFile(new URL("../public/og.png", import.meta.url)),
-    stat(new URL("../public/og.png", import.meta.url)),
-    readFile(new URL("../lib/results.ts", import.meta.url), "utf8"),
-  ]);
+test("ships audited data and a matte, evidence-bearing visual system", async () => {
+  const [resultsSource, sceneSource, pageSource, rootStyles, storyStyles] =
+    await Promise.all([
+      readFile(new URL("../lib/results.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL("../app/components/ResultsUniverse.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+      readFile(
+        new URL("../app/components/story/story.module.css", import.meta.url),
+        "utf8",
+      ),
+    ]);
 
-  assert.deepEqual([...image.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
-  assert.ok(imageStats.size > 1_000_000);
+  await assert.rejects(
+    stat(new URL("../public/og.png", import.meta.url)),
+    (error) => error?.code === "ENOENT",
+  );
+
   assert.match(resultsSource, /mean: 0\.921921, sd: 0\.000913/);
   assert.match(resultsSource, /mean: 0\.930912, sd: 0\.000964/);
   assert.match(resultsSource, /records: 15_698, patients: 15_193/);
-  assert.match(resultsSource, /Neither the PTB-XL benchmark nor the SPH transport study establishes clinical validity/);
+  assert.match(
+    resultsSource,
+    /Neither the PTB-XL benchmark nor the SPH transport study establishes clinical validity/,
+  );
+
+  assert.match(sceneSource, /Line2/);
+  assert.match(sceneSource, /LineGeometry/);
+  assert.match(sceneSource, /LineMaterial/);
+  assert.match(sceneSource, /frameloop=\{shouldAnimate \? "always" : "demand"\}/);
+  assert.equal((sceneSource.match(/\{ name: "/g) ?? []).length, 12);
+  assert.doesNotMatch(
+    sceneSource,
+    /CatmullRomCurve3|TubeGeometry|AdditiveBlending|UnrealBloomPass|AfterimagePass/i,
+  );
+
+  const visualSource = `${pageSource}\n${rootStyles}\n${storyStyles}`;
+  assert.doesNotMatch(
+    visualSource,
+    /text-shadow|backdrop-filter|drop-shadow|radial-gradient|background-clip:\s*text/i,
+  );
+  assert.doesNotMatch(visualSource, /\bcyan\b|\bviolet\b|\bportal\b|\bparticle/i);
 });

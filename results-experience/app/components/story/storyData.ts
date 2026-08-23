@@ -9,7 +9,7 @@ export type ModelBenchmark = {
   id: "resnet" | "transformer";
   name: string;
   descriptor: string;
-  accent: "cyan" | "violet";
+  accent: "resnet" | "transformer";
   metrics: Record<MetricKey, MetricEstimate>;
 };
 
@@ -39,31 +39,40 @@ export type CohortSnapshot = {
 
 export const METRIC_META: Record<
   MetricKey,
-  { label: string; longLabel: string; direction: "higher" | "lower" }
+  {
+    label: string;
+    longLabel: string;
+    direction: "higher" | "lower";
+    plotDomain: readonly [number, number];
+  }
 > = {
   auroc: {
     label: "AUROC",
     longLabel: "Area under the receiver operating curve",
     direction: "higher",
+    plotDomain: [0.85, 0.95],
   },
   averagePrecision: {
     label: "AP",
     longLabel: "Average precision",
     direction: "higher",
+    plotDomain: [0.6, 0.85],
   },
   brier: {
     label: "Brier",
     longLabel: "Brier score",
     direction: "lower",
+    plotDomain: [0.05, 0.11],
   },
   ece: {
     label: "ECE",
     longLabel: "Expected calibration error",
     direction: "lower",
+    plotDomain: [0, 0.07],
   },
 };
 
-/** Audited research outputs. Values are means; spread is the reported ± value. */
+/** Audited research outputs. Values are means ± sample SD across three frozen seeds. */
 export const AUDITED_BENCHMARKS: BenchmarkDataset[] = [
   {
     id: "ptb-xl",
@@ -77,7 +86,7 @@ export const AUDITED_BENCHMARKS: BenchmarkDataset[] = [
         id: "resnet",
         name: "1D ResNet",
         descriptor: "Convolutional baseline",
-        accent: "cyan",
+        accent: "resnet",
         metrics: {
           auroc: { value: 0.921921, spread: 0.000913 },
           averagePrecision: { value: 0.810248, spread: 0.003327 },
@@ -89,7 +98,7 @@ export const AUDITED_BENCHMARKS: BenchmarkDataset[] = [
         id: "transformer",
         name: "ECG Transformer",
         descriptor: "Attention architecture",
-        accent: "violet",
+        accent: "transformer",
         metrics: {
           auroc: { value: 0.89742, spread: 0.00327 },
           averagePrecision: { value: 0.76527, spread: 0.007739 },
@@ -103,7 +112,7 @@ export const AUDITED_BENCHMARKS: BenchmarkDataset[] = [
     id: "sph",
     tabLabel: "SPH transport",
     eyebrow: "Frozen external transport",
-    title: "Performance travels—but the calibration context changes.",
+    title: "Frozen-model performance on the SPH primary cohort.",
     description:
       "The same frozen models are transported to the primary SPH cohort. Strong AUROC persists while average precision and calibration expose the dataset shift.",
     models: [
@@ -111,7 +120,7 @@ export const AUDITED_BENCHMARKS: BenchmarkDataset[] = [
         id: "resnet",
         name: "1D ResNet",
         descriptor: "Frozen for transport",
-        accent: "cyan",
+        accent: "resnet",
         metrics: {
           auroc: { value: 0.930912, spread: 0.000964 },
           averagePrecision: { value: 0.698955, spread: 0.006752 },
@@ -123,7 +132,7 @@ export const AUDITED_BENCHMARKS: BenchmarkDataset[] = [
         id: "transformer",
         name: "ECG Transformer",
         descriptor: "Frozen for transport",
-        accent: "violet",
+        accent: "transformer",
         metrics: {
           auroc: { value: 0.924088, spread: 0.001231 },
           averagePrecision: { value: 0.657838, spread: 0.007557 },

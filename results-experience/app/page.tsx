@@ -1,176 +1,241 @@
+import { MotionControl } from "./components/ExperienceMotion";
 import { ResultsUniverse } from "./components/ResultsUniverse";
 import {
   MetricComparisonSection,
   ResearchSafetySection,
   TransportCohortSection,
 } from "./components/story";
+import { COHORTS, SOURCE_POPULATIONS } from "../lib/results";
 
-const heroFacts = [
-  { value: "0.922", label: "PTB-XL macro AUROC", detail: "sealed internal test" },
-  { value: "0.931", label: "SPH macro AUROC", detail: "frozen transport" },
-  { value: "15,193", label: "external patients", detail: "primary cohort" },
-  { value: "494", label: "checks passing", detail: "verified release" },
+const ptb = COHORTS.ptbxl_fold10;
+const sph = COHORTS.sph_primary;
+
+const headlineFacts = [
+  {
+    value: ptb.results.resnet1d.auroc.mean.toFixed(4),
+    label: "PTB-XL macro-AUROC",
+    detail: `${ptb.count.records.toLocaleString("en-US")} sealed ECGs`,
+  },
+  {
+    value: sph.results.resnet1d.auroc.mean.toFixed(4),
+    label: "SPH macro-AUROC",
+    detail: "frozen external transport",
+  },
+  {
+    value: sph.count.patients.toLocaleString("en-US"),
+    label: "SPH primary patients",
+    detail: `${sph.count.records.toLocaleString("en-US")} ECGs`,
+  },
+] as const;
+
+const methodSteps = [
+  {
+    index: "01",
+    title: "Build on PTB-XL",
+    body: `${SOURCE_POPULATIONS.ptbxlCanonicalManifest.records.toLocaleString("en-US")} provenance-checked ECGs formed the labeled project manifest. Patients stayed isolated by fold.`,
+  },
+  {
+    index: "02",
+    title: "Freeze every decision",
+    body: "Architecture, preprocessing, calibration, thresholds, and confidence gates were fixed before the final evaluations.",
+  },
+  {
+    index: "03",
+    title: "Open the sealed test",
+    body: `${ptb.count.records.toLocaleString("en-US")} fold-10 ECGs compared the ResNet and transformer across the same three seeds.`,
+  },
+  {
+    index: "04",
+    title: "Transport without adaptation",
+    body: `${sph.count.records.toLocaleString("en-US")} mapped SPH ECGs were scored once—without target-domain training, selection, preprocessing changes, or recalibration.`,
+  },
+] as const;
+
+const verdictDeltas = [
+  {
+    label: "PTB-XL AUROC lead",
+    value: `+${(
+      ptb.results.resnet1d.auroc.mean -
+      ptb.results.ecg_transformer.auroc.mean
+    ).toFixed(4)}`,
+  },
+  {
+    label: "SPH primary AUROC lead",
+    value: `+${(
+      sph.results.resnet1d.auroc.mean -
+      sph.results.ecg_transformer.auroc.mean
+    ).toFixed(4)}`,
+  },
+  {
+    label: "SPH primary AP lead",
+    value: `+${(
+      sph.results.resnet1d.averagePrecision.mean -
+      sph.results.ecg_transformer.averagePrecision.mean
+    ).toFixed(4)}`,
+  },
 ] as const;
 
 export default function Home() {
   return (
-    <main className="experience-shell">
-      <div className="ambient-grid" aria-hidden="true" />
-      <div className="film-grain" aria-hidden="true" />
-
+    <>
       <nav className="site-nav" aria-label="Primary navigation">
         <a className="wordmark" href="#top" aria-label="ECG Trust Lab home">
-          <span className="wordmark-pulse" aria-hidden="true" />
-          ECG / TRUST LAB
+          <span>ECG Trust Lab</span>
+          <small>Results notebook / 2026</small>
         </a>
-        <div className="nav-status">
-          <span className="status-dot" aria-hidden="true" />
-          Audited research build
+        <div className="nav-context" aria-label="Study path">
+          <span>PTB-XL</span>
+          <i aria-hidden="true">→</i>
+          <span>SPH</span>
         </div>
-        <a className="nav-link" href="#evidence">
-          Enter the evidence <span aria-hidden="true">↘</span>
-        </a>
+        <div className="nav-actions">
+          <a href="#method">Method</a>
+          <a href="#evidence">Results</a>
+          <MotionControl />
+        </div>
       </nav>
 
-      <section className="hero" id="top" aria-labelledby="hero-title">
-        <div className="hero-scene" aria-hidden="true">
-          <ResultsUniverse />
-        </div>
+      <main className="experience-shell">
 
+      <section className="hero" id="top" aria-labelledby="hero-title">
         <div className="hero-copy">
           <p className="eyebrow">
-            <span>12-lead ECG intelligence</span>
-            <span className="eyebrow-line" aria-hidden="true" />
-            <span>Two models. Two populations.</span>
+            <span>Retrospective research</span>
+            <span>Five diagnostic superclasses</span>
           </p>
           <h1 id="hero-title">
-            <span>Trust,</span>
-            <span>rendered in</span>
-            <span className="text-glow">three dimensions.</span>
+            A ResNet kept its ranking lead <em>after transport.</em>
           </h1>
           <p className="hero-deck">
-            A living map of what our models learned, where they travelled, and
-            exactly how their confidence held up under pressure.
+            Three fixed seeds per architecture. One sealed PTB-XL test. One
+            no-adaptation SPH stress test. The discrimination ordering stayed
+            unchanged when the data source changed.
           </p>
-          <div className="hero-actions">
-            <a className="primary-action" href="#evidence">
-              <span>Explore the signal</span>
-              <span className="action-orbit" aria-hidden="true">↗</span>
-            </a>
-            <p>
-              ResNet leads the sealed test and the independent transport study.
-              <strong> Research only.</strong>
-            </p>
+
+          <dl className="hero-facts" aria-label="Headline audited results">
+            {headlineFacts.map((fact) => (
+              <div key={fact.label}>
+                <dt>{fact.label}</dt>
+                <dd>{fact.value}</dd>
+                <small>{fact.detail}</small>
+              </div>
+            ))}
+          </dl>
+
+          <p className="hero-boundary">
+            External transport is evidence of robustness—not clinical
+            validation. This is a research system, not a medical device.
+          </p>
+        </div>
+
+        <figure className="hero-figure">
+          <div className="hero-scene" aria-hidden="true">
+            <ResultsUniverse />
           </div>
-        </div>
-
-        <div className="hero-index" aria-label="Experience chapter">
-          <span>01</span>
-          <span>Signal universe</span>
-        </div>
-
-        <div className="hero-facts" aria-label="Headline verified results">
-          {heroFacts.map((fact) => (
-            <article className="hero-fact" key={fact.label}>
-              <strong>{fact.value}</strong>
-              <span>{fact.label}</span>
-              <small>{fact.detail}</small>
-            </article>
-          ))}
-        </div>
-
-        <a className="scroll-cue" href="#evidence" aria-label="Scroll to the evidence">
-          <span>Scroll to enter</span>
-          <i aria-hidden="true" />
-        </a>
+          <figcaption>
+            <span>Figure 01</span>
+            <p>
+              Schematic 12-lead evidence instrument. The waveform geometry is
+              illustrative; every reported metric is drawn from the audited
+              evaluation artifacts.
+            </p>
+          </figcaption>
+        </figure>
       </section>
 
-      <section className="manifesto" aria-labelledby="manifesto-title">
-        <div className="manifesto-orbit" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </div>
-        <p className="chapter-label">The governing idea / 01.5</p>
-        <h2 id="manifesto-title">
-          The bar was never one score.
-          <span>It was whether the evidence could survive leaving home.</span>
-        </h2>
-        <div className="study-geometry" aria-label="Study design at a glance">
-          <article>
-            <strong>12</strong>
-            <span>simultaneous ECG leads</span>
-          </article>
-          <article>
-            <strong>5</strong>
-            <span>diagnostic superclasses</span>
-          </article>
-          <article>
-            <strong>3 × 2</strong>
-            <span>frozen seeds × architectures</span>
-          </article>
-          <article>
-            <strong>0</strong>
-            <span>SPH tuning decisions</span>
-          </article>
-        </div>
+      <section className="study-rail" id="method" aria-labelledby="method-title">
+        <header>
+          <p className="section-label">Study design</p>
+          <h2 id="method-title">Study sequence from training to transport</h2>
+          <p>
+            The scientific claim depends on the order of operations. Nothing
+            from SPH was allowed to alter the models or their decision policy.
+          </p>
+        </header>
+        <ol>
+          {methodSteps.map((step) => (
+            <li key={step.index}>
+              <span>{step.index}</span>
+              <div>
+                <h3>{step.title}</h3>
+                <p>{step.body}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <dl className="method-ledger" aria-label="Study dimensions">
+          <div>
+            <dt>Signal</dt>
+            <dd>12 leads × 10 seconds</dd>
+          </div>
+          <div>
+            <dt>Labels</dt>
+            <dd>5 superclasses</dd>
+          </div>
+          <div>
+            <dt>Models</dt>
+            <dd>2 architectures × 3 seeds</dd>
+          </div>
+          <div>
+            <dt>SPH adaptation</dt>
+            <dd>None</dd>
+          </div>
+        </dl>
       </section>
 
       <div id="evidence">
         <MetricComparisonSection />
       </div>
 
-      <aside className="signal-marquee" aria-label="Five classified superclasses">
-        <div aria-hidden="true">
-          <span>NORM</span><i>◆</i><span>MI</span><i>◆</i><span>STTC</span><i>◆</i>
-          <span>CD</span><i>◆</i><span>HYP</span><i>◆</i><span>NORM</span><i>◆</i>
-          <span>MI</span><i>◆</i><span>STTC</span><i>◆</i><span>CD</span><i>◆</i><span>HYP</span>
-        </div>
-      </aside>
-
       <TransportCohortSection />
 
       <section className="verdict" aria-labelledby="verdict-title">
-        <div className="verdict-number" aria-hidden="true">02</div>
-        <div className="verdict-copy">
-          <p className="chapter-label">What the experiment says / 03.5</p>
-          <h2 id="verdict-title">The simpler architecture won twice.</h2>
+        <header>
+          <p className="section-label">Primary result</p>
+          <h2 id="verdict-title">
+            The ResNet led on discrimination. Calibration was less conclusive.
+          </h2>
           <p>
-            The 1D ResNet ranked cases better than the transformer in every
-            frozen seed across the primary and sensitivity cohorts. Its
-            advantage was not enormous. It was consistent—which is the more
-            interesting result.
+            AUROC and average-precision advantages remained directionally
+            consistent across the three fixed seeds. Transported Brier differences
+            were seed-dependent, and no internal ECE winner is claimed.
           </p>
-        </div>
+        </header>
+
         <dl className="verdict-deltas">
-          <div>
-            <dt>PTB-XL AUROC lead</dt>
-            <dd>+0.0245</dd>
-          </div>
-          <div>
-            <dt>SPH primary AUROC lead</dt>
-            <dd>+0.0068</dd>
-          </div>
-          <div>
-            <dt>SPH primary AP lead</dt>
-            <dd>+0.0411</dd>
-          </div>
+          {verdictDeltas.map((delta) => (
+            <div key={delta.label}>
+              <dt>{delta.label}</dt>
+              <dd>{delta.value}</dd>
+            </div>
+          ))}
         </dl>
+
+        <aside className="verdict-note">
+          <span>Interpretation note</span>
+          <p>
+            AUROC measures ranking, not diagnostic accuracy. A higher transported
+            score does not establish safety, clinical utility, or deployment
+            readiness.
+          </p>
+        </aside>
       </section>
 
       <ResearchSafetySection />
 
+      </main>
+
       <footer className="site-footer">
         <div>
-          <span className="wordmark-pulse" aria-hidden="true" />
-          <strong>ECG / TRUST LAB</strong>
+          <strong>ECG Trust Lab</strong>
+          <span>Audited model evidence / 2026</span>
         </div>
         <p>
-          Audited retrospective research experience. Not a medical device. Not
-          for diagnosis, treatment, or emergency decisions.
+          Retrospective research only. Not for diagnosis, treatment, triage, or
+          emergency decisions.
         </p>
-        <a href="#top">Return to signal ↑</a>
+        <a href="#top">Back to the beginning ↑</a>
       </footer>
-    </main>
+    </>
   );
 }

@@ -1,158 +1,111 @@
-"use client";
-
-import type { CSSProperties } from "react";
 import styles from "./story.module.css";
 import {
   AUDITED_TRANSPORT_COHORT,
   type CohortSnapshot,
 } from "./storyData";
-import { useCountUp, useStoryMotion } from "./useStoryMotion";
 
 type TransportCohortSectionProps = {
   cohort?: CohortSnapshot;
   className?: string;
 };
 
-type CSSVars = CSSProperties & Record<`--${string}`, string | number>;
-
 const countFormatter = new Intl.NumberFormat("en-US");
-
-function AnimatedCount({ value, active }: { value: number; active: boolean }) {
-  const visibleValue = useCountUp(value, active);
-  return (
-    <span aria-label={countFormatter.format(value)}>
-      <span aria-hidden="true">{countFormatter.format(visibleValue)}</span>
-    </span>
-  );
-}
 
 export function TransportCohortSection({
   cohort = AUDITED_TRANSPORT_COHORT,
   className = "",
 }: TransportCohortSectionProps) {
-  const { ref, isVisible } = useStoryMotion<HTMLElement>();
-
   return (
     <section
-      ref={ref}
-      className={`${styles.storySection} ${styles.transportSection} ${
-        isVisible ? styles.isVisible : ""
-      } ${className}`}
-      aria-labelledby="transport-heading"
+      id="transport"
+      className={`${styles.storySection} ${styles.transportSection} ${className}`}
+      aria-labelledby="transport-evidence-heading"
     >
       <div className={styles.sectionInner}>
         <header className={styles.sectionHeader}>
+          <p className={styles.kicker}>External transport / 03</p>
           <div>
-            <p className={styles.kicker}>03 · External transport</p>
-            <h2 id="transport-heading">
-              Leave the home dataset. <span>Keep the model frozen.</span>
+            <h2 id="transport-evidence-heading">
+              Frozen-model transport from PTB-XL to SPH
             </h2>
+            <p className={styles.headerCopy}>
+              Frozen models leave PTB-XL and enter an independently assembled SPH
+              cohort. No SPH tuning decision is added between those two points.
+            </p>
           </div>
-          <p className={styles.headerCopy}>
-            Generalization is tested by moving the trained models from PTB-XL
-            into a distinct SPH cohort—without tuning them to the destination.
-          </p>
         </header>
 
-        <div className={styles.transportStage}>
-          <div className={styles.transportCopy}>
-            <p className={styles.transportRoute}>
-              <span>{cohort.sourceLabel}</span>
-              <i aria-hidden="true" />
-              <span>{cohort.destinationLabel}</span>
-            </p>
-            <h3>A different hospital system. A harder question.</h3>
-            <p>
-              High AUROC survives transport, but changes in precision and ECE
-              make the shift visible. That is evidence of robustness—not proof
-              of clinical readiness.
-            </p>
-
-            <dl className={styles.cohortStats}>
+        <ol className={styles.transportSequence} aria-label="External transport sequence">
+          <li>
+            <span>01 / source</span>
+            <strong>{cohort.sourceLabel}</strong>
+            <p>Training and sealed in-distribution evaluation.</p>
+          </li>
+          <li className={styles.frozenStep}>
+            <span>02 / transfer</span>
+            <strong>Frozen models</strong>
+            <p>Same weights and architectures. No destination retuning.</p>
+            <dl>
               <div>
-                <dt>{cohort.primary.label}</dt>
-                <dd>
-                  <strong>
-                    <AnimatedCount value={cohort.primary.ecgs} active={isVisible} />
-                  </strong>
-                  <span>ECGs</span>
-                  <small>
-                    <AnimatedCount
-                      value={cohort.primary.patients}
-                      active={isVisible}
-                    />{" "}
-                    patients
-                  </small>
-                </dd>
+                <dt>Architectures</dt>
+                <dd>1D ResNet + ECG Transformer</dd>
               </div>
               <div>
-                <dt>{cohort.broad.label}</dt>
-                <dd>
-                  <strong>
-                    <AnimatedCount value={cohort.broad.ecgs} active={isVisible} />
-                  </strong>
-                  <span>ECGs</span>
-                  <small>
-                    <AnimatedCount
-                      value={cohort.broad.patients}
-                      active={isVisible}
-                    />{" "}
-                    patients
-                  </small>
-                </dd>
+                <dt>SPH tuning decisions</dt>
+                <dd>0</dd>
               </div>
             </dl>
+          </li>
+          <li>
+            <span>03 / destination</span>
+            <strong>{cohort.destinationLabel}</strong>
+            <p>External discrimination and calibration reread.</p>
+          </li>
+        </ol>
+
+        <div className={styles.transportLedger}>
+          <div className={styles.transportFinding}>
+            <p className={styles.ledgerLabel}>What the sequence establishes</p>
+            <h3>SPH preserved AUROC while other metrics shifted.</h3>
+            <p>
+              Strong AUROC persisted in SPH. Average precision and calibration
+              metrics changed with the destination cohort. That is evidence of
+              robustness under dataset shift—not clinical validation.
+            </p>
           </div>
 
-          <div
-            className={styles.orbitScene}
-            aria-label={`Transport from ${cohort.sourceLabel} to ${cohort.destinationLabel}; primary cohort ${countFormatter.format(
-              cohort.primary.ecgs,
-            )} ECGs from ${countFormatter.format(cohort.primary.patients)} patients`}
-            role="img"
-          >
-            <div className={styles.orbitGlow} aria-hidden="true" />
-            {[0, 1, 2].map((ring) => (
-              <div
-                key={ring}
-                className={`${styles.orbitRing} ${styles[`orbitRing${ring + 1}`]}`}
-                style={{ "--ring-index": ring } as CSSVars}
-                aria-hidden="true"
-              >
-                <i />
-                <i />
-              </div>
-            ))}
-            <div className={`${styles.datasetNode} ${styles.sourceNode}`} aria-hidden="true">
-              <span>TRAIN</span>
-              <strong>{cohort.sourceLabel}</strong>
-              <i />
-            </div>
-            <div className={`${styles.datasetNode} ${styles.targetNode}`} aria-hidden="true">
-              <span>TRANSPORT</span>
-              <strong>{cohort.destinationLabel}</strong>
-              <i />
-            </div>
-            <div className={styles.orbitCore} aria-hidden="true">
-              <span>FROZEN</span>
-              <strong>MODEL</strong>
-              <small>no retuning</small>
-            </div>
-            <div className={styles.signalParticles} aria-hidden="true">
-              {Array.from({ length: 12 }, (_, index) => (
-                <i
-                  key={index}
-                  style={
-                    {
-                      "--particle-index": index,
-                      "--particle-delay": `${index * -0.23}s`,
-                    } as CSSVars
-                  }
-                />
-              ))}
-            </div>
-          </div>
+          <table className={styles.cohortTable}>
+            <caption>Audited SPH cohort sizes</caption>
+            <thead>
+              <tr>
+                <th scope="col">Analysis cohort</th>
+                <th scope="col">ECGs</th>
+                <th scope="col">Patients</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">{cohort.primary.label}</th>
+                <td>{countFormatter.format(cohort.primary.ecgs)}</td>
+                <td>{countFormatter.format(cohort.primary.patients)}</td>
+              </tr>
+              <tr>
+                <th scope="row">{cohort.broad.label}</th>
+                <td>{countFormatter.format(cohort.broad.ecgs)}</td>
+                <td>{countFormatter.format(cohort.broad.patients)}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+
+        <aside className={styles.transportMethodNote} aria-label="Transport interpretation note">
+          <strong>Read transport as a stress test.</strong>
+          <p>
+            It asks whether a locked research result remains informative in a
+            different dataset. It does not test prospective workflow, clinician
+            behavior, patient outcomes, or medical-device performance.
+          </p>
+        </aside>
       </div>
     </section>
   );

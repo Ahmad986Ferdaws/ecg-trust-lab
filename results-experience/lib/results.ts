@@ -34,7 +34,6 @@ export interface ModelDefinition {
   readonly color: {
     readonly accent: string;
     readonly secondary: string;
-    readonly glow: string;
     readonly surface: string;
   };
 }
@@ -97,10 +96,9 @@ export const MODELS = {
     shortName: "ResNet",
     description: "A residual convolutional network operating directly on all 12 ECG leads.",
     color: {
-      accent: "#55F6D1",
-      secondary: "#2AB8FF",
-      glow: "rgba(85, 246, 209, 0.45)",
-      surface: "rgba(38, 203, 181, 0.12)",
+      accent: "#006B70",
+      secondary: "#004F53",
+      surface: "rgba(0, 107, 112, 0.08)",
     },
   },
   ecg_transformer: {
@@ -109,10 +107,9 @@ export const MODELS = {
     shortName: "Transformer",
     description: "A capacity-matched patch transformer trained under the same protocol and budget.",
     color: {
-      accent: "#B28CFF",
-      secondary: "#FF62D6",
-      glow: "rgba(178, 140, 255, 0.45)",
-      surface: "rgba(154, 105, 255, 0.12)",
+      accent: "#98483B",
+      secondary: "#71352C",
+      surface: "rgba(152, 72, 59, 0.08)",
     },
   },
 } as const satisfies Readonly<Record<ModelId, ModelDefinition>>;
@@ -165,31 +162,31 @@ export const LABELS = [
     code: "NORM",
     name: "Normal ECG",
     description: "Recordings labeled as normal within the benchmark ontology.",
-    color: "#63F5D2",
+    color: "#006B70",
   },
   {
     code: "MI",
     name: "Myocardial infarction",
     description: "ECG patterns associated with myocardial infarction labels.",
-    color: "#FF6F8F",
+    color: "#98483B",
   },
   {
     code: "STTC",
     name: "ST/T change",
     description: "Repolarization-related ST-segment or T-wave changes.",
-    color: "#FFCC66",
+    color: "#A66D1E",
   },
   {
     code: "CD",
     name: "Conduction disturbance",
     description: "Electrical conduction abnormalities represented by the superclass.",
-    color: "#66B8FF",
+    color: "#466A78",
   },
   {
     code: "HYP",
     name: "Hypertrophy",
     description: "ECG labels associated with cardiac chamber hypertrophy.",
-    color: "#CF8CFF",
+    color: "#6E746D",
   },
 ] as const satisfies readonly {
   readonly code: LabelCode;

@@ -1,7 +1,7 @@
 {
   "name": "ecg-trust-results-experience",
   "version": "1.0.0",
-  "description": "An immersive, audited 3D exploration of PTB-XL and SPH ECG classifier results.",
+  "description": "An editorial signal ledger for audited PTB-XL and SPH ECG classifier results.",
   "private": true,
   "packageManager": "pnpm@11.19.0",
   "engines": {
@@ -12,7 +12,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "pnpm run build && node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

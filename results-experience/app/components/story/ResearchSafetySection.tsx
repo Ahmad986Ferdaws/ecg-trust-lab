@@ -1,7 +1,4 @@
-"use client";
-
 import styles from "./story.module.css";
-import { useStoryMotion } from "./useStoryMotion";
 
 export type SafetyPrinciple = {
   index: string;
@@ -39,64 +36,50 @@ const DEFAULT_PRINCIPLES: SafetyPrinciple[] = [
 ];
 
 export function ResearchSafetySection({
-  eyebrow = "04 · The boundary",
-  title = "Strong evidence. A deliberate limit.",
+  eyebrow = "Research boundary / 04",
+  title = "Research evidence, not clinical validation",
   description =
-    "Trustworthy machine learning is as explicit about what the experiment cannot prove as it is about every score it can measure.",
+    "Trustworthy machine learning is as explicit about what an experiment cannot prove as it is about every score it can measure.",
   principles = DEFAULT_PRINCIPLES,
   className = "",
 }: ResearchSafetySectionProps) {
-  const { ref, isVisible } = useStoryMotion<HTMLElement>();
-
   return (
     <section
-      ref={ref}
-      className={`${styles.storySection} ${styles.safetySection} ${
-        isVisible ? styles.isVisible : ""
-      } ${className}`}
-      aria-labelledby="safety-heading"
+      id="research-boundary"
+      className={`${styles.storySection} ${styles.safetySection} ${className}`}
+      aria-labelledby="research-boundary-heading"
     >
-      <div className={styles.safetyGrid} aria-hidden="true" />
       <div className={styles.sectionInner}>
-        <div className={styles.boundaryLabel}>
-          <i aria-hidden="true" />
-          Research system · not a medical device
+        <div className={styles.researchStatus}>
+          <span>Research system</span>
+          <strong>Not a medical device</strong>
         </div>
 
-        <div className={styles.safetyHeadline}>
+        <header className={styles.safetyHeader}>
           <p className={styles.kicker}>{eyebrow}</p>
-          <h2 id="safety-heading">{title}</h2>
-          <p>{description}</p>
-        </div>
-
-        <div className={styles.principleDeck}>
-          {principles.map((principle, index) => (
-            <article key={`${principle.index}-${principle.title}`}>
-              <div className={styles.principleFace}>
-                <span>{principle.index}</span>
-                <h3>{principle.title}</h3>
-                <p>{principle.description}</p>
-              </div>
-              <i
-                className={styles.principleEdge}
-                style={{ "--edge-index": index } as React.CSSProperties}
-                aria-hidden="true"
-              />
-            </article>
-          ))}
-        </div>
-
-        <div className={styles.finalStatement}>
-          <div className={styles.finalPulse} aria-hidden="true">
-            <i />
-            <i />
-            <i />
+          <div>
+            <h2 id="research-boundary-heading">{title}</h2>
+            <p>{description}</p>
           </div>
+        </header>
+
+        <ol className={styles.boundaryList}>
+          {principles.map((principle) => (
+            <li key={`${principle.index}-${principle.title}`}>
+              <span>{principle.index}</span>
+              <h3>{principle.title}</h3>
+              <p>{principle.description}</p>
+            </li>
+          ))}
+        </ol>
+
+        <div className={styles.researchConclusion}>
+          <span>Research conclusion</span>
           <p>
-            <span>Research conclusion</span>
-            Across the audited experiments, the 1D ResNet is the stronger of the
-            two tested architectures. The next claim requires prospective,
-            clinically governed validation.
+            Across the audited experiments, the 1D ResNet has the stronger
+            discrimination results of the two tested architectures. Calibration
+            conclusions are narrower, and any clinical claim requires prospective,
+            governed validation.
           </p>
         </div>
       </div>
