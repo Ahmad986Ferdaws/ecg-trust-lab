@@ -88,6 +88,11 @@ demonstration, not a clinical-use demonstration.
   Chromium replay verified ordinary inference and Grad-CAM across the rendered
   12-lead waveform with no console error or failed request; details are in the
   [post-evaluation run log](reports/POST_EVALUATION_RUN_LOG.md).
+- The vNext [source-calibration preparation](reports/TRUST_SENTINEL_SOURCE_CALIBRATION.md)
+  completed from a clean, hash-bound commit using three patient-disjoint fold-9
+  roles. Its untuned 465-ECG source-validation point estimate was macro AUROC
+  `0.914492`. Embedding-based unfamiliar-input detection remains pending, so
+  this is explicitly not a complete release or clinical validation.
 - The historical August 9 r3 repository gate passed all 434 tests, Ruff, and
   strict mypy. The current post-SPH repository gate separately passed all 494
   tests, Ruff, and strict mypy. Pytest emitted one upstream Starlette/httpx

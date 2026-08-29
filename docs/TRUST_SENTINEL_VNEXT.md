@@ -73,11 +73,14 @@ research scaffolds for foundation representations, counterfactual review,
 longitudinal studies, and human-factors studies. These modules are tested
 research infrastructure, not completed clinical studies or claims of benefit.
 
-The source-calibration protocol is frozen as a development-only preparation
-step. Its embedding-based unfamiliar-input component remains explicitly
-`PENDING`, so no complete vNext release is ready. The historical Plotly demo is
-a separate entropy-gated baseline and must not be presented as the Sentinel
-service. No vNext component is authorized for patient care.
+The source-calibration protocol has now completed as a development-only,
+patient-separated preparation step; its independently audited aggregate status
+is recorded in
+[`reports/TRUST_SENTINEL_SOURCE_CALIBRATION.md`](../reports/TRUST_SENTINEL_SOURCE_CALIBRATION.md).
+Its embedding-based unfamiliar-input component remains explicitly `PENDING`,
+so no complete vNext release is ready. The historical Plotly demo is a separate
+entropy-gated baseline and must not be presented as the Sentinel service. No
+vNext component is authorized for patient care.
 
 ## Delivery sequence
 
