@@ -21,9 +21,26 @@ and [independent artifact audit](reports/SPH_EXTERNAL_TRANSPORT_AUDIT.md)
 document a separate retrospective external-transport stress test of the same
 six frozen members.
 
+Active development now continues in a separate
+[ECG Trust Sentinel vNext line](docs/TRUST_SENTINEL_VNEXT.md). It adds strict
+input and lead-quality assurance, unfamiliar-input detection, conformal
+uncertainty, and reason-aware fail-closed decisions without modifying or
+superseding the sealed PTB-XL or SPH evidence.
+
+The vNext code now contains the assurance contracts, quality and uncertainty
+primitives, five-state service boundary, synthetic Failure Lab, monitoring,
+audit, governance, and future-study scaffolds described in that document. It
+is still development infrastructure: source calibration is not a promoted
+release, embedding-based unfamiliar-input detection remains pending, and the
+system is not authorized for patient care.
+
 ## Demo walkthrough
 
 [![ECG Trust Lab demo poster](publication/media/ecg-trust-lab-demo-poster.png)](publication/media/ecg-trust-lab-research-demo.mp4)
+
+This recorded walkthrough and the local Plotly demo represent the historical
+entropy-gated baseline. They are explicitly not a Trust Sentinel release; an
+abstaining response now withholds every label-level score and attribution.
 
 The linked [29.5-second silent walkthrough](publication/media/ecg-trust-lab-research-demo.mp4)
 shows the frozen model state, calibrated probabilities, accept/defer gate,

@@ -136,7 +136,7 @@
     <section class="stack">
       <div id="empty-state" class="panel">
         <h2>Ready for one immutable inference</h2>
-        <p class="metric">The response will show raw and fold-9 calibrated probabilities, frozen thresholds, an accept/defer gate, and optional waveform attribution.</p>
+        <p class="metric">This is the historical entropy-gated research baseline, not ECG Trust Sentinel. Label-level results appear only when its frozen legacy gate permits display.</p>
       </div>
 
       <div id="results" class="stack hidden">
@@ -148,7 +148,8 @@
           <div class="metric">Uncertainty <b id="uncertainty"></b><br>Frozen gate <b id="gate"></b></div>
         </section>
 
-        <div class="result-grid">
+        <p id="blocked-note" class="metric hidden">Label scores and attribution were withheld because the frozen legacy gate abstained.</p>
+        <div id="label-results" class="result-grid">
           <section class="panel">
             <h2>Five-superclass probabilities</h2>
             <div id="probabilities" class="chart"></div>
@@ -214,20 +215,24 @@ document.addEventListener('DOMContentLoaded', () => {
   function render(payload) {
     document.getElementById('empty-state').classList.add('hidden');
     document.getElementById('results').classList.remove('hidden');
-    const decision = payload.decision.status;
-    const badge = document.getElementById('decision'); badge.textContent = decision === 'accept' ? 'Accept' : 'Defer'; badge.className = `decision-badge ${decision}`;
-    document.getElementById('uncertainty').textContent = payload.decision.uncertainty.toFixed(4);
-    document.getElementById('gate').textContent = payload.decision.gate_threshold.toFixed(4);
+    const exposed = payload.predictions_exposed === true;
+    const badge = document.getElementById('decision'); badge.textContent = exposed ? 'Legacy display allowed' : 'Abstain'; badge.className = `decision-badge ${exposed ? 'accept' : 'abstain'}`;
+    document.getElementById('uncertainty').textContent = exposed ? payload.uncertainty.toFixed(4) : 'withheld';
+    document.getElementById('gate').textContent = exposed ? payload.gate_threshold.toFixed(4) : 'withheld';
+    document.getElementById('label-results').classList.toggle('hidden', !exposed);
+    document.getElementById('blocked-note').classList.toggle('hidden', exposed);
 
-    const raw = labels.map(label => payload.raw_probabilities[label]);
-    const calibrated = labels.map(label => payload.calibrated_probabilities[label]);
-    Plotly.react('probabilities', [
-      {type: 'bar', orientation: 'h', y: labels, x: raw, name: 'Raw', marker: {color: '#637b86'}},
-      {type: 'bar', orientation: 'h', y: labels, x: calibrated, name: 'Calibrated', marker: {color: '#55e4d2'}}
-    ], {...darkLayout, barmode: 'group', xaxis: {range: [0, 1], title: 'Probability'}, legend: {orientation: 'h'}}, plotConfig);
+    if (exposed) {
+      const raw = labels.map(label => payload.raw_probabilities[label]);
+      const calibrated = labels.map(label => payload.calibrated_probabilities[label]);
+      Plotly.react('probabilities', [
+        {type: 'bar', orientation: 'h', y: labels, x: raw, name: 'Raw', marker: {color: '#637b86'}},
+        {type: 'bar', orientation: 'h', y: labels, x: calibrated, name: 'Calibrated', marker: {color: '#55e4d2'}}
+      ], {...darkLayout, barmode: 'group', xaxis: {range: [0, 1], title: 'Probability'}, legend: {orientation: 'h'}}, plotConfig);
 
-    const decisions = labels.map(label => payload.threshold_predictions[label] ? 1 : 0);
-    Plotly.react('thresholds', [{type: 'bar', x: labels, y: decisions, marker: {color: decisions.map(v => v ? '#55e4d2' : '#34464b')}, text: decisions.map(v => v ? 'Positive' : 'Negative'), textposition: 'auto'}], {...darkLayout, yaxis: {range: [0, 1.15], tickvals: [0, 1], ticktext: ['No', 'Yes']}}, plotConfig);
+      const decisions = labels.map(label => payload.threshold_predictions[label] ? 1 : 0);
+      Plotly.react('thresholds', [{type: 'bar', x: labels, y: decisions, marker: {color: decisions.map(v => v ? '#55e4d2' : '#34464b')}, text: decisions.map(v => v ? 'Positive' : 'Negative'), textposition: 'auto'}], {...darkLayout, yaxis: {range: [0, 1.15], tickvals: [0, 1], ticktext: ['No', 'Yes']}}, plotConfig);
+    }
 
     const waveform = payload.waveform;
     const traces = leads.map((lead, index) => ({

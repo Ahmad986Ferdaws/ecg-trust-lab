@@ -48,6 +48,23 @@ test("server-renders the complete Signal Ledger evidence experience", async () =
   assert.match(html, /15,193/);
   assert.match(html, /12 leads × 10 seconds/);
   assert.match(html, /No SPH tuning/);
+  assert.match(html, /id="failure-lab"/);
+  assert.match(html, /Challenge the trust gates before trusting a score/);
+  assert.match(html, /Illustrative synthetic scenario preview/);
+  assert.match(html, /FailureLabRunner/);
+  assert.match(html, /Baseline wander/);
+  assert.match(html, /Mains interference/);
+  assert.match(html, /Lead order swap/);
+  assert.match(html, /Designed to challenge:[\s\S]{0,40}Signal-quality gate/);
+  assert.match(html, /INVALID_INPUT/);
+  assert.match(html, /REACQUIRE/);
+  assert.match(html, /UNSUPPORTED_INPUT/);
+  assert.match(html, /ABSTAIN/);
+  assert.match(html, /PREDICTION_ALLOWED/);
+  assert.match(html, /Not model output/);
+  assert.equal((html.match(/data-lead="/g) ?? []).length, 12);
+  assert.equal((html.match(/name="failure-scenario"/g) ?? []).length, 9);
+  assert.match(html, /type="range"/);
   assert.doesNotMatch(
     html,
     /id="metric-panel-sph"[^>]*\shidden(?:=""|="hidden")?/i,
@@ -59,7 +76,15 @@ test("server-renders the complete Signal Ledger evidence experience", async () =
 });
 
 test("ships audited data and a matte, evidence-bearing visual system", async () => {
-  const [resultsSource, sceneSource, pageSource, rootStyles, storyStyles] =
+  const [
+    resultsSource,
+    sceneSource,
+    pageSource,
+    rootStyles,
+    storyStyles,
+    failureLabSource,
+    failureLabStyles,
+  ] =
     await Promise.all([
       readFile(new URL("../lib/results.ts", import.meta.url), "utf8"),
       readFile(
@@ -70,6 +95,17 @@ test("ships audited data and a matte, evidence-bearing visual system", async () 
       readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
       readFile(
         new URL("../app/components/story/story.module.css", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/components/story/FailureLabSection.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL(
+          "../app/components/story/FailureLabSection.module.css",
+          import.meta.url,
+        ),
         "utf8",
       ),
     ]);
@@ -97,10 +133,22 @@ test("ships audited data and a matte, evidence-bearing visual system", async () 
     /CatmullRomCurve3|TubeGeometry|AdditiveBlending|UnrealBloomPass|AfterimagePass/i,
   );
 
-  const visualSource = `${pageSource}\n${rootStyles}\n${storyStyles}`;
+  const visualSource = `${pageSource}\n${rootStyles}\n${storyStyles}\n${failureLabStyles}`;
   assert.doesNotMatch(
     visualSource,
     /text-shadow|backdrop-filter|drop-shadow|radial-gradient|background-clip:\s*text/i,
   );
   assert.doesNotMatch(visualSource, /\bcyan\b|\bviolet\b|\bportal\b|\bparticle/i);
+  assert.doesNotMatch(
+    failureLabSource,
+    /Math\.random|setInterval|requestAnimationFrame|modelProbability/i,
+  );
+  assert.match(failureLabSource, /const SAMPLE_COUNT = 960/);
+  assert.match(failureLabSource, /2 \* Math\.PI \* mainsFrequencyHz \* time/);
+  assert.match(failureLabSource, /2 \* Math\.PI \* (?:23|31|43) \* time/);
+  assert.doesNotMatch(
+    `${failureLabSource}\n${failureLabStyles}`,
+    /(?:linear|radial)-gradient|backdrop-filter|box-shadow|animation\s*:/i,
+  );
+  assert.equal((failureLabSource.match(/id: "[a-z-]+"/g) ?? []).length, 9);
 });

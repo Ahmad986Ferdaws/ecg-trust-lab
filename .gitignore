@@ -1,10 +1,11 @@
 # Python and uv
 .venv/
-.uv-cache/
+.uv-cache*/
 .python/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest-tmp-*/
 .ruff_cache/
 .mypy_cache/
 .coverage

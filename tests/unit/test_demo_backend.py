@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -25,10 +26,21 @@ from ecg_trust.demo_backend import (
     load_wfdb_physical_signal,
     validate_physical_signal,
 )
+from ecg_trust.demo_sentinel_adapter import DemoSentinelModelRunner
 from ecg_trust.experiment_config import ModelConfig
 from ecg_trust.experiment_runner import build_experiment_model
 from ecg_trust.models import count_parameters
 from ecg_trust.protocol import TRAIN_FOLDS, ExperimentProtocol
+from ecg_trust.registry import (
+    ArtifactRole,
+    TrustBundleCompatibility,
+    TrustBundleParent,
+    bind_parent_file,
+    seal_trust_bundle,
+    verify_trust_bundle,
+)
+from ecg_trust.runtime_binding import RuntimeTrustBinding
+from ecg_trust.sentinel_engine import SentinelModelArtifactInputs
 from ecg_trust.training import save_checkpoint
 
 
@@ -38,6 +50,63 @@ class DemoFiles:
     resolved_config: Path
     normalization: Path
     policy: Path
+
+
+def _model_artifact_inputs(root: Path, files: DemoFiles) -> SentinelModelArtifactInputs:
+    role_paths = {
+        ArtifactRole.CHECKPOINT: files.checkpoint,
+        ArtifactRole.RESOLVED_CONFIG: files.resolved_config,
+        ArtifactRole.NORMALIZATION: files.normalization,
+        ArtifactRole.DECISION_POLICY: files.policy,
+    }
+    declarations: list[tuple[str, ArtifactRole, str]] = []
+    for role in ArtifactRole:
+        artifact_id = "checkpoint-0" if role is ArtifactRole.CHECKPOINT else role.value.lower()
+        path = role_paths.get(role)
+        if path is None:
+            path = root / f"{artifact_id}.bin"
+            path.write_bytes(f"{role.value}:{artifact_id}\n".encode())
+        declarations.append((artifact_id, role, path.name))
+    parents = tuple(
+        sorted(
+            (
+                bind_parent_file(
+                    root,
+                    artifact_id=artifact_id,
+                    role=role,
+                    relative_path=filename,
+                    media_type="application/octet-stream",
+                )
+                for artifact_id, role, filename in declarations
+            ),
+            key=lambda parent: (parent.role.value, parent.artifact_id),
+        )
+    )
+    by_role: dict[ArtifactRole, TrustBundleParent] = {
+        parent.role: parent for parent in parents if parent.role is not ArtifactRole.CHECKPOINT
+    }
+    compatibility = TrustBundleCompatibility.canonical()
+    bundle = seal_trust_bundle(
+        release_id="release-vnext",
+        created_at=datetime(2026, 8, 24, 12, 0, tzinfo=UTC),
+        code_commit="a" * 40,
+        protocol_sha256=by_role[ArtifactRole.PROTOCOL].file_sha256,
+        dataset_manifest_sha256=by_role[ArtifactRole.DATASET_MANIFEST].file_sha256,
+        environment_lock_sha256=by_role[ArtifactRole.ENVIRONMENT_LOCK].file_sha256,
+        compatibility=compatibility,
+        parents=parents,
+    )
+    binding = RuntimeTrustBinding(
+        verify_trust_bundle(bundle, root, expected_compatibility=compatibility)
+    )
+    return SentinelModelArtifactInputs(
+        release_id=binding.release_id,
+        manifest_sha256=binding.service_manifest_sha256,
+        checkpoints=binding.require_checkpoints(),
+        resolved_config=binding.require_single(ArtifactRole.RESOLVED_CONFIG),
+        normalization=binding.require_single(ArtifactRole.NORMALIZATION),
+        decision_policy=binding.require_single(ArtifactRole.DECISION_POLICY),
+    )
 
 
 def _write_demo_files(
@@ -155,6 +224,53 @@ def test_backend_loads_supported_checkpoint_and_returns_fixed_order_probabilitie
     json.dumps(payload)
 
 
+@pytest.mark.parametrize("architecture", ["resnet1d", "ecg_transformer"])
+def test_backend_exports_deterministic_embedding_for_sentinel_ood_gate(
+    tmp_path: Path,
+    architecture: Literal["resnet1d", "ecg_transformer"],
+) -> None:
+    backend = _load_backend(_write_demo_files(tmp_path, architecture=architecture))
+    signal = np.zeros((12, 1000), dtype=np.float32)
+
+    first = backend.extract_embedding_signal(signal)
+    second = backend.extract_embedding_signal(signal)
+    evidence = DemoSentinelModelRunner(
+        backend=backend,
+        release_id="release-vnext",
+        bound_manifest_sha256="c" * 64,
+        bound_checkpoint_sha256s=(
+            str(backend.artifact_provenance["checkpoint_sha256"]),
+        ),
+    ).infer(signal)
+
+    assert first.ndim == 1
+    assert first.numel() > 0
+    assert first.dtype is torch.float32
+    assert torch.isfinite(first).all()
+    torch.testing.assert_close(first, second, rtol=0.0, atol=0.0)
+    assert evidence.label_order == SUPERCLASSES
+    assert evidence.release_id == "release-vnext"
+    assert evidence.embedding == tuple(float(value) for value in first.tolist())
+    assert len(evidence.calibrated_probabilities) == len(SUPERCLASSES)
+
+
+def test_demo_runner_loads_model_only_from_verified_runtime_parent_identities(
+    tmp_path: Path,
+) -> None:
+    files = _write_demo_files(tmp_path)
+    inputs = _model_artifact_inputs(tmp_path, files)
+
+    runner = DemoSentinelModelRunner.load_from_verified_artifacts(inputs)
+
+    assert runner.release_id == inputs.release_id
+    assert runner.bound_manifest_sha256 == inputs.manifest_sha256
+    assert runner.bound_checkpoint_sha256s == (
+        inputs.checkpoints[0].identity.unprefixed_sha256,
+    )
+    evidence = runner.infer(np.zeros((12, 1000), dtype=np.float64))
+    assert evidence.release_id == inputs.release_id
+
+
 def test_backend_abstains_with_frozen_gate_reason(tmp_path: Path) -> None:
     backend = _load_backend(_write_demo_files(tmp_path, gate_threshold=0.0))
 
@@ -163,6 +279,24 @@ def test_backend_abstains_with_frozen_gate_reason(tmp_path: Path) -> None:
     assert result.decision == "abstain"
     assert result.decision_reason == "uncertainty_exceeds_frozen_fold9_gate"
     assert result.uncertainty > result.gate_threshold
+    payload = result.to_dict()
+    assert payload["decision"] == {
+        "status": "ABSTAIN",
+        "reason": "uncertainty_exceeds_frozen_fold9_gate",
+        "predictions_exposed": False,
+    }
+    assert payload["predictions_exposed"] is False
+    assert payload["system_scope"] == "legacy_entropy_baseline_not_trust_sentinel"
+    assert not {
+        "raw_logits",
+        "raw_probabilities",
+        "calibrated_probabilities",
+        "threshold_predictions",
+        "positive_labels",
+        "uncertainty",
+        "gate_threshold",
+        "attribution",
+    }.intersection(payload)
 
 
 def test_signed_gradcam_payload_is_plot_ready(tmp_path: Path) -> None:
@@ -197,9 +331,7 @@ def test_integrated_gradients_works_for_transformer(tmp_path: Path) -> None:
     assert result.attribution is not None
     assert result.attribution.values.shape == (12, 1000)
     with pytest.raises(DemoInputError, match="only for ResNet1D"):
-        backend.predict_signal(
-            torch.zeros(12, 1000), attribution_method="grad_cam"
-        )
+        backend.predict_signal(torch.zeros(12, 1000), attribution_method="grad_cam")
 
 
 @pytest.mark.parametrize(
@@ -261,9 +393,7 @@ def test_wfdb_record_loading_and_prediction(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("artifact_name", ["checkpoint", "resolved_config", "normalization"])
-def test_backend_rejects_tampered_bound_artifacts(
-    tmp_path: Path, artifact_name: str
-) -> None:
+def test_backend_rejects_tampered_bound_artifacts(tmp_path: Path, artifact_name: str) -> None:
     files = _write_demo_files(tmp_path)
     path = getattr(files, artifact_name)
     with path.open("ab") as handle:

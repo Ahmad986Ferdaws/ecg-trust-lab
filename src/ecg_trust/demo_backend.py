@@ -26,7 +26,7 @@ from ecg_trust.data.manifest import sha256_file
 from ecg_trust.experiment_config import ExperimentConfigError, ModelConfig
 from ecg_trust.experiment_runner import DevelopmentRunnerError, build_experiment_model
 from ecg_trust.explain import grad_cam_1d, integrated_gradients
-from ecg_trust.models import ResNet1D, count_parameters
+from ecg_trust.models import ECGTransformer, ResNet1D, count_parameters
 from ecg_trust.protocol import CALIBRATION_FOLDS, TRAIN_FOLDS, ExperimentProtocol
 from ecg_trust.training import CHECKPOINT_SCHEMA_VERSION
 
@@ -283,9 +283,7 @@ class FrozenDecisionPolicy:
             },
             "provenance",
         )
-        raw_folds = _sequence(
-            provenance_payload["calibration_folds"], "calibration_folds"
-        )
+        raw_folds = _sequence(provenance_payload["calibration_folds"], "calibration_folds")
         folds = tuple(
             int(value)
             for value in raw_folds
@@ -294,17 +292,13 @@ class FrozenDecisionPolicy:
         if len(folds) != len(raw_folds):
             raise DemoArtifactError("calibration_folds must contain integers")
         provenance = DecisionProvenance(
-            dataset_version=_string(
-                provenance_payload["dataset_version"], "dataset_version"
-            ),
+            dataset_version=_string(provenance_payload["dataset_version"], "dataset_version"),
             protocol_hash=_string(provenance_payload["protocol_hash"], "protocol_hash"),
             manifest_hash=_string(provenance_payload["manifest_hash"], "manifest_hash"),
             checkpoint_config_hash=_string(
                 provenance_payload["checkpoint_config_hash"], "checkpoint_config_hash"
             ),
-            checkpoint_sha256=_string(
-                provenance_payload["checkpoint_sha256"], "checkpoint_sha256"
-            ),
+            checkpoint_sha256=_string(provenance_payload["checkpoint_sha256"], "checkpoint_sha256"),
             resolved_config_sha256=_string(
                 provenance_payload["resolved_config_sha256"], "resolved_config_sha256"
             ),
@@ -373,39 +367,51 @@ class DemoPrediction:
     artifact_provenance: Mapping[str, object]
 
     def to_dict(self) -> dict[str, object]:
-        raw = [float(value) for value in self.raw_probabilities.tolist()]
-        calibrated = [float(value) for value in self.calibrated_probabilities.tolist()]
-        return {
+        predictions_exposed = self.decision == "accept"
+        payload: dict[str, object] = {
             "label_order": list(self.label_order),
-            "raw_logits": [float(value) for value in self.raw_logits.tolist()],
-            "raw_probabilities": dict(zip(self.label_order, raw, strict=True)),
-            "calibrated_probabilities": dict(
-                zip(self.label_order, calibrated, strict=True)
-            ),
-            "threshold_predictions": dict(
-                zip(self.label_order, self.threshold_predictions, strict=True)
-            ),
-            "positive_labels": [
-                label
-                for label, predicted in zip(
-                    self.label_order, self.threshold_predictions, strict=True
-                )
-                if predicted
-            ],
             "decision": {
-                "status": self.decision,
+                "status": ("LEGACY_BASELINE_DISPLAY_ALLOWED" if predictions_exposed else "ABSTAIN"),
                 "reason": self.decision_reason,
-                "uncertainty": self.uncertainty,
-                "gate_threshold": self.gate_threshold,
+                "predictions_exposed": predictions_exposed,
             },
+            "predictions_exposed": predictions_exposed,
+            "system_scope": "legacy_entropy_baseline_not_trust_sentinel",
             "source": self.source,
-            "attribution": None if self.attribution is None else self.attribution.to_dict(),
             "artifact_provenance": dict(self.artifact_provenance),
             "safety": {
                 "notice": RESEARCH_ONLY_NOTICE,
                 "limitations": list(LIMITATIONS),
             },
         }
+        if predictions_exposed:
+            raw = [float(value) for value in self.raw_probabilities.tolist()]
+            calibrated = [float(value) for value in self.calibrated_probabilities.tolist()]
+            payload.update(
+                {
+                    "raw_logits": [float(value) for value in self.raw_logits.tolist()],
+                    "raw_probabilities": dict(zip(self.label_order, raw, strict=True)),
+                    "calibrated_probabilities": dict(
+                        zip(self.label_order, calibrated, strict=True)
+                    ),
+                    "threshold_predictions": dict(
+                        zip(self.label_order, self.threshold_predictions, strict=True)
+                    ),
+                    "positive_labels": [
+                        label
+                        for label, predicted in zip(
+                            self.label_order, self.threshold_predictions, strict=True
+                        )
+                        if predicted
+                    ],
+                    "uncertainty": self.uncertainty,
+                    "gate_threshold": self.gate_threshold,
+                    "attribution": (
+                        None if self.attribution is None else self.attribution.to_dict()
+                    ),
+                }
+            )
+        return payload
 
 
 def _validate_normalization(stats: NormalizationStats) -> None:
@@ -728,9 +734,9 @@ class DemoInferenceBackend:
         calibrated_probabilities = (logits / self.policy.temperature).sigmoid()
         epsilon = torch.finfo(calibrated_probabilities.dtype).eps
         clipped = calibrated_probabilities.clamp(epsilon, 1.0 - epsilon)
-        entropy = -(
-            clipped * clipped.log() + (1.0 - clipped) * (1.0 - clipped).log()
-        ) / math.log(2.0)
+        entropy = -(clipped * clipped.log() + (1.0 - clipped) * (1.0 - clipped).log()) / math.log(
+            2.0
+        )
         uncertainty = float(entropy.mean())
         accepted = uncertainty <= self.policy.uncertainty_threshold
         decision: Decision = "accept" if accepted else "abstain"
@@ -785,6 +791,50 @@ class DemoInferenceBackend:
             attribution=attribution,
             artifact_provenance=self.artifact_provenance,
         )
+
+    def extract_embedding_signal(
+        self,
+        signal: SignalArray,
+        *,
+        sampling_frequency_hz: float = EXPECTED_FREQUENCY_HZ,
+        lead_names: Sequence[str] = LEADS,
+        units: str = PHYSICAL_UNITS,
+    ) -> Tensor:
+        """Return the frozen pre-classifier embedding for an OOD detector.
+
+        The method preserves the existing prediction path and runs a separate
+        inference-only feature pass.  ResNet temporal features are pooled with
+        the model's own global-pooling layer; the transformer already returns
+        its final class-token embedding.
+        """
+
+        physical = validate_physical_signal(
+            signal,
+            sampling_frequency_hz=sampling_frequency_hz,
+            lead_names=lead_names,
+            units=units,
+        )
+        normalized = ((physical - self._mean) / self._std).contiguous()
+        if not torch.isfinite(normalized).all():
+            raise DemoInputError("signal became non-finite after frozen normalization")
+        inputs = normalized.unsqueeze(0)
+        with torch.inference_mode():
+            if isinstance(self.model, ResNet1D):
+                feature_map = self.model.forward_features(inputs)
+                embedding = self.model.global_pool(feature_map).squeeze(-1)
+            elif isinstance(self.model, ECGTransformer):
+                embedding = self.model.forward_features(inputs)
+            else:  # pragma: no cover - loading already restricts architectures.
+                raise DemoArtifactError("loaded model has no supported embedding contract")
+        if (
+            not isinstance(embedding, Tensor)
+            or embedding.ndim != 2
+            or embedding.shape[0] != 1
+            or embedding.shape[1] < 1
+            or not torch.isfinite(embedding).all()
+        ):
+            raise DemoArtifactError("loaded model violated the finite embedding contract")
+        return embedding[0].detach().cpu().to(torch.float32).contiguous()
 
     @staticmethod
     def _attribution_target(target: str | int | None, probabilities: Tensor) -> int:

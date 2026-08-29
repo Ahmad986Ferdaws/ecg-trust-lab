@@ -1,0 +1,120 @@
+schema_version: 1
+protocol_id: trust-sentinel-source-calibration-v1
+status: frozen_pre_execution
+frozen_at_utc: 2026-08-29T07:09:55Z
+research_only: true
+
+purpose: >-
+  Create a development-only ResNet Sentinel policy without using PTB-XL fold 10,
+  SPH, or any future external lockbox for fitting or threshold selection.
+
+model:
+  member_id: resnet1d-seed2026
+  source_artifact_model_name: resnet1d_refit_folds1-8_seed2026
+  architecture: resnet1d
+  seed: 2026
+  selection_rule: development_selected_primary_architecture_and_first_fixed_seed
+  checkpoint_sha256: d3b8a19ab891db34afa6039179edab9847a8812e466a65c4cb408df12b402b35
+  demo_binding:
+    path: artifacts/demo/ptbxl_matched_equal_budget_v1/resnet1d-seed2026.coverage80.demo-binding.json
+    file_sha256: cea592df221a2821c5f29cec5f8e0175aabe997da6836f22ab28acb36dbf3b14
+  historical_policy:
+    path: artifacts/demo/ptbxl_matched_equal_budget_v1/resnet1d-seed2026.coverage80.demo-policy.json
+    file_sha256: 539d9e7dfc84edc49ab285775cdd0f6e93b2f5bb804c6fe7be7d00bc2aff4d42
+    use: comparison_only_not_reused_for_vnext_fitting
+
+source_prediction:
+  role: ptbxl_fold9_source_calibration_pool
+  npz_path: runs/release/ptbxl_matched_equal_budget_v1/fold9_predictions/resnet1d-seed2026.fold9.npz
+  npz_sha256: 2e306a5e648dd48041381e275184a19af9096843fb48bf986d18a8ae5e3bd5e1
+  sidecar_path: runs/release/ptbxl_matched_equal_budget_v1/fold9_predictions/resnet1d-seed2026.fold9.json
+  sidecar_sha256: 00fd0cda224b2bd5c886b86c43f79b544b418b6947981949eccb5ece3a27bf90
+  expected_records: 2146
+  label_order: [NORM, MI, STTC, CD, HYP]
+
+patient_split:
+  unit: patient_id
+  algorithm: >-
+    sha256(utf8(salt + "|" + base10_patient_id)); take the first 8 digest bytes
+    as an unsigned big-endian integer; divide by 2^64
+  salt: trust-sentinel-v1
+  ranges:
+    decision_fit: "[0.0,0.4)"
+    conformal_and_ood_threshold_fit: "[0.4,0.8)"
+    source_validation: "[0.8,1.0)"
+  expected:
+    decision_fit:
+      records: 847
+      patients: 751
+      positive_records: {NORM: 354, MI: 209, STTC: 230, CD: 202, HYP: 112}
+    conformal_and_ood_threshold_fit:
+      records: 834
+      patients: 757
+      positive_records: {NORM: 385, MI: 214, STTC: 188, CD: 189, HYP: 111}
+    source_validation:
+      records: 465
+      patients: 409
+      positive_records: {NORM: 216, MI: 117, STTC: 110, CD: 104, HYP: 45}
+  design_provenance: >-
+    The 40/40/20 proportions were chosen after a label-count feasibility check
+    only and before viewing any split-specific probabilities, scores, thresholds,
+    or performance metrics. This is source-domain development, not confirmation.
+
+decision_fit:
+  temperature_scaling: single_positive_temperature_binary_nll
+  classification_thresholds: per_label_maximum_f1
+  classification_threshold_tie_rule: maximum_f1_then_closest_to_0.5_then_higher_threshold
+  legacy_entropy_gate:
+    method: mean_normalized_binary_entropy
+    target_coverage: 0.8
+    tie_rule: retain_all_scores_less_than_or_equal_to_frozen_order_statistic
+
+conformal:
+  method: labelwise_binary_split_conformal
+  alpha: 0.1
+  fit_role: conformal_and_ood_threshold_fit
+  coverage_scope: labelwise_marginal_under_exchangeability
+  individual_certainty_guarantee: false
+
+open_world:
+  primary_method: shrinkage_mahalanobis_embedding_distance
+  embedding: frozen_resnet_preclassifier_global_average_pool
+  reference_role: ptbxl_folds_1_to_8_training_reference
+  threshold_role: conformal_and_ood_threshold_fit
+  threshold_inlier_coverage: 0.95
+  shrinkage: 0.1
+  ridge: 0.000001
+  target_site_fitting: forbidden
+
+source_validation:
+  tuning_allowed: false
+  report:
+    - labelwise_conformal_coverage_and_set_size
+    - legacy_gate_coverage
+    - hamming_loss_and_exact_match_at_frozen_thresholds
+    - auroc_average_precision_brier_ece15
+    - ood_source_false_rejection
+  minimum_positive_records_for_label_statement: 20
+
+forbidden_fit_or_selection_sources:
+  - ptbxl_fold10
+  - sph
+  - future_external_observed_sites
+  - future_external_lockbox_sites
+
+execution:
+  require_clean_committed_revision: true
+  require_verified_input_hashes: true
+  output_root: artifacts/trust_sentinel/source_calibration_v1
+  output_root_must_be_absent: true
+  automatic_publication: false
+  raw_ids_or_row_arrays_public: false
+
+claims:
+  scope: retrospective_source_domain_development_only
+  limitations:
+    - no_external_lockbox_evaluation
+    - no_clinical_validation
+    - conformal_coverage_is_marginal_not_individual
+    - ood_score_does_not_identify_unknown_disease
+    - thresholds_are_provisional_research_values

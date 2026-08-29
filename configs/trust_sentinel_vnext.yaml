@@ -1,0 +1,144 @@
+schema_version: 1
+protocol_id: trust-sentinel-vnext-dev-v1
+status: active_development
+research_only: true
+
+baseline:
+  immutable: true
+  git_commit: 2188862d0f258d98ca5b18a0fb655760929a97b3
+  ptbxl_protocol:
+    path: configs/protocol.yaml
+    sha256: d630ccb99569513082ccaaafe1b0117f5fe1567a505c600add9c0a79b64c51c8
+  sph_transport_protocol:
+    path: configs/external_transport_sph_frozen_r2.yaml
+    sha256: 840acb758d50dbf1a04bf704b16a58d4d29d668370ce7ef91ef7a44860bf311b
+  public_result_snapshot:
+    path: reports/FINAL_RESULTS_PUBLIC.md
+    sha256: 895c707ec4de99c3995c1425fa56a3490d35ebd26f16be638d772b8eccb3705a
+  restrictions:
+    - do_not_modify_or_supersede_sealed_ptbxl_or_sph_artifacts
+    - ptbxl_fold10_is_previously_observed
+    - sph_is_previously_observed
+    - neither_ptbxl_fold10_nor_sph_is_a_vnext_lockbox
+
+input_contract:
+  acquisition: resting_simultaneous_12_lead
+  lead_order: [I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6]
+  physical_units: mV
+  canonical_sampling_frequency_hz: 100
+  canonical_duration_seconds: 10
+  canonical_samples_per_lead: 1000
+  canonical_shape: [12, 1000]
+  resampling_policy: adapter_must_be_explicit_versioned_and_audited
+  lead_reversal_policy: detect_and_reacquire_never_silently_correct
+
+decision_contract:
+  state_order:
+    - INVALID_INPUT
+    - REACQUIRE
+    - UNSUPPORTED_INPUT
+    - ABSTAIN
+    - PREDICTION_ALLOWED
+  predictions_exposed_only_for: PREDICTION_ALLOWED
+  component_failure_policy: fail_closed
+  required_components:
+    - input_validation
+    - signal_quality
+    - distribution_support
+    - calibrated_uncertainty
+    - release_integrity
+
+quality:
+  required_checks:
+    - finite_values
+    - shape
+    - lead_identity
+    - sampling_frequency
+    - duration
+    - physical_units
+    - flatline
+    - clipping
+    - spikes
+    - baseline_wander
+    - powerline_interference
+    - high_frequency_noise
+    - probable_limb_lead_reversal
+  provisional_research_targets:
+    unacceptable_recording_sensitivity: 0.95
+    deterministic_severe_corruptions_accepted: 0
+  targets_are_clinical_standards: false
+
+uncertainty:
+  baseline_methods:
+    - frozen_entropy_gate
+    - ensemble_disagreement
+  candidate_method: labelwise_split_conformal
+  per_label_states: [SUPPORTED, NOT_SUPPORTED, UNCERTAIN]
+  calibration_role: patient_separated_source_calibration
+  invalidate_on_changes:
+    - model
+    - preprocessing
+    - label_ontology
+    - calibration_population
+    - decision_policy
+  provisional_research_tolerances_percentage_points:
+    overall_coverage_lower_bound_gap: 2
+    adequate_label_or_subgroup_lower_bound_gap: 5
+
+open_world:
+  baselines:
+    - normalized_bernoulli_entropy
+    - energy_score
+    - shrinkage_mahalanobis_embedding_distance
+  evaluation_axes:
+    - semantic_unknown
+    - mixed_known_unknown
+    - signal_corruption
+    - unseen_site_or_device
+    - acquisition_shift
+    - reduced_leads
+  provisional_research_targets:
+    severe_ood_recall: 0.90
+    maximum_clean_false_rejection: 0.05
+  target_site_fitting: forbidden_in_zero_adaptation_track
+
+data_roles:
+  ptbxl_folds_1_to_8: source_development
+  ptbxl_fold_9: source_calibration
+  ptbxl_fold_10: previously_observed_baseline_only
+  sph: previously_observed_transport_only
+  future_external_sources:
+    policy: manifest_hash_and_assign_roles_before_model_results
+    exclude_overlapping_ptb_and_ptbxl_records: true
+    preserve_native_labels: true
+    shared_ontology_requires_cardiology_review: true
+    reserve_at_least_one_untouched_site_lockbox: true
+
+release:
+  bundle_mode: immutable_content_addressed
+  startup_integrity_failure: service_not_ready
+  required_lineage:
+    - dataset_snapshot
+    - experiment_run
+    - checkpoint
+    - calibration_policy
+    - quality_policy
+    - distribution_policy
+    - evaluation
+    - release
+  public_waveform_or_row_level_artifacts: forbidden
+  automatic_model_retraining: forbidden
+  automatic_publication: false
+
+claims:
+  allowed_scope: retrospective_research_and_education_only
+  forbidden:
+    - diagnosis
+    - treatment_recommendation
+    - replaces_cardiologist
+    - clinical_validation
+    - clinical_safety
+    - medical_device
+    - individual_probability_guarantee
+    - unknown_disease_discovery
+    - causal_explanation

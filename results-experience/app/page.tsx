@@ -1,6 +1,7 @@
 import { MotionControl } from "./components/ExperienceMotion";
 import { ResultsUniverse } from "./components/ResultsUniverse";
 import {
+  FailureLabSection,
   MetricComparisonSection,
   ResearchSafetySection,
   TransportCohortSection,
@@ -91,6 +92,7 @@ export default function Home() {
         <div className="nav-actions">
           <a href="#method">Method</a>
           <a href="#evidence">Results</a>
+          <a href="#failure-lab">Failure lab</a>
           <MotionControl />
         </div>
       </nav>
@@ -220,6 +222,8 @@ export default function Home() {
           </p>
         </aside>
       </section>
+
+      <FailureLabSection />
 
       <ResearchSafetySection />
 

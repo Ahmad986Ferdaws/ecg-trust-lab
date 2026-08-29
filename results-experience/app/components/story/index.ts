@@ -1,4 +1,5 @@
 export { MetricComparisonSection } from "./MetricComparisonSection";
+export { FailureLabSection } from "./FailureLabSection";
 export { TransportCohortSection } from "./TransportCohortSection";
 export {
   ResearchSafetySection,

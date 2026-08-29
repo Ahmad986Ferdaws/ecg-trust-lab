@@ -22,7 +22,7 @@ from ecg_trust.demo_backend import (
 
 
 class FakeBackend:
-    def __init__(self) -> None:
+    def __init__(self, *, abstain: bool = False) -> None:
         self.policy = FrozenDecisionPolicy(
             temperature=1.25,
             classification_thresholds=(0.4, 0.5, 0.6, 0.5, 0.7),
@@ -40,6 +40,7 @@ class FakeBackend:
         )
         self.artifact_provenance = {"checkpoint_sha256": "d" * 64, "seed": 2026}
         self.seen_paths: list[Path] = []
+        self.abstain = abstain
 
     def predict_record(
         self,
@@ -70,10 +71,14 @@ class FakeBackend:
             raw_probabilities=raw,
             calibrated_probabilities=calibrated,
             threshold_predictions=(True, False, False, False, False),
-            uncertainty=0.25,
+            uncertainty=0.95 if self.abstain else 0.25,
             gate_threshold=self.policy.uncertainty_threshold,
-            decision="accept",
-            decision_reason="uncertainty_within_frozen_fold9_gate",
+            decision="abstain" if self.abstain else "accept",
+            decision_reason=(
+                "uncertainty_exceeds_frozen_fold9_gate"
+                if self.abstain
+                else "uncertainty_within_frozen_fold9_gate"
+            ),
             source=str(path),
             attribution=attribution,
             artifact_provenance=self.artifact_provenance,
@@ -119,6 +124,8 @@ def test_index_metadata_and_local_plotly_are_self_contained() -> None:
     assert page.status_code == 200
     assert "Research use only" in page.text
     assert "ECG Trust Lab" in page.text
+    assert "historical entropy-gated research baseline" in page.text
+    assert "not ECG Trust Sentinel" in page.text
     assert '<link rel="icon" href="data:,">' in page.text
     assert "type: 'scatter'" in page.text
     assert "scattergl" not in page.text.casefold()
@@ -176,8 +183,45 @@ def test_upload_prediction_returns_waveform_and_hides_temporary_path(tmp_path: P
     assert len(payload["waveform"]["values"][0]) == 1000
     assert payload["attribution"]["target_label"] == "MI"
     assert list(payload["calibrated_probabilities"]) == list(SUPERCLASSES)
+    assert payload["predictions_exposed"] is True
+    assert payload["system_scope"] == "legacy_entropy_baseline_not_trust_sentinel"
     assert backend.seen_paths and not backend.seen_paths[0].parent.exists()
     assert str(backend.seen_paths[0]) not in response.text
+
+
+def test_abstaining_legacy_demo_withholds_every_label_level_result(tmp_path: Path) -> None:
+    header, signal = _wfdb_pair(tmp_path)
+    backend = FakeBackend(abstain=True)
+    with (
+        TestClient(create_app(backend=backend)) as client,
+        header.open("rb") as header_handle,
+        signal.open("rb") as signal_handle,
+    ):
+        response = client.post(
+            "/predict",
+            files={
+                "header": (header.name, header_handle, "text/plain"),
+                "signal": (signal.name, signal_handle, "application/octet-stream"),
+            },
+            data={"attribution_method": "grad_cam", "attribution_target": "MI"},
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["decision"]["status"] == "ABSTAIN"
+    assert payload["predictions_exposed"] is False
+    assert payload["system_scope"] == "legacy_entropy_baseline_not_trust_sentinel"
+    assert "waveform" in payload
+    assert not {
+        "raw_logits",
+        "raw_probabilities",
+        "calibrated_probabilities",
+        "threshold_predictions",
+        "positive_labels",
+        "uncertainty",
+        "gate_threshold",
+        "attribution",
+    }.intersection(payload)
 
 
 def test_upload_rejects_mismatched_and_path_bearing_names(tmp_path: Path) -> None:
@@ -247,13 +291,7 @@ def test_example_manifest_is_strict_and_resolves_relative_records(tmp_path: Path
     _wfdb_pair(tmp_path, "sample")
     manifest = tmp_path / "examples.json"
     manifest.write_text(
-        json.dumps(
-            {
-                "examples": [
-                    {"id": "sample", "label": "Sample", "record_path": "sample"}
-                ]
-            }
-        ),
+        json.dumps({"examples": [{"id": "sample", "label": "Sample", "record_path": "sample"}]}),
         encoding="utf-8",
     )
 

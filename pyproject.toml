@@ -21,6 +21,7 @@ dependencies = [
   "pandas>=2.3",
   "plotly>=6.9.0",
   "psutil>=7.0",
+  "pydantic>=2.13,<3",
   "pyarrow>=20.0",
   "python-multipart>=0.0.32",
   "pyyaml>=6.0",
