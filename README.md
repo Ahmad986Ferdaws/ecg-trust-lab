@@ -33,9 +33,11 @@ audit, governance, and future-study scaffolds described in that document. It
 is still development infrastructure: source calibration is not a promoted
 release, its original unfamiliar-input field remains permanently pending, and
 the system is not authorized for patient care. A separate, immutable
-[OOD-completion protocol](docs/TRUST_SENTINEL_OOD_COMPLETION_PROTOCOL.md) now
-defines how source-support embeddings may be fitted and evaluated without
-rewriting that source artifact.
+[OOD-completion protocol](docs/TRUST_SENTINEL_OOD_COMPLETION_PROTOCOL.md) and
+[completed result](docs/TRUST_SENTINEL_OOD_COMPLETION_RESULT.md) preserve the
+one-shot source-support evaluation without rewriting that source artifact. The
+experiment completed successfully but missed its preregistered support gate;
+it is not an OOD-validation or clinical-validation result.
 
 ## Demo walkthrough
 
@@ -96,12 +98,18 @@ demonstration, not a clinical-use demonstration.
   roles. Its untuned 465-ECG source-validation point estimate was macro AUROC
   `0.914492`. Embedding-based unfamiliar-input detection remains pending, so
   this is explicitly not a complete release or clinical validation.
-- The separate OOD-completion v1 preregistration and implementation are frozen
-  before ECG embedding access. They bind patient-disjoint R/B/C roles, two
-  exact CUDA FP32 passes, private row-level artifacts, a 10,000-replicate
-  patient-cluster interval, and aggregate-only results. No OOD-positive cohort
-  is included, so this work cannot validate OOD detection or unknown-disease
-  discovery.
+- The separate OOD-completion v1 one-shot run is complete. On 465 ECGs from
+  409 patient-disjoint source-validation patients, it retained 440 and rejected
+  25: 94.62% support coverage and 5.38% false rejection. Its one-sided 95%
+  patient-cluster upper bound was 7.30%, above the frozen 5% maximum, so the
+  source-support target was missed and the bundle is not research-eligible.
+  Three read-only audits independently reproduced the result. No OOD-positive
+  cohort was evaluated, so OOD detection and unknown-disease discovery remain
+  unvalidated; see the
+  [aggregate result note](docs/TRUST_SENTINEL_OOD_COMPLETION_RESULT.md).
+- The OOD implementation gate passed all 1,132 repository tests, Ruff, and
+  strict mypy before the one-shot run. The generated private artifacts remain
+  local and Git-ignored.
 - The historical August 9 r3 repository gate passed all 434 tests, Ruff, and
   strict mypy. The current post-SPH repository gate separately passed all 494
   tests, Ruff, and strict mypy. Pytest emitted one upstream Starlette/httpx

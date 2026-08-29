@@ -1,11 +1,10 @@
 import { MotionControl } from "./components/ExperienceMotion";
 import { ResultsUniverse } from "./components/ResultsUniverse";
-import {
-  FailureLabSection,
-  MetricComparisonSection,
-  ResearchSafetySection,
-  TransportCohortSection,
-} from "./components/story";
+import { FailureLabSection } from "./components/story/FailureLabSection";
+import { MetricComparisonSection } from "./components/story/MetricComparisonSection";
+import { ResearchSafetySection } from "./components/story/ResearchSafetySection";
+import { SourceSupportSection } from "./components/story/SourceSupportSection";
+import { TransportCohortSection } from "./components/story/TransportCohortSection";
 import { COHORTS, SOURCE_POPULATIONS } from "../lib/results";
 
 const ptb = COHORTS.ptbxl_fold10;
@@ -88,10 +87,13 @@ export default function Home() {
           <span>PTB-XL</span>
           <i aria-hidden="true">→</i>
           <span>SPH</span>
+          <i aria-hidden="true">→</i>
+          <span>Support gate</span>
         </div>
         <div className="nav-actions">
           <a href="#method">Method</a>
           <a href="#evidence">Results</a>
+          <a href="#source-support">Support gate</a>
           <a href="#failure-lab">Failure lab</a>
           <MotionControl />
         </div>
@@ -190,6 +192,8 @@ export default function Home() {
       </div>
 
       <TransportCohortSection />
+
+      <SourceSupportSection />
 
       <section className="verdict" aria-labelledby="verdict-title">
         <header>

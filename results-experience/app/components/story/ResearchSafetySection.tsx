@@ -23,9 +23,9 @@ const DEFAULT_PRINCIPLES: SafetyPrinciple[] = [
   },
   {
     index: "02",
-    title: "External transport ≠ validation",
+    title: "Stress tests ≠ validation",
     description:
-      "SPH transport probes robustness under dataset shift; it does not establish clinical safety or efficacy.",
+      "SPH transport and PTB-XL source-support analysis probe narrow failure modes; neither establishes clinical safety or efficacy.",
   },
   {
     index: "03",
@@ -78,8 +78,9 @@ export function ResearchSafetySection({
           <p>
             Across the audited experiments, the 1D ResNet has the stronger
             discrimination results of the two tested architectures. Calibration
-            conclusions are narrower, and any clinical claim requires prospective,
-            governed validation.
+            conclusions are narrower, the source-support gate missed its frozen
+            target, and any clinical claim requires prospective, governed
+            validation.
           </p>
         </div>
       </div>

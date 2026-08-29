@@ -1,6 +1,7 @@
 export { MetricComparisonSection } from "./MetricComparisonSection";
 export { FailureLabSection } from "./FailureLabSection";
 export { TransportCohortSection } from "./TransportCohortSection";
+export { SourceSupportSection } from "./SourceSupportSection";
 export {
   ResearchSafetySection,
   type SafetyPrinciple,

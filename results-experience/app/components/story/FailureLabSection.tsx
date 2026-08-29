@@ -354,7 +354,7 @@ export function FailureLabSection() {
                 aria-labelledby="failure-waveform-title failure-waveform-description"
               >
                 <title id="failure-waveform-title">
-                  Synthetic 12-lead preview of {selected.label.toLowerCase()}
+                  {`Synthetic 12-lead preview of ${selected.label.toLowerCase()}`}
                 </title>
                 <desc id="failure-waveform-description">
                   Deterministic teaching waveform at {severityLabel.toLowerCase()} illustrative

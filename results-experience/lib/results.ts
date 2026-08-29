@@ -89,6 +89,48 @@ export interface ScientificCaveat {
   readonly severity: "critical" | "important" | "context";
 }
 
+export interface SourceSupportCompletion {
+  readonly protocol: string;
+  readonly status: "SOURCE_SUPPORT_GATE_TARGET_MISSED";
+  readonly completed: string;
+  readonly researchBundleEligible: false;
+  readonly roles: {
+    readonly reference: SourceSupportRole;
+    readonly thresholdFit: SourceSupportRole;
+    readonly sourceValidation: SourceSupportRole;
+  };
+  readonly validation: {
+    readonly retained: number;
+    readonly rejected: number;
+    readonly supportCoverage: number;
+    readonly recordFalseRejection: number;
+    readonly patientEqualizedFalseRejection: number;
+    readonly patientsWithAnyRejection: number;
+    readonly patientAnyFalseRejection: number;
+    readonly twoSided95: readonly [number, number];
+    readonly oneSidedUpper95: number;
+    readonly targetMaximum: number;
+    readonly thresholdTies: number;
+  };
+  readonly thresholdFit: {
+    readonly retained: number;
+    readonly rejected: number;
+    readonly falseRejection: number;
+  };
+  readonly bootstrapReplicates: number;
+  readonly oodPositiveEvaluation: "NOT_EVALUATED";
+  readonly claimScope: "retrospective_ptbxl_source_domain_development_only";
+}
+
+export interface SourceSupportRole {
+  readonly code: "R" | "B" | "C";
+  readonly label: string;
+  readonly purpose: string;
+  readonly folds: string;
+  readonly records: number;
+  readonly patients: number;
+}
+
 export const MODELS = {
   resnet1d: {
     id: "resnet1d",
@@ -212,6 +254,66 @@ export const SOURCE_POPULATIONS = {
     description: "Complete official SPH metadata population before frozen cohort filters.",
   },
 } as const;
+
+/**
+ * Aggregate-only output from the immutable one-shot source-support completion.
+ * No row-level identity, embedding, score, waveform, or filesystem path is
+ * included in this public presentation object.
+ */
+export const SOURCE_SUPPORT_COMPLETION = {
+  protocol: "trust-sentinel-ood-completion-v1",
+  status: "SOURCE_SUPPORT_GATE_TARGET_MISSED",
+  completed: "2026-08-29",
+  researchBundleEligible: false,
+  roles: {
+    reference: {
+      code: "R",
+      label: "Reference",
+      purpose: "Fit the source-reference mean and covariance from frozen embeddings",
+      folds: "PTB-XL folds 1–8",
+      records: 17_084,
+      patients: 14_823,
+    },
+    thresholdFit: {
+      code: "B",
+      label: "Threshold fit",
+      purpose: "Fix rank 794 before validation; reject only above it",
+      folds: "PTB-XL fold 9",
+      records: 834,
+      patients: 757,
+    },
+    sourceValidation: {
+      code: "C",
+      label: "Source validation",
+      purpose: "Open once and preserve the observed result",
+      folds: "PTB-XL fold 9",
+      records: 465,
+      patients: 409,
+    },
+  },
+  validation: {
+    retained: 440,
+    rejected: 25,
+    supportCoverage: 0.946236559139785,
+    recordFalseRejection: 0.053763440860215055,
+    patientEqualizedFalseRejection: 0.04665851670741646,
+    patientsWithAnyRejection: 22,
+    patientAnyFalseRejection: 0.05378973105134474,
+    twoSided95: [0.03239566265733224, 0.07725321888412018],
+    oneSidedUpper95: 0.07296137339055794,
+    targetMaximum: 0.05,
+    thresholdTies: 0,
+  },
+  thresholdFit: {
+    retained: 794,
+    rejected: 40,
+    falseRejection: 0.047961630695443645,
+  },
+  bootstrapReplicates: 10_000,
+  oodPositiveEvaluation: "NOT_EVALUATED",
+  claimScope: "retrospective_ptbxl_source_domain_development_only",
+} as const satisfies SourceSupportCompletion;
+
 export const COHORTS = {
   ptbxl_fold10: {
     id: "ptbxl_fold10",
@@ -380,6 +482,18 @@ export const SCIENTIFIC_CAVEATS = [
     severity: "critical",
   },
   {
+    id: "source-support-target-missed",
+    title: "Source-support target missed",
+    detail: "The one-shot PTB-XL source-validation false-rejection upper bound was 7.30%, above the frozen 5.00% maximum; the bundle is not research-eligible.",
+    severity: "critical",
+  },
+  {
+    id: "ood-positive-not-evaluated",
+    title: "OOD detection not evaluated",
+    detail: "No OOD-positive cohort was included, so unfamiliar-disease, unseen-site, unseen-device, OOD recall, OOD AUROC, and OOD average precision claims remain unsupported.",
+    severity: "critical",
+  },
+  {
     id: "auroc-not-accuracy",
     title: "AUROC is not accuracy",
     detail: "A macro AUROC of 0.921921 describes ranking discrimination across labels; it must not be presented as 92.2% diagnostic accuracy.",
@@ -428,10 +542,11 @@ export const RESULTS_STORY = {
   metrics: METRICS,
   labels: LABELS,
   sourcePopulations: SOURCE_POPULATIONS,
+  sourceSupportCompletion: SOURCE_SUPPORT_COMPLETION,
   cohorts: COHORTS,
   narrative: STUDY_NARRATIVE,
   caveats: SCIENTIFIC_CAVEATS,
   seeds: [2026, 2027, 2028],
   statistic: "mean ± sample standard deviation across three frozen seeds",
-  updatedFromAudit: "2026-08-22",
+  updatedFromAudit: "2026-08-29",
 } as const;

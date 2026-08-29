@@ -35,7 +35,13 @@ test("server-renders the complete Signal Ledger evidence experience", async () =
   const html = await response.text();
   assert.match(html, /<title>ECG Trust Lab — The Signal Ledger<\/title>/i);
   assert.match(html, /<link rel="icon" href="data:,"\s*\/?>/i);
-  assert.doesNotMatch(html, /og:image|twitter:image|localhost(?::\d+)?\/og\.png/i);
+  assert.match(html, /og:image/i);
+  assert.match(html, /twitter:image:alt/i);
+  assert.match(
+    html,
+    /https:\/\/ecg-trust-results-motion\.byw-123\.chatgpt\.site\/og\.png/i,
+  );
+  assert.doesNotMatch(html, /localhost(?::\d+)?\/og\.png/i);
   assert.match(html, /A ResNet kept its ranking lead/);
   assert.match(html, /Study sequence from training to transport/);
   assert.match(html, /Discrimination and calibration results/);
@@ -48,6 +54,12 @@ test("server-renders the complete Signal Ledger evidence experience", async () =
   assert.match(html, /15,193/);
   assert.match(html, /12 leads × 10 seconds/);
   assert.match(html, /No SPH tuning/);
+  assert.match(html, /id="source-support"/);
+  assert.match(html, /The experiment completed\. The gate did not pass\./);
+  assert.match(html, /94\.62%/);
+  assert.match(html, /Source-support target missed/);
+  assert.match(html, /NOT EVALUATED/);
+  assert.match(html, /No tuning · no retry/);
   assert.match(html, /id="failure-lab"/);
   assert.match(html, /Challenge the trust gates before trusting a score/);
   assert.match(html, /Illustrative synthetic scenario preview/);
@@ -84,6 +96,7 @@ test("ships audited data and a matte, evidence-bearing visual system", async () 
     storyStyles,
     failureLabSource,
     failureLabStyles,
+    sourceSupportSource,
   ] =
     await Promise.all([
       readFile(new URL("../lib/results.ts", import.meta.url), "utf8"),
@@ -108,16 +121,24 @@ test("ships audited data and a matte, evidence-bearing visual system", async () 
         ),
         "utf8",
       ),
+      readFile(
+        new URL(
+          "../app/components/story/SourceSupportSection.tsx",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
     ]);
 
-  await assert.rejects(
-    stat(new URL("../public/og.png", import.meta.url)),
-    (error) => error?.code === "ENOENT",
-  );
+  const socialPreview = await stat(new URL("../public/og.png", import.meta.url));
+  assert.ok(socialPreview.size > 100_000);
 
   assert.match(resultsSource, /mean: 0\.921921, sd: 0\.000913/);
   assert.match(resultsSource, /mean: 0\.930912, sd: 0\.000964/);
   assert.match(resultsSource, /records: 15_698, patients: 15_193/);
+  assert.match(resultsSource, /supportCoverage: 0\.946236559139785/);
+  assert.match(resultsSource, /oneSidedUpper95: 0\.07296137339055794/);
+  assert.match(resultsSource, /researchBundleEligible: false/);
   assert.match(
     resultsSource,
     /Neither the PTB-XL benchmark nor the SPH transport study establishes clinical validity/,
@@ -151,4 +172,10 @@ test("ships audited data and a matte, evidence-bearing visual system", async () 
     /(?:linear|radial)-gradient|backdrop-filter|box-shadow|animation\s*:/i,
   );
   assert.equal((failureLabSource.match(/id: "[a-z-]+"/g) ?? []).length, 9);
+  assert.match(sourceSupportSource, /OOD-positive evaluation/);
+  assert.match(sourceSupportSource, /result\.oodPositiveEvaluation/);
+  assert.doesNotMatch(
+    sourceSupportSource,
+    /patient_id|ecg_id|embedding|filesystem|source-validation-one-shot-claim/i,
+  );
 });
