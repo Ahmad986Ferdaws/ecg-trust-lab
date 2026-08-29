@@ -1,0 +1,454 @@
+schema_version: 1
+protocol_id: trust-sentinel-ood-external-v2-parent
+status: frozen_parent_preregistration_pre_download
+drafted_on: "2026-08-29"
+frozen_at_utc: "2026-08-29T17:36:32Z"
+research_only: true
+
+purpose: >-
+  Evaluate the exact sealed Trust Sentinel OOD-completion-v1 distribution
+  policy, without refitting or threshold adjustment, on two newly declared
+  external acquisition and population domains while separately evaluating the
+  frozen signal-quality gate on natural technical-quality labels.
+
+design_history:
+  written_after_v1_result_was_observed: true
+  v1_observed_status: SOURCE_SUPPORT_GATE_TARGET_MISSED
+  v1_observed_source_record_false_rejection_rate: 0.053763440860215055
+  v1_observed_one_sided_95_upper_bound: 0.07296137339055794
+  independent_of_v1_claim: false
+  required_disclosure: >-
+    This parent protocol was designed after the aggregate v1 result was known.
+    It is a new external stress-test protocol, not an independent replication
+    or a retry of v1.
+  v1_c_influence:
+    allowed: [historical_aggregate_context_only]
+    forbidden:
+      - waveform_access
+      - embedding_access
+      - row_identity_access
+      - score_access
+      - subgroup_or_error_analysis
+      - detector_fit
+      - threshold_fit
+      - method_selection
+      - operating_point_selection
+
+immutability:
+  v1_output_must_remain_byte_identical: true
+  v1_distribution_policy_reused_exactly: true
+  v1_detector_refit: forbidden
+  v1_threshold_change: forbidden
+  external_target_fitting_or_adaptation: forbidden
+  post_external_access_protocol_change: forbidden
+  unfavorable_results_must_be_retained: true
+
+bindings:
+  v1_completion_bundle:
+    output_root: artifacts/trust_sentinel/ood_completion_v1
+    verifier: ecg_trust.ood_completion.verify_ood_completion_bundle
+    eligibility_verifier_must_not_be_substituted: true
+    result:
+      path: artifacts/trust_sentinel/ood_completion_v1/ood-completion-result.json
+      file_sha256: sha256:844bbe7f2a85b229f553cd12df14f7db712b9e0090fe6fd6823319a557777c12
+      artifact_sha256: sha256:dd76258b30c95a3ac8f865da54973a42a93d0135caba09da0c6412267f041b53
+      required_status: SOURCE_SUPPORT_GATE_TARGET_MISSED
+      required_research_bundle_eligible: false
+    success_manifest:
+      path: artifacts/trust_sentinel/ood_completion_v1/success-manifest.json
+      file_sha256: sha256:2db65dabd06bc5dfcebd7f1d1556b45b012c8b05cf73c4384e46fc7416293206
+      artifact_sha256: sha256:6f97e0697d661372e62f4aee9245f26014312e6a1d681615314bc9fcb77c5732
+    distribution_policy:
+      path: artifacts/trust_sentinel/ood_completion_v1/distribution-policy.json
+      file_sha256: sha256:817d6e5c4a3058c064cdc7bdceafb774c7ea4bb0b6cf725be1b8f12c7aae9c1c
+      artifact_sha256: sha256:d544c28ad18b764e3e30cc316b092a41d75125a8334f1d41ed58c31ec37568db
+      method: shrinkage_mahalanobis_embedding_distance
+      threshold: 270.9668613705653
+      threshold_comparison: score_strictly_greater_than_threshold
+      embedding_dimension: 512
+      shrinkage: 0.1
+      ridge: 0.000001
+  v1_checkpoint:
+    path: runs/refit/ptbxl_matched_equal_budget_v1/resnet1d_refit_folds1-8_seed2026/attempt00/final.ckpt
+    file_sha256: sha256:d3b8a19ab891db34afa6039179edab9847a8812e466a65c4cb408df12b402b35
+  v1_resolved_config:
+    path: runs/refit/ptbxl_matched_equal_budget_v1/resnet1d_refit_folds1-8_seed2026/attempt00/resolved_refit_config.json
+    file_sha256: sha256:d00643dadc1c27a241da5c100bccd45f314fe0b94b16c9e3ce9d88ed22656d49
+    inner_config_sha256: sha256:003125474caa877585e609b7b248727aa3ecaf7c716d8c249966ff4b9188e71e
+  normalization:
+    path: artifacts/preprocessing/ptbxl_v1.0.3_train_folds_1-7_normalization.json
+    file_sha256: sha256:4a6cb489098361d8221403c14871c242672c346975af3a07f731ceac97264363
+    refit_on_external_data: false
+  signal_quality_implementation:
+    path: src/ecg_trust/quality/signal_quality.py
+    file_sha256: sha256:ee86c6f979b2b44f8dceacb3d5266b917428483c8d79a518a05d9e04e3a718a9
+    config_version: canonical-12x1000-mv-v1
+    threshold_override: forbidden
+  dependency_lock:
+    path: uv.lock
+    file_sha256: sha256:73234642bb4982a0e2cb4e25774f8d82e7a51a650033faec2297d45032da2d07
+  project_manifest:
+    path: pyproject.toml
+    file_sha256: sha256:e1de755829678d588784bbcc34becc8c031c742d9b3f05458e76e67f577da3cd
+
+fixed_selection:
+  detector_candidates: [sealed_v1_distribution_policy_only]
+  model_candidates: [resnet1d-seed2026-only]
+  score_ensembling: forbidden
+  hyperparameter_search: forbidden
+  threshold_calibration: forbidden
+  source_or_external_recalibration: forbidden
+  external_label_use_for_distribution_decisions: forbidden
+
+external_sources:
+  physionet_challenge_2011_set_a:
+    role: natural_technical_quality_primary_and_external_ood_positive
+    title: Improving the Quality of ECGs Collected using Mobile Phones
+    publisher: PhysioNet
+    version: 1.0.0
+    subset: set-a
+    version_url: https://physionet.org/content/challenge-2011/1.0.0/
+    subset_url: https://physionet.org/content/challenge-2011/1.0.0/set-a/
+    files_url: https://physionet.org/files/challenge-2011/1.0.0/set-a/
+    license: Open Data Commons Attribution License v1.0
+    license_spdx: ODC-By-1.0
+    access: open
+    expected_records: 1000
+    expected_sampling_frequency_hz: 500
+    expected_duration_seconds: 10
+    expected_leads: 12
+    expected_resolution_bits: 16
+    acquisition_note: conventional_ecg_machines_not_original_mobile_hardware
+    record_selection:
+      include: every_official_set_a_wfdb_header_data_pair_exactly_once
+      identity: official_set_a_record_stem
+      csv_txt_representation: ignored_as_redundant_signal_representation
+      demographic_filtering: forbidden
+      quality_filtering_before_quality_evaluation: forbidden
+    patient_identity:
+      available: false
+      record_id_must_not_be_claimed_as_patient_id: true
+    natural_quality_reference:
+      primary: true
+      group_1: acceptable
+      group_2: indeterminate_excluded_from_primary_quality_metrics
+      group_3: unacceptable
+      label_use: quality_evaluation_only
+
+  zzu_pecg_v1:
+    role: pediatric_population_and_acquisition_ood_positive
+    title: A pediatric ECG database with disease diagnosis covering 11643 children
+    publisher: figshare
+    version: 1
+    article_id: 27078763
+    version_doi: https://doi.org/10.6084/m9.figshare.27078763.v1
+    official_url: https://figshare.com/articles/dataset/A_pediatric_ECG_database_with_disease_diagnosis_covering_11643_children/27078763
+    license: Creative Commons Attribution 4.0 International
+    license_spdx: CC-BY-4.0
+    access: open
+    upstream_counts:
+      records_total: 14190
+      patients_total: 11643
+      twelve_lead_records: 12334
+      nine_lead_records: 1856
+    expected_sampling_frequency_hz: 500
+    source_duration_seconds_range: [5, 120]
+    age_years_range: [0, 14]
+    record_selection:
+      lead_count: exactly_12
+      minimum_source_samples: 5000
+      minimum_duration_seconds: 10
+      duration_or_lead_failure: exclude_before_waveform_decode_from_header_metadata
+      include: all_and_only_records_meeting_the_above_contract
+      demographic_or_disease_filtering: forbidden
+      selected_record_and_patient_counts: >-
+        Bind exact counts and the ordered identity hash in the pre-inference
+        child execution contract after metadata-only inventory and before any
+        waveform decoding, quality scoring, embedding extraction, or model result.
+    patient_identity:
+      available: true
+      unit: dataset_scoped_patient_id
+    disease_labels:
+      allowed_use: descriptive_upstream_provenance_only
+      forbidden_uses:
+        - ood_positive_definition
+        - detector_fit
+        - threshold_fit
+        - record_selection
+        - disease_performance_claim
+
+forbidden_sources:
+  ptbxl_fold9_source_validation_c:
+    reason: already_opened_one_shot_v1_cohort
+    patient_hash_range: "[0.8,1.0)"
+    waveform_embedding_score_or_identity_access: forbidden
+  ptbxl_fold10:
+    reason: previously_observed_final_test
+  sph:
+    reason: previously_observed_external_transport_stress_test
+  physionet_challenge_2011_set_b:
+    reason: not_selected_by_parent_protocol
+  physionet_challenge_2011_set_c:
+    reason: not_public_and_not_selected_by_parent_protocol
+  zzu_nine_lead_records:
+    reason: incompatible_input_contract
+  zzu_records_shorter_than_10_seconds:
+    reason: padding_or_signal_fabrication_forbidden
+
+canonicalization:
+  lead_order: [I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6]
+  physical_units: mV
+  require_named_unique_leads: true
+  deterministic_reordering_by_exact_lead_names: allowed
+  missing_lead_derivation_or_imputation: forbidden
+  silent_amplitude_rescaling: forbidden
+  segment:
+    selection: first_10_seconds
+    source_samples_at_500_hz: 5000
+    timing: before_resampling
+    random_or_quality_based_window_selection: forbidden
+  resampling:
+    implementation: scipy.signal.resample_poly
+    up: 1
+    down: 5
+    axis: time
+    window: [kaiser, 5.0]
+    padtype: constant
+    target_sampling_frequency_hz: 100
+    target_samples_per_lead: 1000
+    output_dtype: float32
+    require_c_contiguous: true
+  quality_input: canonical_physical_mv_before_ptbxl_normalization
+  model_input: canonical_signal_after_unchanged_ptbxl_normalization
+
+evidence_separation:
+  input_contract_failure_state: INVALID_INPUT
+  quality_failure_state: REACQUIRE
+  distribution_failure_state: UNSUPPORTED_INPUT
+  uncertainty_failure_state: ABSTAIN
+  prediction_state: PREDICTION_ALLOWED
+  state_order:
+    - INVALID_INPUT
+    - REACQUIRE
+    - UNSUPPORTED_INPUT
+    - ABSTAIN
+    - PREDICTION_ALLOWED
+  distribution_scoring_population: quality_status_PASS_only
+  technical_quality_success_must_not_count_as_distribution_success: true
+  distribution_rejection_must_not_count_as_quality_success: true
+
+external_ood_definition:
+  unit: quality_passing_external_record
+  challenge_set_a: external_acquisition_and_population_domain
+  zzu_pecg: pediatric_population_and_external_acquisition_domain
+  every_quality_passing_selected_record_is_operational_ood_positive: true
+  native_disease_label_required: false
+  semantic_unknown_disease_interpretation: forbidden
+  ood_probability_interpretation: forbidden
+  claim_text: >-
+    OOD-positive means only that the record comes from a preregistered external
+    acquisition or population domain relative to the PTB-XL-fitted policy. It
+    does not mean that the record contains an unknown disease.
+
+runtime:
+  device: cuda:0
+  model_mode: eval
+  gradient_mode: inference_mode
+  autocast: false
+  tf32: false
+  torch_compile: false
+  deterministic_algorithms: true
+  cudnn_benchmark: false
+  batch_size: 128
+  num_workers: 4
+  shuffle: false
+  drop_last: false
+  full_embedding_passes_per_external_role: 2
+  pass_comparison: exact_alignment_and_embedding_tensor_sha256
+  mismatch_policy: fail_closed
+
+evaluation:
+  primary_endpoints:
+    challenge_group3_technical_block_sensitivity:
+      numerator: selected_group3_records_with_quality_status_REACQUIRE
+      denominator: all_selected_group3_records
+      direction: higher_is_better
+      minimum: 0.95
+      resampling_unit: record
+    challenge_group1_quality_pass_rate:
+      numerator: group1_records_with_quality_status_PASS
+      denominator: all_selected_group1_records
+      direction: higher_is_better
+      minimum: 0.90
+      resampling_unit: record
+    challenge_external_distribution_recall:
+      numerator: quality_PASS_selected_records_with_score_strictly_above_v1_threshold
+      denominator: all_quality_PASS_selected_records
+      direction: higher_is_better
+      minimum: 0.90
+      resampling_unit: record
+    zzu_external_distribution_recall:
+      numerator: quality_PASS_selected_records_with_score_strictly_above_v1_threshold
+      denominator: all_quality_PASS_selected_records
+      direction: higher_is_better
+      minimum: 0.90
+      resampling_unit: patient_cluster
+      replicate_statistic: record_weighted_recall
+  multiplicity:
+    family: exact_four_co_primary_endpoints
+    family_wise_alpha: 0.05
+    method: bonferroni
+    one_sided_alpha_per_endpoint: 0.0125
+    required_one_sided_confidence_level: 0.9875
+    all_four_endpoints_must_pass: true
+  bootstrap:
+    resamples: 10000
+    random_generator: numpy.random.Generator_PCG64
+    quantile_method: linear
+    lower_quantile_for_minimum_gates: 0.0125
+    challenge:
+      seed: 20260901
+      unit: record
+      record_order: ascending_official_record_stem_utf8
+      draw_rule: draw_n_records_with_replacement
+    zzu:
+      seed: 20260902
+      unit: patient_cluster
+      patient_order: ascending_canonical_dataset_scoped_patient_id
+      record_order_within_patient: ascending_official_record_identity_utf8
+      draw_rule: draw_n_patients_with_replacement_and_include_all_patient_records
+    nonfinite_empty_or_undefined_replicate_policy: fail_closed
+  hard_gates:
+    challenge_reference_label_alignment_complete: true
+    challenge_invalid_input_count: 0
+    challenge_group3_prediction_allowed_count: 0
+    skipped_selected_records: 0
+    target_site_fitting_performed: false
+    v1_policy_bytes_unchanged_before_and_after: true
+    exact_selected_input_inventory_verified_before_and_after: true
+    deterministic_repeated_embeddings_match: true
+    aggregate_only_publication_verified: true
+  secondary_report_only:
+    - quality_group_confusion_matrix_including_group2_as_indeterminate
+    - quality_reason_code_counts
+    - distribution_score_quantiles_by_dataset_and_quality_group
+    - record_level_distribution_recall_for_zzu
+    - patient_equalized_distribution_recall_for_zzu
+    - patient_any_distribution_recall_for_zzu
+    - final_five_state_route_counts
+    - exact_preprocessing_and_exclusion_counts
+  unsupported_metrics:
+    ood_auroc: NOT_EVALUATED_NO_EXTERNAL_IN_DISTRIBUTION_CONTROL
+    ood_average_precision: NOT_EVALUATED_NO_EXTERNAL_IN_DISTRIBUTION_CONTROL
+    unknown_disease_recall: NOT_EVALUATED
+    diagnostic_performance: NOT_EVALUATED
+
+one_shot_external_access:
+  preclaim_allowed:
+    - download_and_license_inventory
+    - file_size_and_checksum_verification
+    - header_and_nonwaveform_metadata_parsing
+    - challenge_reference_quality_label_parsing
+    - zzu_patient_role_and_lead_duration_inventory
+    - exact_ordered_selection_identity_hashing
+  preclaim_forbidden:
+    - waveform_sample_decode
+    - quality_policy_execution
+    - embedding_extraction
+    - distribution_scoring
+    - model_logits_or_probabilities
+    - endpoint_or_subgroup_metrics
+  prerequisites:
+    - parent_protocol_frozen_and_committed
+    - child_execution_contract_with_exact_input_hashes_frozen_and_committed
+    - exact_v1_bundle_verified
+    - quality_implementation_hash_verified
+    - output_root_absent
+    - clean_committed_revision
+  output_root: artifacts/trust_sentinel/ood_external_v2
+  output_root_must_be_absent: true
+  retained_armed_marker: external-access-armed.json
+  external_claim:
+    path: artifacts/trust_sentinel/.ood_external_v2.one-shot-claim.json
+    creation: atomic_create_new_no_overwrite
+    timing: after_durable_armed_marker_before_first_waveform_sample_decode
+    scope: both_selected_external_sources_in_one_claim
+    retention: permanent
+  retry_resume_or_second_inference: forbidden
+  postclaim_failure:
+    preserve_existing_evidence: true
+    emit_sanitized_failure_receipt_when_possible: true
+    success_manifest: forbidden
+    new_protocol_and_new_output_root_required: true
+
+artifacts:
+  private:
+    - exact_input_manifest
+    - challenge_quality_alignment
+    - zzu_patient_alignment
+    - canonicalization_audit
+    - embeddings
+    - distribution_scores
+    - per_record_quality_and_route_decisions
+    - bootstrap_replicates
+    - verified_v1_policy_copy_or_content_binding
+  aggregate_result:
+    filename: ood-external-v2-result.json
+    public_fields: allowlisted_aggregate_only
+  success_manifest:
+    filename: success-manifest.json
+    creation: atomic_create_new_no_overwrite_as_final_success_write
+  public_forbidden:
+    - record_ids
+    - patient_ids
+    - file_paths
+    - waveforms
+    - embeddings
+    - row_scores
+    - logits
+    - probabilities
+    - bootstrap_replicate_arrays
+    - raw_demographics
+    - native_disease_labels
+  automatic_publication: false
+
+eligibility:
+  external_evidence_eligible_when:
+    - all_four_multiplicity_adjusted_primary_gates_pass
+    - every_hard_gate_passes
+    - immutable_success_bundle_verifies
+    - no_failure_receipt_exists
+  failure_status: EXTERNAL_OOD_TARGET_MISSED
+  success_status: EXTERNAL_OOD_EVIDENCE_COMPLETE
+  unfavorable_result_is_completed_evidence: true
+  system_integration:
+    automatic: false
+    require_external_evidence_eligible: true
+    require_separate_source_support_evidence_eligible: true
+    current_v1_source_support_evidence_eligible: false
+    current_consequence: >-
+      This protocol cannot by itself authorize Sentinel integration even if all
+      external endpoints pass. A distinct future source-retention protocol,
+      without reusing C, must first produce eligible evidence.
+
+claims:
+  allowed_scope: retrospective_external_acquisition_and_population_stress_test
+  required_language:
+    - designed_after_observing_v1
+    - exact_v1_distribution_policy_no_tuning_or_recalibration
+    - operational_external_domain_ood_not_unknown_disease
+    - technical_quality_and_distribution_support_evaluated_separately
+    - research_only
+    - not_clinical_validation
+  forbidden:
+    - independent_replication_of_v1
+    - validated_unknown_disease_detection
+    - probability_of_being_ood
+    - diagnostic_validation
+    - pediatric_diagnostic_validation
+    - clinical_validation
+    - clinical_safety
+    - treatment_recommendation
+    - medical_device
+    - deployment_ready
+    - complete_vnext_release
