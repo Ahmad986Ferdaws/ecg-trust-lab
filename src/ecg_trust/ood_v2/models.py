@@ -34,7 +34,7 @@ OOD_V2_PROTOCOL_ID: Final = "trust-sentinel-ood-external-v2-1-parent"
 OOD_V2_ARTIFACT_TYPE: Final = "ecg_trust.ood_external_v2_1_result"
 OOD_V2_RESULT_FILENAME: Final = "ood-external-v2-1-result.json"
 OOD_V2_PARENT_CONFIG_SHA256: Final = (
-    "sha256:b60c757c5da69ec0a0929c5d503d434302b406fd35c0d6237aaf23f3ea243f98"
+    "sha256:33da72f63106f7783ff63bf40f33ca94d55dac457d05bdc551a26fa72d11fac0"
 )
 _V1_RESULT_FILE_SHA256: Final = (
     "sha256:844bbe7f2a85b229f553cd12df14f7db712b9e0090fe6fd6823319a557777c12"

@@ -13,6 +13,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 import torch
+import yaml  # type: ignore[import-untyped]
 
 from ecg_trust.constants import LEADS
 from ecg_trust.data.dataset import NormalizationStats
@@ -37,6 +38,7 @@ from ecg_trust.ood_v2.bundle import (
     ACCESS_MARKER_FILENAME,
     FAILURE_RECEIPT_FILENAME,
     SUCCESS_MANIFEST_FILENAME,
+    sha256_bytes,
     sha256_file,
     verify_external_v2_bundle,
 )
@@ -257,6 +259,55 @@ def test_successor_preflight_rejects_hash_identical_parent_copy(
     ):
         pipeline.verify_successor_parent_preflight(
             copied,
+            project_root=isolated,
+        )
+
+
+@pytest.mark.parametrize(
+    ("keys", "replacement", "message"),
+    (
+        (
+            (
+                "revision_boundary",
+                "remote",
+                "allowed_static_remote_ref",
+                "revision",
+            ),
+            "0" * 40,
+            "successor remote declaration differs",
+        ),
+        (
+            (
+                "design_history",
+                "pre_inventory_remote_preflight",
+                "first_frozen_implementation_revision",
+            ),
+            "0" * 40,
+            "successor pre-inventory amendment declaration differs",
+        ),
+    ),
+)
+def test_successor_preflight_enforces_remote_and_amendment_semantics(
+    tmp_path: Path,
+    keys: tuple[str, ...],
+    replacement: str,
+    message: str,
+) -> None:
+    isolated = _isolated_successor_preflight_project(tmp_path)
+    parent_path = isolated / "configs" / SUCCESSOR_PARENT_PATH.name
+    payload = cast(dict[str, Any], yaml.safe_load(parent_path.read_text(encoding="utf-8")))
+    target: dict[str, Any] = payload
+    for key in keys[:-1]:
+        target = cast(dict[str, Any], target[key])
+    target[keys[-1]] = replacement
+    parent_path.write_text(
+        yaml.safe_dump(payload, allow_unicode=False, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(pipeline.OODExternalV2ConfigError, match=message):
+        pipeline.verify_successor_parent_preflight(
+            parent_path,
             project_root=isolated,
         )
 
@@ -847,7 +898,7 @@ def test_public_five_state_route_counts_are_rederived_from_private_rows() -> Non
         )
 
 
-def test_live_git_remote_state_requires_exact_single_origin_main_line(
+def test_live_git_remote_state_requires_exact_main_and_backup_tag_lines(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -869,7 +920,13 @@ def test_live_git_remote_state_requires_exact_single_origin_main_line(
                 "ref: refs/heads/main\tHEAD\n"
                 f"{revision}\tHEAD\n"
                 f"{revision}\trefs/heads/main\n"
+                f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+                f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
             )
+        elif arguments[:2] == ("cat-file", "-t"):
+            stdout = "commit\n"
+        elif arguments[:2] == ("merge-base", "--is-ancestor"):
+            stdout = ""
         else:
             raise AssertionError(arguments)
         return SimpleNamespace(stdout=stdout, stderr="", returncode=0)
@@ -887,6 +944,8 @@ def test_live_git_remote_state_requires_exact_single_origin_main_line(
                 "ref: refs/heads/main\tHEAD\n"
                 f"{'b' * 40}\tHEAD\n"
                 f"{'b' * 40}\trefs/heads/main\n"
+                f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+                f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
             )
         return result
 
@@ -898,6 +957,281 @@ def test_live_git_remote_state_requires_exact_single_origin_main_line(
         pipeline._verify_git_remote_state(  # noqa: SLF001
             tmp_path,
             expected_revision=revision,
+        )
+
+    def non_ancestor_tag(_root: Path, *arguments: str, **kwargs: object) -> Any:
+        result = exact_git(_root, *arguments, **kwargs)
+        if arguments[:2] == ("merge-base", "--is-ancestor"):
+            result.returncode = 1
+        return result
+
+    monkeypatch.setattr(pipeline, "_run_git", non_ancestor_tag)
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="not the exact pushed frozen revision",
+    ):
+        pipeline._verify_git_remote_state(  # noqa: SLF001
+            tmp_path,
+            expected_revision=revision,
+        )
+
+
+def _amendment_git_runner(
+    implementation_revision: str,
+    *,
+    revision_line: str | None = None,
+    commit_count: str = "1",
+    diff_stdout: str | None = None,
+) -> Any:
+    resolved_diff = diff_stdout
+    if resolved_diff is None:
+        resolved_diff = "".join(
+            f"M\t{path}\n" for path in pipeline.SUCCESSOR_AMENDMENT_MODIFIED_PATHS
+        )
+    responses = {
+        (
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            implementation_revision,
+        ): revision_line
+        or (
+            f"{implementation_revision} "
+            f"{pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
+        ),
+        (
+            "rev-list",
+            "--count",
+            f"{pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{implementation_revision}",
+        ): f"{commit_count}\n",
+        (
+            "diff",
+            "--name-status",
+            "--no-renames",
+            f"{pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{implementation_revision}",
+            "--",
+        ): resolved_diff,
+    }
+
+    def runner(_root: Path, *arguments: str, **_kwargs: object) -> Any:
+        if arguments not in responses:
+            raise AssertionError(arguments)
+        return SimpleNamespace(
+            stdout=responses[arguments],
+            stderr="",
+            returncode=0,
+        )
+
+    return runner
+
+
+def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = "d" * 40
+    observed: dict[str, object] = {}
+    monkeypatch.setattr(pipeline, "_run_git", _amendment_git_runner(revision))
+
+    def verify_old_parent(
+        _root: Path,
+        **kwargs: object,
+    ) -> None:
+        observed.update(kwargs)
+
+    monkeypatch.setattr(pipeline, "_verify_historical_revision_blob", verify_old_parent)
+    pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+        tmp_path,
+        implementation_revision=revision,
+    )
+
+    assert observed == {
+        "context": "first frozen successor parent",
+        "expected_file_sha256": pipeline.FIRST_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
+        "revision": pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+    }
+
+
+@pytest.mark.parametrize(
+    ("runner_kwargs", "message"),
+    (
+        (
+            {"revision_line": f"{'d' * 40} {'e' * 40}\n"},
+            "sole direct child",
+        ),
+        ({"commit_count": "2"}, "sole direct child"),
+        ({"diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
+        (
+            {
+                "diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in pipeline.SUCCESSOR_AMENDMENT_MODIFIED_PATHS[:-1]
+                )
+            },
+            "paths differ",
+        ),
+        (
+            {
+                "diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in pipeline.SUCCESSOR_AMENDMENT_MODIFIED_PATHS
+                )
+                + "M\textra.txt\n"
+            },
+            "paths differ",
+        ),
+        ({"diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
+    ),
+)
+def test_successor_amendment_revision_rejects_lineage_or_diff_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runner_kwargs: dict[str, str],
+    message: str,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        _amendment_git_runner(revision, **runner_kwargs),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(pipeline.OODExternalV2IntegrityError, match=message):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+def test_successor_amendment_revision_rejects_old_parent_blob_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(pipeline, "_run_git", _amendment_git_runner(revision))
+
+    def reject_old_parent(*_args: object, **_kwargs: object) -> None:
+        raise pipeline.OODExternalV2IntegrityError("old parent blob differs")
+
+    monkeypatch.setattr(pipeline, "_verify_historical_revision_blob", reject_old_parent)
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="old parent blob differs",
+    ):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+def test_historical_blob_verification_allows_current_amended_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+    relative_path = pipeline.SUCCESSOR_PARENT_CONFIG_PATH
+    current = tmp_path.joinpath(*relative_path.split("/"))
+    current.parent.mkdir(parents=True)
+    current.write_bytes(b"current amended parent")
+    historical = b"first frozen parent"
+
+    def git_result(_root: Path, *arguments: str, **_kwargs: object) -> Any:
+        assert arguments == ("cat-file", "-t", f"{revision}:{relative_path}")
+        return SimpleNamespace(stdout="blob\n", stderr="", returncode=0)
+
+    def git_bytes(_root: Path, *arguments: str) -> bytes:
+        assert arguments == ("show", f"{revision}:{relative_path}")
+        return historical
+
+    monkeypatch.setattr(pipeline, "_run_git", git_result)
+    monkeypatch.setattr(pipeline, "_run_git_bytes", git_bytes)
+    pipeline._verify_historical_revision_blob(  # noqa: SLF001
+        tmp_path,
+        revision=revision,
+        relative_path=relative_path,
+        expected_file_sha256=sha256_bytes(historical),
+        context="first frozen successor parent",
+    )
+
+    assert current.read_bytes() != historical
+
+
+def test_historical_blob_verification_rejects_non_blob_object_type(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+    relative_path = pipeline.SUCCESSOR_PARENT_CONFIG_PATH
+    historical = b"first frozen parent"
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            stdout="tree\n",
+            stderr="",
+            returncode=0,
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git_bytes",
+        lambda *_args, **_kwargs: historical,
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="differs from its exact historical Git blob",
+    ):
+        pipeline._verify_historical_revision_blob(  # noqa: SLF001
+            tmp_path,
+            revision=revision,
+            relative_path=relative_path,
+            expected_file_sha256=sha256_bytes(historical),
+            context="first frozen successor parent",
+        )
+
+
+def test_historical_blob_verification_rejects_wrong_blob_sha256(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+    relative_path = pipeline.SUCCESSOR_PARENT_CONFIG_PATH
+    expected = b"first frozen parent"
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            stdout="blob\n",
+            stderr="",
+            returncode=0,
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git_bytes",
+        lambda *_args, **_kwargs: b"tampered historical parent",
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="differs from its exact historical Git blob",
+    ):
+        pipeline._verify_historical_revision_blob(  # noqa: SLF001
+            tmp_path,
+            revision=revision,
+            relative_path=relative_path,
+            expected_file_sha256=sha256_bytes(expected),
+            context="first frozen successor parent",
         )
 
 
@@ -912,6 +1246,11 @@ def test_revision_boundary_rejects_merge_child_freeze_commit(
         pipeline,
         "_verify_clean_git_revision",
         lambda _root: execution,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_successor_amendment_revision",
+        lambda *_args, **_kwargs: None,
     )
 
     def git_result(_root: Path, *arguments: str, **_kwargs: object) -> Any:
@@ -982,6 +1321,7 @@ def test_private_git_history_must_be_exactly_empty(
     pipeline._verify_private_history_absent(tmp_path)  # noqa: SLF001
     assert observed == (
         "log",
+        "--full-history",
         "--all",
         "--reflog",
         "--format=%H",
@@ -1003,6 +1343,96 @@ def test_private_git_history_must_be_exactly_empty(
         match="appear in Git history",
     ):
         pipeline._verify_private_history_absent(tmp_path)  # noqa: SLF001
+
+
+def test_private_history_full_history_finds_deleted_merged_side_parent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "synthetic-merge-history"
+    repository.mkdir()
+    git_executable = shutil.which("git")
+    assert git_executable is not None
+
+    def git(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [git_executable, *arguments],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            encoding="utf-8",
+            errors="strict",
+            text=True,
+        )
+
+    git("init", "--initial-branch=main")
+    git("config", "user.name", "Synthetic History Test")
+    git("config", "user.email", "synthetic-history@example.invalid")
+    (repository / "README.md").write_text("base\n", encoding="utf-8")
+    git("add", "README.md")
+    git("commit", "-m", "base")
+
+    git("switch", "-c", "side-parent")
+    protected_relative = "data/raw/external-ood/deleted-before-merge.txt"
+    protected = repository / protected_relative
+    protected.parent.mkdir(parents=True)
+    protected.write_text("synthetic protected evidence\n", encoding="utf-8")
+    git("add", "--", protected_relative)
+    git("commit", "-m", "add protected path on side parent")
+    side_revision = git("rev-parse", "HEAD").stdout.strip()
+
+    git("switch", "main")
+    (repository / "main-only.txt").write_text("main\n", encoding="utf-8")
+    git("add", "main-only.txt")
+    git("commit", "-m", "advance main")
+    git("merge", "--no-ff", "--no-commit", "side-parent")
+    protected.unlink()
+    git("add", "-u", "--", protected_relative)
+    git("commit", "-m", "merge while deleting protected path")
+    git("branch", "-D", "side-parent")
+    git("reflog", "expire", "--expire=now", "--all")
+
+    simplified = git(
+        "log",
+        "--all",
+        "--reflog",
+        "--format=%H",
+        "--",
+        *pipeline.FORBIDDEN_GIT_HISTORY_PATHS,
+    ).stdout
+    full_history = git(
+        "log",
+        "--full-history",
+        "--all",
+        "--reflog",
+        "--format=%H",
+        "--",
+        *pipeline.FORBIDDEN_GIT_HISTORY_PATHS,
+    ).stdout
+    assert simplified == ""
+    assert side_revision in full_history.splitlines()
+    assert not protected.exists()
+
+    observed: tuple[str, ...] = ()
+
+    def synthetic_git(
+        root: Path,
+        *arguments: str,
+        allow_empty: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal observed
+        assert root == repository
+        assert allow_empty is False
+        observed = arguments
+        return git(*arguments)
+
+    monkeypatch.setattr(pipeline, "_run_git", synthetic_git)
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="appear in Git history",
+    ):
+        pipeline._verify_private_history_absent(repository)  # noqa: SLF001
+    assert observed[:2] == ("log", "--full-history")
 
 
 def _runtime_scratch_layout(root: Path) -> None:
@@ -1186,6 +1616,42 @@ def test_git_repository_controls_reject_worktree_config_and_fsmonitor(
         pipeline._verify_git_repository_controls(root)  # noqa: SLF001
 
 
+@pytest.mark.parametrize("relative_path", ("shallow", "shallow.lock"))
+def test_git_repository_controls_reject_shallow_state(
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    root = _isolated_successor_preflight_project(tmp_path)
+    (root / ".git" / relative_path).write_text("0" * 40 + "\n", encoding="ascii")
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="shallow state",
+    ):
+        pipeline._verify_git_repository_controls(root)  # noqa: SLF001
+
+
+@pytest.mark.parametrize("relative_path", ("shallow", "shallow.lock"))
+def test_git_repository_controls_reject_indirect_shallow_state(
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    root = _isolated_successor_preflight_project(tmp_path)
+    target = root / ".git" / f"actual-{relative_path}"
+    target.write_text("0" * 40 + "\n", encoding="ascii")
+    linked = root / ".git" / relative_path
+    try:
+        linked.symlink_to(target)
+    except OSError:
+        pytest.skip("file symlink creation is unavailable")
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="shallow state",
+    ):
+        pipeline._verify_git_repository_controls(root)  # noqa: SLF001
+
+
 def test_inventory_builder_preflight_binds_frozen_runtime_and_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1228,6 +1694,11 @@ def test_inventory_builder_preflight_binds_frozen_runtime_and_source(
     monkeypatch.setattr(pipeline, "_verify_clean_git_revision", lambda _r: revision)
     monkeypatch.setattr(pipeline, "_verify_git_remote_state", lambda *_a, **_k: None)
     monkeypatch.setattr(pipeline, "_verify_private_history_absent", lambda _r: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_successor_amendment_revision",
+        lambda *_a, **_k: None,
+    )
     monkeypatch.setattr(pipeline, "_verify_tracked_head_blob", lambda *_a, **_k: None)
     monkeypatch.setattr(
         pipeline,

@@ -184,7 +184,7 @@ EXPECTED_PARENT_CONFIG_SHA256: Final = (
     "sha256:3aacb31be939d1a2bea96bb29f193d60a4b54c38a40a1a7e2a490cfe60c3b0d9"
 )
 EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256: Final[str | None] = (
-    "sha256:b60c757c5da69ec0a0929c5d503d434302b406fd35c0d6237aaf23f3ea243f98"
+    "sha256:33da72f63106f7783ff63bf40f33ca94d55dac457d05bdc551a26fa72d11fac0"
 )
 SUCCESSOR_PROTOCOL_ID: Final = PROTOCOL_ID
 PREDECESSOR_TERMINATION_PATH: Final = (
@@ -531,6 +531,27 @@ EXPECTED_GIT_REMOTE_URL: Final = (
     "https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git"
 )
 EXPECTED_GIT_REMOTE_MAIN_REF: Final = "refs/remotes/origin/main"
+EXPECTED_GIT_REMOTE_BACKUP_TAG_REF: Final = (
+    "refs/tags/private-evidence-backup-v1-2026-08-29"
+)
+EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION: Final = (
+    "a88ef86e8e0b28dd6f162cda88e16b4159d195d8"
+)
+FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
+    "85b55d0f358e12052b23c8afa7468f2285342181"
+)
+FIRST_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
+    "sha256:b60c757c5da69ec0a0929c5d503d434302b406fd35c0d6237aaf23f3ea243f98"
+)
+SUCCESSOR_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
+    "configs/trust_sentinel_ood_external_v2_1.yaml",
+    "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+    "src/ecg_trust/ood_v2/models.py",
+    "src/ecg_trust/ood_v2/pipeline.py",
+    "tests/unit/test_ood_v2_models.py",
+    "tests/unit/test_ood_v2_pipeline.py",
+    "tests/unit/test_ood_v2_protocol_closure.py",
+)
 _ARCHIVE_MEMBER_ROLES: Final[tuple[str, ...]] = (
     "ignored_release_file",
     "quality_reference",
@@ -1182,6 +1203,79 @@ def verify_successor_parent_preflight(
         "waveform_or_model_access_occurred": False,
     }:
         raise OODExternalV2ConfigError("successor predecessor declaration differs")
+    amendment = _mapping(
+        design.get("pre_inventory_remote_preflight"),
+        "successor pre-inventory amendment",
+    )
+    amendment_revision = _mapping(
+        amendment.get("amendment_revision_contract"),
+        "successor amendment revision contract",
+    )
+    expected_amendment = {
+        "amendment": (
+            "allow_only_the_exact_pinned_v1_backup_tag_and_still_forbid_every_other_ref"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_first_frozen_revision": 1,
+            "exact_modified_paths": list(SUCCESSOR_AMENDMENT_MODIFIED_PATHS),
+            "sole_parent": FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+            "status_for_every_path": "modified",
+        },
+        "first_frozen_at_utc": "2026-08-29T22:03:25Z",
+        "first_frozen_implementation_revision": (
+            FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+        ),
+        "first_frozen_parent_config_file_sha256": (
+            FIRST_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+        ),
+        "new_successor_archive_header_metadata_or_waveform_byte_read": False,
+        "outcome": "refused_before_new_successor_external_raw_or_waveform_access",
+        "preserved_predecessor_metadata_inventory_evidence_reread": True,
+        "reason": "exact_preexisting_encrypted_v1_backup_tag_was_not_declared",
+        "successor_inventory_claim_or_output_created": False,
+        "new_successor_waveform_trained_checkpoint_or_inference_access_occurred": (
+            False
+        ),
+    }
+    if amendment != expected_amendment or amendment_revision != (
+        expected_amendment["amendment_revision_contract"]
+    ):
+        raise OODExternalV2ConfigError(
+            "successor pre-inventory amendment declaration differs"
+        )
+    revision_boundary = _mapping(
+        payload.get("revision_boundary"),
+        "successor revision boundary",
+    )
+    remote = _mapping(revision_boundary.get("remote"), "successor remote boundary")
+    if remote != {
+        "allowed_static_remote_ref": {
+            "local_object_type": "commit",
+            "must_be_ancestor_of_every_required_main_revision": True,
+            "name": EXPECTED_GIT_REMOTE_BACKUP_TAG_REF,
+            "purpose": "encrypted_v1_private_evidence_backup",
+            "remote_form": "lightweight_direct_commit_without_peeled_line",
+            "revision": EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION,
+        },
+        "any_other_advertised_remote_ref": "forbidden",
+        "fetch_url": EXPECTED_GIT_REMOTE_URL,
+        "live_remote_exact_lines": [
+            "ref:_refs/heads/main_TAB_HEAD",
+            "current_required_main_revision_TAB_HEAD",
+            "current_required_main_revision_TAB_refs/heads/main",
+            (
+                f"{EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}_TAB_"
+                f"{EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}"
+            ),
+        ],
+        "live_remote_query": "git_ls_remote_symref_exact_https_url_all_advertised_refs",
+        "must_equal_execution_revision_preclaim_and_post_evaluation": True,
+        "must_equal_implementation_revision_at_child_freeze": True,
+        "name": EXPECTED_GIT_REMOTE_NAME,
+        "push_url": EXPECTED_GIT_REMOTE_URL,
+        "tracking_ref": EXPECTED_GIT_REMOTE_MAIN_REF,
+    }:
+        raise OODExternalV2ConfigError("successor remote declaration differs")
     predecessor_parent = root_path.joinpath(*PurePosixPath(PARENT_CONFIG_DEFAULT).parts)
     if load_parent_config(predecessor_parent).file_sha256 != EXPECTED_PARENT_CONFIG_SHA256:
         raise OODExternalV2IntegrityError("predecessor parent bytes differ")
@@ -2476,6 +2570,10 @@ def _verify_revision_boundary(
         ) from error
     if clean_head != execution_revision:
         raise OODExternalV2IntegrityError("execution revision differs from clean Git HEAD")
+    _verify_successor_amendment_revision(
+        project_root,
+        implementation_revision=child.implementation_revision,
+    )
     completed = _run_git(
         project_root,
         "merge-base",
@@ -2637,30 +2735,106 @@ def _verify_git_remote_state(
         "--verify",
         EXPECTED_GIT_REMOTE_MAIN_REF,
     ).stdout.strip().casefold()
-    live_remote_lines = tuple(
-        item
-        for item in _run_git(
-            project_root,
-            "ls-remote",
-            "--symref",
-            EXPECTED_GIT_REMOTE_URL,
-        ).stdout.splitlines()
-        if item
+    live_remote_stdout = _run_git(
+        project_root,
+        "ls-remote",
+        "--symref",
+        EXPECTED_GIT_REMOTE_URL,
+    ).stdout
+    backup_tag_type = _run_git(
+        project_root,
+        "cat-file",
+        "-t",
+        EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION,
+    ).stdout
+    backup_tag_ancestor = _run_git(
+        project_root,
+        "merge-base",
+        "--is-ancestor",
+        EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION,
+        expected_revision,
+        allow_empty=True,
     )
-    expected_live_lines = (
-        "ref: refs/heads/main\tHEAD",
-        f"{expected_revision}\tHEAD",
-        f"{expected_revision}\trefs/heads/main",
+    expected_live_stdout = (
+        "ref: refs/heads/main\tHEAD\n"
+        f"{expected_revision}\tHEAD\n"
+        f"{expected_revision}\trefs/heads/main\n"
+        f"{EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+        f"{EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
     )
     if (
         remotes != (EXPECTED_GIT_REMOTE_NAME,)
         or fetch_urls != (EXPECTED_GIT_REMOTE_URL,)
         or push_urls != (EXPECTED_GIT_REMOTE_URL,)
         or remote_revision != expected_revision
-        or live_remote_lines != expected_live_lines
+        or live_remote_stdout != expected_live_stdout
+        or backup_tag_type != "commit\n"
+        or backup_tag_ancestor.returncode != 0
+        or backup_tag_ancestor.stdout != ""
     ):
         raise OODExternalV2IntegrityError(
             "Git origin/main is not the exact pushed frozen revision"
+        )
+
+
+def _verify_successor_amendment_revision(
+    project_root: Path,
+    *,
+    implementation_revision: str,
+) -> None:
+    """Bind the sole pre-inventory amendment to its first frozen parent."""
+
+    revision = _revision(
+        implementation_revision,
+        "amended successor implementation revision",
+    )
+    revision_line = _run_git(
+        project_root,
+        "rev-list",
+        "--parents",
+        "-n",
+        "1",
+        revision,
+    ).stdout.strip().casefold()
+    commit_count = _run_git(
+        project_root,
+        "rev-list",
+        "--count",
+        f"{FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}..{revision}",
+    ).stdout.strip()
+    if revision_line.split() != [
+        revision,
+        FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+    ] or commit_count != "1":
+        raise OODExternalV2IntegrityError(
+            "successor amendment is not the sole direct child of its first freeze"
+        )
+    _verify_historical_revision_blob(
+        project_root,
+        revision=FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=FIRST_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        context="first frozen successor parent",
+    )
+    diff = _run_git(
+        project_root,
+        "diff",
+        "--name-status",
+        "--no-renames",
+        f"{FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}..{revision}",
+        "--",
+    )
+    changed: dict[str, str] = {}
+    for line in diff.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 2 or parts[0] != "M":
+            raise OODExternalV2IntegrityError(
+                "successor amendment contains a non-modification change"
+            )
+        changed[parts[1].replace("\\", "/")] = parts[0]
+    if changed != {path: "M" for path in SUCCESSOR_AMENDMENT_MODIFIED_PATHS}:
+        raise OODExternalV2IntegrityError(
+            "successor amendment paths differ from the frozen allowlist"
         )
 
 
@@ -2670,6 +2844,7 @@ def _verify_private_history_absent(project_root: Path) -> None:
     history = _run_git(
         project_root,
         "log",
+        "--full-history",
         "--all",
         "--reflog",
         "--format=%H",
@@ -3074,6 +3249,29 @@ def _verify_revision_bound_file(
     ):
         raise OODExternalV2IntegrityError(
             f"{context} differs from its exact execution Git blob"
+        )
+
+
+def _verify_historical_revision_blob(
+    project_root: Path,
+    *,
+    revision: str,
+    relative_path: str,
+    expected_file_sha256: str,
+    context: str,
+) -> None:
+    """Verify historical bytes without requiring the amended worktree to match."""
+
+    object_type = _run_git(
+        project_root,
+        "cat-file",
+        "-t",
+        f"{revision}:{relative_path}",
+    ).stdout
+    blob = _run_git_bytes(project_root, "show", f"{revision}:{relative_path}")
+    if object_type != "blob\n" or sha256_bytes(blob) != expected_file_sha256:
+        raise OODExternalV2IntegrityError(
+            f"{context} differs from its exact historical Git blob"
         )
 
 
@@ -4771,6 +4969,10 @@ def verify_inventory_builder_preflight(
 
     root = _strict_project_root(project_root)
     revision = _revision(implementation_revision, "inventory implementation revision")
+    _verify_successor_amendment_revision(
+        root,
+        implementation_revision=revision,
+    )
     expected_parent = root.joinpath(
         *PurePosixPath(SUCCESSOR_PARENT_CONFIG_PATH).parts
     )
@@ -4984,6 +5186,10 @@ def freeze_external_v2_child_contract(
         raise OODExternalV2IntegrityError(
             "child freeze must run at the implementation revision"
         )
+    _verify_successor_amendment_revision(
+        root,
+        implementation_revision=revision,
+    )
     _verify_git_remote_state(root, expected_revision=revision)
     _verify_private_history_absent(root)
     _verify_tracked_head_blob(
@@ -7532,13 +7738,15 @@ def _verify_git_repository_controls(project_root: Path) -> None:
         git_directory / "objects" / "info" / "alternates",
         git_directory / "info" / "grafts",
         git_directory / "info" / "sparse-checkout",
+        git_directory / "shallow",
+        git_directory / "shallow.lock",
         git_directory / "refs" / "replace",
         git_directory / "config.worktree",
         git_directory / "worktrees",
     )
     if any(path.exists() or _is_indirect(path) for path in forbidden):
         raise OODExternalV2IntegrityError(
-            "Git object alternates, grafts, and replacement refs are forbidden"
+            "Git object alternates, grafts, shallow state, and replacement refs are forbidden"
         )
     config = _read_bounded(git_directory / "config", 1_000_000, "local Git config")
     try:

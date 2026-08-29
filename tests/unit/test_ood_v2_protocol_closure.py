@@ -234,6 +234,8 @@ def _remote_git_runner(
     revision: str,
     *,
     live_stdout: str | None = None,
+    backup_tag_type: str = "commit",
+    backup_tag_ancestor_returncode: int = 0,
     observed: list[tuple[str, ...]] | None = None,
 ) -> Any:
     responses = {
@@ -266,7 +268,20 @@ def _remote_git_runner(
             "ref: refs/heads/main\tHEAD\n"
             f"{revision}\tHEAD\n"
             f"{revision}\trefs/heads/main\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
         ),
+        (
+            "cat-file",
+            "-t",
+            pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION,
+        ): f"{backup_tag_type}\n",
+        (
+            "merge-base",
+            "--is-ancestor",
+            pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION,
+            revision,
+        ): "",
     }
 
     def runner(
@@ -274,12 +289,19 @@ def _remote_git_runner(
         *arguments: str,
         allow_empty: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        assert allow_empty is False
+        is_ancestor_check = arguments[:2] == ("merge-base", "--is-ancestor")
+        assert allow_empty is is_ancestor_check
         if observed is not None:
             observed.append(arguments)
         if arguments not in responses:
             raise AssertionError(f"unexpected Git invocation: {arguments!r}")
-        return _git_result(arguments, responses[arguments])
+        return _git_result(
+            arguments,
+            responses[arguments],
+            returncode=(
+                backup_tag_ancestor_returncode if is_ancestor_check else 0
+            ),
+        )
 
     return runner
 
@@ -770,7 +792,7 @@ def test_terminal_semantic_verifier_requires_and_routes_live_source_closure(
     assert "seven_zip_executable=seven_zip_executable" in semantic_call
 
 
-def test_live_remote_query_requires_exact_advertised_main_only_state(
+def test_live_remote_query_requires_exact_main_and_backup_tag_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -800,7 +822,46 @@ def test_live_remote_query_requires_exact_advertised_main_only_state(
             "--symref",
             pipeline.EXPECTED_GIT_REMOTE_URL,
         ),
+        (
+            "cat-file",
+            "-t",
+            pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION,
+        ),
+        (
+            "merge-base",
+            "--is-ancestor",
+            pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION,
+            revision,
+        ),
     ]
+
+
+@pytest.mark.parametrize(
+    ("backup_tag_type", "ancestor_returncode"),
+    (("tag", 0), ("commit", 1)),
+)
+def test_live_remote_query_rejects_noncommit_or_nonancestor_backup_tag(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    backup_tag_type: str,
+    ancestor_returncode: int,
+) -> None:
+    revision = "1" * 40
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        _remote_git_runner(
+            revision,
+            backup_tag_type=backup_tag_type,
+            backup_tag_ancestor_returncode=ancestor_returncode,
+        ),
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="exact pushed frozen revision",
+    ):
+        pipeline._verify_git_remote_state(tmp_path, expected_revision=revision)
 
 
 def test_clean_git_revision_rejects_skip_worktree_and_assume_unchanged_flags(
@@ -875,6 +936,11 @@ def test_execution_revision_rejects_merge_even_when_x_to_y_count_is_one(
         "_verify_clean_git_revision",
         lambda _root: execution_revision,
     )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_successor_amendment_revision",
+        lambda *_args, **_kwargs: None,
+    )
 
     def git_runner(
         _root: Path,
@@ -911,24 +977,97 @@ def test_execution_revision_rejects_merge_even_when_x_to_y_count_is_one(
     [
         (
             "ref: refs/heads/main\tHEAD\n"
+            f"{'1' * 40}\tHEAD\n"
+            f"{'1' * 40}\trefs/heads/main\n"
+        ),
+        (
+            "ref: refs/heads/main\tHEAD\n"
             f"{'2' * 40}\tHEAD\n"
             f"{'2' * 40}\trefs/heads/main\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
         ),
         (
             "ref: refs/heads/main\tHEAD\n"
             f"{'1' * 40} HEAD\n"
             f"{'1' * 40}\trefs/heads/main\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
         ),
         (
             "ref: refs/heads/main\tHEAD\n"
             f"{'1' * 40}\tHEAD\n"
             f"{'1' * 40}\trefs/heads/main\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
             f"{'1' * 40}\trefs/tags/main\n"
         ),
         (
             "ref: refs/heads/not-main\tHEAD\n"
             f"{'1' * 40}\tHEAD\n"
             f"{'1' * 40}\trefs/heads/not-main\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+        ),
+        (
+            "ref: refs/heads/main\tHEAD\n"
+            f"{'1' * 40}\tHEAD\n"
+            f"{'1' * 40}\trefs/heads/main\n"
+            f"{'3' * 40}\t{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+        ),
+        (
+            "ref: refs/heads/main\tHEAD\r\n"
+            f"{'1' * 40}\tHEAD\r\n"
+            f"{'1' * 40}\trefs/heads/main\r\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\r\n"
+        ),
+        (
+            "ref: refs/heads/main\tHEAD\n"
+            f"{'1' * 40}\tHEAD\n"
+            f"{'1' * 40}\trefs/heads/main\n\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+        ),
+        (
+            "ref: refs/heads/main\tHEAD\n"
+            f"{'1' * 40}\tHEAD\n"
+            f"{'1' * 40}\trefs/heads/main\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}"
+        ),
+        (
+            "ref: refs/heads/main\tHEAD\n"
+            f"{'1' * 40}\tHEAD\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+            f"{'1' * 40}\trefs/heads/main\n"
+        ),
+        (
+            "ref: refs/heads/main\tHEAD\n"
+            f"{'1' * 40}\tHEAD\n"
+            f"{'1' * 40}\trefs/heads/main\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+        ),
+        (
+            "ref: refs/heads/main\tHEAD\n"
+            f"{'1' * 40}\tHEAD\n"
+            f"{'1' * 40}\trefs/heads/main\n"
+            f"{'4' * 40}\t{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}^{{}}\n"
+        ),
+        (
+            "ref: refs/heads/main\tHEAD\n"
+            f"{'1' * 40}\tHEAD\n"
+            f"{'1' * 40}\trefs/heads/main\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}^{{}}\n"
         ),
     ],
 )
@@ -983,6 +1122,7 @@ def test_private_history_query_covers_every_forbidden_path_and_fails_closed(
     assert observed == [
         (
             "log",
+            "--full-history",
             "--all",
             "--reflog",
             "--format=%H",

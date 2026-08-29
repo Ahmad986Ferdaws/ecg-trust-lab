@@ -27,6 +27,20 @@ access. It permits exactly three dataset-specific, case-only ZZU aliases:
 mixed-case names. No generic case folding is allowed. The map changes names
 only; it cannot infer, swap, sign-flip, rescale, or otherwise alter a signal.
 
+The first frozen successor implementation (`85b55d0f358e12052b23c8afa7468f2285342181`)
+then stopped at its remote preflight because GitHub also advertised the
+preexisting encrypted-v1-evidence backup tag. That refusal occurred before any
+new-successor external-source archive, header/record metadata, waveform,
+trained-checkpoint, or inference byte was accessed and created no successor
+inventory, claim, or output. The preflight did reread already-frozen predecessor
+metadata/inventory evidence plus Git/runtime metadata and imported project
+source code. This amended parent permits the existing tag associated with the
+separately documented, hash-pinned encrypted backup asset, using only its exact
+tag name and pinned revision; every other unexpected remote ref remains
+forbidden. This Git-ref check neither fetches nor authenticates the GitHub
+release asset; asset integrity remains governed separately by
+`TRUST_SENTINEL_PRIVATE_BACKUP.md` and is not an execution dependency.
+
 ## Evidence boundary and v1 history
 
 The aggregate v1 source-support result was already known when both external
@@ -249,24 +263,36 @@ denominator-integrity gates, not additional inferential endpoints.
 ## One-shot execution and failure semantics
 
 The parent and exact child must be committed and pushed before access. The
-implementation revision and child-freeze execution revision are consecutive:
-the execution revision has the implementation revision as its sole first
-parent, and exactly one commit lies in `X..Y`. That commit is additive-only and
-contains exactly the tracked child plus its aggregate public inventory
-projection; the private inventory remains ignored and untracked. The only Git
+first frozen successor revision `85b55d0...` and amended implementation
+revision X are consecutive: X has that first freeze as its sole parent and
+modifies exactly the seven declared config, protocol, implementation, and test
+paths. The implementation revision X and child-freeze execution revision Y are
+also consecutive: Y has X as its sole parent, exactly one commit lies in
+`X..Y`, and that commit adds only the tracked child plus its aggregate public
+inventory projection. The private inventory remains ignored and untracked. The only Git
 remote is `origin`, its fetch and push URL are exactly
 `https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git`, and
 `refs/remotes/origin/main` must equal X at child freeze and Y immediately
 before the claim and after evaluation. A live `git ls-remote --symref` against
 the exact HTTPS URL—not a symbolic local remote—must return exactly the HEAD
-symref plus HEAD and `refs/heads/main` at that revision, with no other
-advertised ref. The local tracking ref alone is not accepted as proof of push.
+symref, HEAD and `refs/heads/main` at that revision, plus the required pinned
+`private-evidence-backup-v1-2026-08-29` tag at
+`a88ef86e8e0b28dd6f162cda88e16b4159d195d8`. Every other advertised ref is
+forbidden. The tag must remain a lightweight direct-commit ref with no peeled
+line; its local object must be a commit and an ancestor of the current X or Y,
+so it adds no protected-history reachability beyond `main`. The local tracking
+ref alone is not accepted as proof of push.
 Output and claim paths must be absent.
+
+Shallow repository state (`.git/shallow` or `.git/shallow.lock`), object
+alternates, grafts, replacement refs, sparse checkout, or linked-worktree
+configuration are forbidden because they can hide or reinterpret reachable
+history.
 
 At child freeze, immediately before the claim, and after evaluation, the
 successor parent must be a tracked file whose exact `git show <revision>:<path>`
 blob equals both the worktree bytes and the frozen SHA-256. At those same
-boundaries, `git log --all --reflog --format=%H -- <exact protected glob
+boundaries, `git log --full-history --all --reflog --format=%H -- <exact protected glob
 pathspecs>` must return empty output for the entire external raw-data tree,
 both protocols' complete private-preflight trees, both output/claim namespaces,
 all retained staging namespaces, and the isolated runtime-root namespace. This

@@ -2,7 +2,7 @@ schema_version: 1
 protocol_id: trust-sentinel-ood-external-v2-1-parent
 status: frozen_parent_preregistration_pre_waveform
 drafted_on: "2026-08-29"
-frozen_at_utc: "2026-08-29T22:03:25Z"
+frozen_at_utc: "2026-08-29T22:49:01Z"
 research_only: true
 
 purpose: >-
@@ -39,6 +39,29 @@ design_history:
     - zzu_patient_role_lead_count_and_duration_metadata
     - ordered_record_identities_and_file_hashes
   external_waveform_quality_embedding_score_logit_or_metric_observed: false
+  pre_inventory_remote_preflight:
+    first_frozen_implementation_revision: 85b55d0f358e12052b23c8afa7468f2285342181
+    first_frozen_parent_config_file_sha256: sha256:b60c757c5da69ec0a0929c5d503d434302b406fd35c0d6237aaf23f3ea243f98
+    first_frozen_at_utc: "2026-08-29T22:03:25Z"
+    outcome: refused_before_new_successor_external_raw_or_waveform_access
+    reason: exact_preexisting_encrypted_v1_backup_tag_was_not_declared
+    new_successor_archive_header_metadata_or_waveform_byte_read: false
+    preserved_predecessor_metadata_inventory_evidence_reread: true
+    new_successor_waveform_trained_checkpoint_or_inference_access_occurred: false
+    successor_inventory_claim_or_output_created: false
+    amendment: allow_only_the_exact_pinned_v1_backup_tag_and_still_forbid_every_other_ref
+    amendment_revision_contract:
+      commit_count_after_first_frozen_revision: 1
+      sole_parent: 85b55d0f358e12052b23c8afa7468f2285342181
+      exact_modified_paths:
+        - configs/trust_sentinel_ood_external_v2_1.yaml
+        - docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md
+        - src/ecg_trust/ood_v2/models.py
+        - src/ecg_trust/ood_v2/pipeline.py
+        - tests/unit/test_ood_v2_models.py
+        - tests/unit/test_ood_v2_pipeline.py
+        - tests/unit/test_ood_v2_protocol_closure.py
+      status_for_every_path: modified
   v1_c_influence:
     allowed:
       - historical_aggregate_context_only
@@ -78,8 +101,16 @@ revision_boundary:
     live_remote_query: git_ls_remote_symref_exact_https_url_all_advertised_refs
     live_remote_exact_lines:
       - ref:_refs/heads/main_TAB_HEAD
-      - execution_revision_TAB_HEAD
-      - execution_revision_TAB_refs/heads/main
+      - current_required_main_revision_TAB_HEAD
+      - current_required_main_revision_TAB_refs/heads/main
+      - a88ef86e8e0b28dd6f162cda88e16b4159d195d8_TAB_refs/tags/private-evidence-backup-v1-2026-08-29
+    allowed_static_remote_ref:
+      name: refs/tags/private-evidence-backup-v1-2026-08-29
+      revision: a88ef86e8e0b28dd6f162cda88e16b4159d195d8
+      purpose: encrypted_v1_private_evidence_backup
+      remote_form: lightweight_direct_commit_without_peeled_line
+      local_object_type: commit
+      must_be_ancestor_of_every_required_main_revision: true
     any_other_advertised_remote_ref: forbidden
     must_equal_implementation_revision_at_child_freeze: true
     must_equal_execution_revision_preclaim_and_post_evaluation: true
@@ -97,7 +128,7 @@ revision_boundary:
     version: git_version_2.53.0.windows.2
     full_mingw64_tree_path_free_hash_bound: true
     sanitized_environment_and_exact_git_dir_work_tree: true
-    global_system_includes_replacements_alternates_grafts_sparse_and_worktree_config: forbidden
+    global_system_includes_replacements_alternates_grafts_shallow_sparse_and_worktree_config: forbidden
     local_config: exact_section_key_value_allowlist_only
     status_hardening:
       core_fsmonitor: false
@@ -107,7 +138,7 @@ revision_boundary:
       core_checkStat: default
       core_trustctime: true
   forbidden_private_history:
-    command: git_log_all_reflog_format_H_double_dash_exact_glob_pathspecs
+    command: git_log_full_history_all_reflog_format_H_double_dash_exact_glob_pathspecs
     required_output: exact_empty_stdout
     timing: [child_freeze, immediately_preclaim, post_evaluation]
     paths:
