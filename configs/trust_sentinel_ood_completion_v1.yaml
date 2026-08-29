@@ -1,0 +1,434 @@
+schema_version: 1
+protocol_id: trust-sentinel-ood-completion-v1
+status: frozen_pre_execution
+frozen_at_utc: 2026-08-29T08:53:21Z
+research_only: true
+
+purpose: >-
+  Complete the source-domain distribution-support component without changing
+  trust-sentinel-source-calibration-v1 and without using any observed test,
+  external, or future lockbox cohort for fitting or selection.
+
+immutability:
+  source_calibration_v1_must_remain_pending: true
+  source_calibration_v1_mutation: forbidden
+  protocol_changes_after_embedding_access: forbidden
+  unfavorable_results_must_be_retained: true
+
+bindings:
+  source_calibration_result:
+    path: artifacts/trust_sentinel/source_calibration_v1/source-calibration-result.json
+    file_sha256: 8bae3acdebac42504167afc7bb7d2051b7ac2c48019aa429ed6544f14a59f38f
+    artifact_sha256: sha256:b9063fd2965b194806f9e544f3ea6390cc19bc8a93b27d3e88a674bf0aa7c839
+    required_status: PREPARED_NOT_RELEASE_READY
+    required_open_world_status: PENDING
+  source_calibration_config:
+    path: configs/trust_sentinel_source_calibration_v1.yaml
+    file_sha256: 3dbef163757807c442276b80631e0c83a6c07b241c62974fc64ba91bbedb8178
+  dataset_manifest:
+    path: data/manifests/ptbxl_superclasses_v1.0.3.parquet
+    file_sha256: 563a2b715cc6f6657b04c2f67d813fd7c30a696210740f97c55a070f157579a0
+    dataset: PTB-XL
+    dataset_version: 1.0.3
+  official_dataset_checksums:
+    path: data/raw/ptb-xl/1.0.3/SHA256SUMS.txt
+    file_sha256: b7224b92b341511ec3ceb13dc6652079b2c36a06504bcb49506f157f51dc695d
+  refit_completion:
+    path: runs/refit/ptbxl_matched_equal_budget_v1/resnet1d_refit_folds1-8_seed2026/attempt00/refit_completion.json
+    file_sha256: ca6957bdaec738e771f66829b8b0994256cd82538bb902ea69f75aee4570d1ca
+    artifact_sha256: sha256:a5947701b8d70cddc68031be739eba38e0b8910fd4c9d105e151e9f98d8b0853
+    required_status: complete
+  checkpoint:
+    path: runs/refit/ptbxl_matched_equal_budget_v1/resnet1d_refit_folds1-8_seed2026/attempt00/final.ckpt
+    file_sha256: d3b8a19ab891db34afa6039179edab9847a8812e466a65c4cb408df12b402b35
+  resolved_config:
+    path: runs/refit/ptbxl_matched_equal_budget_v1/resnet1d_refit_folds1-8_seed2026/attempt00/resolved_refit_config.json
+    file_sha256: d00643dadc1c27a241da5c100bccd45f314fe0b94b16c9e3ce9d88ed22656d49
+    inner_config_sha256: sha256:003125474caa877585e609b7b248727aa3ecaf7c716d8c249966ff4b9188e71e
+  normalization:
+    path: artifacts/preprocessing/ptbxl_v1.0.3_train_folds_1-7_normalization.json
+    file_sha256: 4a6cb489098361d8221403c14871c242672c346975af3a07f731ceac97264363
+    fitted_folds: [1, 2, 3, 4, 5, 6, 7]
+  historical_demo_policy:
+    path: artifacts/demo/ptbxl_matched_equal_budget_v1/resnet1d-seed2026.coverage80.demo-policy.json
+    file_sha256: 539d9e7dfc84edc49ab285775cdd0f6e93b2f5bb804c6fe7be7d00bc2aff4d42
+    use: checkpoint_loading_lineage_only_no_threshold_or_decision_reuse
+  demo_binding:
+    path: artifacts/demo/ptbxl_matched_equal_budget_v1/resnet1d-seed2026.coverage80.demo-binding.json
+    file_sha256: cea592df221a2821c5f29cec5f8e0175aabe997da6836f22ab28acb36dbf3b14
+    use: checkpoint_loading_lineage_only
+  experiment_protocol:
+    path: configs/protocol.yaml
+    file_sha256: d630ccb99569513082ccaaafe1b0117f5fe1567a505c600add9c0a79b64c51c8
+    resolved_path: runs/refit/ptbxl_matched_equal_budget_v1/resnet1d_refit_folds1-8_seed2026/attempt00/protocol.json
+    resolved_file_sha256: 242bc6b1e37e264a9225702b31eca092d4edfd430d1cb014d348ceca92878fa2
+    protocol_sha256: sha256:ebfdb588615bfa22eedc6d936d7b0155a33702878cbe0258ebb84aaa88567e09
+  dependency_lock:
+    path: uv.lock
+    file_sha256: 73234642bb4982a0e2cb4e25774f8d82e7a51a650033faec2297d45032da2d07
+  project_manifest:
+    path: pyproject.toml
+    file_sha256: e1de755829678d588784bbcc34becc8c031c742d9b3f05458e76e67f577da3cd
+
+input_contract:
+  lead_order: [I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6]
+  physical_units: mV
+  sampling_frequency_hz: 100
+  duration_seconds: 10
+  samples_per_lead: 1000
+  input_dtype: float32
+  normalization: frozen_folds_1_to_7_per_lead_mean_and_standard_deviation
+  resampling_or_silent_repair: forbidden
+
+cohort_identity:
+  algorithm: ordered_role_input_identity_v1
+  order: ascending_ecg_id
+  fields: [ecg_id, patient_id, strat_fold, record_path]
+  domain_prefix_utf8: ecg_trust.ordered_role_input_identity.v1
+  domain_terminator_hex: "00"
+  byte_stream: utf8(domain_prefix_utf8)_then_0x00_then_utf8(canonical_json_payload)
+  payload_shape: >-
+    {"algorithm":"ordered_role_input_identity_v1","records":[record_objects],
+    "schema_version":1}
+  record_object_fields: [ecg_id, patient_id, record_path, strat_fold]
+  integer_encoding: base10_json_integer_booleans_forbidden
+  record_path_encoding: normalized_project_relative_posix_text
+  json_serialization:
+    allow_nan: false
+    ensure_ascii: true
+    separators: [",", ":"]
+    sort_keys: true
+    trailing_newline: false
+  digest: sha256_over_exact_byte_stream
+  reference_sha256: sha256:4aec3498193b962a0f9434e2032f5050e6f7daf4a8ddb44f87f54721efb72ae8
+  fold9_sha256: sha256:f5b06b01ca347e33068b128d93a0ed6bc3cd0e1f2e85f931cae5b35834612707
+
+official_checksum_subset:
+  source_binding: official_dataset_checksums
+  selection_roles: [REFERENCE, THRESHOLD_FIT, SOURCE_VALIDATION]
+  excluded_role: ptbxl_fold9_decision_fit
+  manifest_record_path_field: record_path
+  file_extensions: [.dat, .hea]
+  expected_selected_records: 18383
+  expected_selected_files: 36766
+  pair_order: ascending_relative_path_utf8_byte_order
+  domain_prefix_utf8: ecg_trust.official_checksum_subset.v1
+  domain_terminator_hex: "00"
+  byte_stream: utf8(domain_prefix_utf8)_then_0x00_then_utf8(canonical_json_payload)
+  payload_shape: >-
+    {"algorithm":"official_checksum_subset_v1","files":[pair_objects],
+    "schema_version":1}
+  pair_object_fields: [relative_path, sha256]
+  relative_path_encoding: normalized_dataset_relative_posix_text
+  sha256_encoding: lowercase_64_character_hex_without_prefix
+  json_serialization:
+    allow_nan: false
+    ensure_ascii: true
+    separators: [",", ":"]
+    sort_keys: true
+    trailing_newline: false
+  digest: sha256_over_exact_byte_stream
+  require_each_selected_file_once: true
+  require_actual_file_hash_matches_official_pair: true
+  observed_sha256: null
+  observed_digest_timing: execution_after_input_verification
+  public_lineage_fields: [selected_record_count, selected_file_count, observed_sha256]
+
+roles:
+  unit_of_assignment: patient_id
+  records_are_weighted_equally_for_fit_and_threshold: true
+  patients_must_be_disjoint_across_reference_threshold_and_validation: true
+  reference:
+    artifact_role: REFERENCE
+    source: ptbxl_task_manifest
+    folds: [1, 2, 3, 4, 5, 6, 7, 8]
+    records: 17084
+    patients: 14823
+    allowed_use: embedding_mean_and_covariance_only
+  threshold_fit:
+    artifact_role: THRESHOLD_FIT
+    source: ptbxl_fold9_conformal_and_ood_threshold_fit
+    fold: 9
+    patient_hash_range: "[0.4,0.8)"
+    patient_hash_salt: trust-sentinel-v1
+    records: 834
+    patients: 757
+    allowed_use: source_support_threshold_only
+  source_validation:
+    artifact_role: SOURCE_VALIDATION
+    source: ptbxl_fold9_source_validation
+    fold: 9
+    patient_hash_range: "[0.8,1.0)"
+    patient_hash_salt: trust-sentinel-v1
+    records: 465
+    patients: 409
+    allowed_use: evaluation_only
+    tuning_allowed: false
+    inclusion: all_canonical_records_no_quality_filtering
+  excluded:
+    - ptbxl_fold9_decision_fit
+    - ptbxl_fold10
+    - sph
+    - future_external_observed_sites
+    - future_external_lockbox_sites
+
+embedding:
+  architecture: resnet1d
+  member_id: resnet1d-seed2026
+  seed: 2026
+  method: frozen_resnet_preclassifier_global_average_pool
+  node: final_temporal_feature_map_after_stage4_global_pool_before_classifier_dropout
+  dimension: 512
+  model_mode: eval
+  gradient_mode: inference_mode
+  augmentation: forbidden
+  output_dtype: float32
+
+runtime:
+  device: cuda:0
+  device_name: NVIDIA GeForce RTX 5070 Ti Laptop GPU
+  compute_capability: [12, 0]
+  python_version: 3.12.13
+  nvidia_driver_version: "596.49"
+  torch_version: 2.13.0+cu130
+  cuda_runtime: "13.0"
+  cudnn_version: "9.20.0"
+  cudnn_version_api_integer: 92000
+  input_dtype: float32
+  model_parameter_dtype: float32
+  embedding_dtype: float32
+  autocast: false
+  tf32: false
+  torch_compile: false
+  deterministic_algorithms: true
+  cudnn_benchmark: false
+  batch_size: 128
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  shuffle: false
+  drop_last: false
+  full_embedding_passes_per_role: 2
+  pass_comparison: exact_alignment_and_embedding_tensor_sha256
+  pass_mismatch_policy: fail_closed
+
+detector:
+  method: shrinkage_mahalanobis_embedding_distance
+  fit_math_device: cpu
+  fit_math_dtype: float64
+  score_direction: higher_is_more_out_of_distribution
+  covariance_denominator: n_minus_1
+  shrinkage_target: trace_covariance_divided_by_embedding_dimension_times_identity
+  shrinkage: 0.1
+  ridge: 0.000001
+  precision_solver: symmetric_eigendecomposition
+  score: squared_mahalanobis_clamped_at_zero
+  threshold:
+    fit_role: THRESHOLD_FIT
+    unit: record
+    inlier_coverage: 0.95
+    sample_count: 834
+    rank_rule: ceil((n+1)*inlier_coverage)
+    expected_rank: 794
+    supported_comparison: score_less_than_or_equal_to_threshold
+    unsupported_comparison: score_strictly_greater_than_threshold
+    tie_rule: retain_all_threshold_ties
+  target_site_fitting: forbidden
+
+evaluation:
+  role: SOURCE_VALIDATION
+  preseal_access:
+    allowed:
+      - preregistered_label_free_identity
+      - official_checksum_metadata
+    forbidden:
+      - waveform_bytes
+      - waveform_decoding
+      - embeddings
+      - scores
+      - metrics
+    purpose: partition_alignment_and_provenance_integrity_only
+  detector_must_be_sealed_before_forbidden_access: true
+  tuning_allowed: false
+  primary_metric: source_record_false_rejection_rate
+  source_record_support_coverage:
+    required_public_field: true
+    formula: accepted_records_divided_by_records
+    identity: one_minus_source_record_false_rejection_rate
+  report:
+    - retained_and_rejected_record_counts
+    - source_record_support_coverage
+    - source_record_false_rejection_rate
+    - patient_equalized_false_rejection_rate
+    - patient_any_rejection_rate
+    - score_quantiles_p50_p90_p95_p99_max
+    - threshold_tie_count
+  bootstrap:
+    unit: patient_cluster
+    method: percentile
+    resamples: 10000
+    seed: 20260829
+    random_generator: numpy.random.Generator_PCG64
+    patient_order: ascending_numeric_patient_id
+    draw_rule: draw_n_patients_with_replacement_per_resample
+    records_per_drawn_patient: all_records_repeated_once_per_patient_draw
+    record_order_within_patient: ascending_ecg_id
+    confidence: 0.95
+    two_sided_quantiles: [0.025, 0.975]
+    one_sided_upper_quantile: 0.95
+    resampled_statistic: record_weighted_false_rejection_rate
+    percentile_function: numpy.quantile
+    quantile_method: linear
+    nonfinite_or_empty_resample_policy: fail_closed
+  research_bundle_eligibility:
+    metric: source_record_false_rejection_rate_one_sided_95_upper_bound
+    comparison: less_than_or_equal_to
+    maximum: 0.05
+    failure_policy: completed_evidence_not_research_bundle_eligible
+    eligible_status: SOURCE_SUPPORT_GATE_COMPLETE
+    ineligible_status: SOURCE_SUPPORT_GATE_TARGET_MISSED
+    status_claim_boundary: source_support_only_not_validated_ood_or_release
+  ood_positive_metrics:
+    semantic_ood_recall: NOT_EVALUATED
+    severe_ood_recall: NOT_EVALUATED
+    ood_auroc: NOT_EVALUATED
+    ood_average_precision: NOT_EVALUATED
+    unseen_site_or_device_performance: NOT_EVALUATED
+
+artifacts:
+  output_root: artifacts/trust_sentinel/ood_completion_v1
+  output_root_must_be_absent: true
+  output_root_directory_commit_precedes_finalization: true
+  output_root_immutable_after_success_manifest: true
+  post_directory_commit_existing_file_mutation: forbidden
+  post_directory_commit_allowed_new_files: [success-manifest.json, failure-receipt.json]
+  private_embeddings:
+    public: false
+    retain_locally: true
+    exact_npz_keys: [ecg_id, patient_id, strat_fold, embedding]
+    roles:
+      REFERENCE:
+        npz: private/reference-embeddings.npz
+        sidecar: private/reference-embeddings.json
+      THRESHOLD_FIT:
+        npz: private/threshold-fit-embeddings.npz
+        sidecar: private/threshold-fit-embeddings.json
+      SOURCE_VALIDATION:
+        npz: private/source-validation-embeddings.npz
+        sidecar: private/source-validation-embeddings.json
+  distribution_policy:
+    path: distribution-policy.json
+    public: false
+    must_bind_embedding_and_runtime_contracts: true
+  aggregate_result:
+    path: ood-completion-result.json
+    public_fields: aggregate_only
+    raw_ids_embeddings_scores_logits_probabilities_waveforms_or_paths: forbidden
+  failure_receipt:
+    path: failure-receipt.json
+    sanitized: true
+  source_validation_one_shot:
+    external_claim:
+      basename: .ood_completion_v1.source-validation-one-shot-claim.json
+      path: artifacts/trust_sentinel/.ood_completion_v1.source-validation-one-shot-claim.json
+      location: adjacent_to_output_root
+      creation: atomic_create_new_no_overwrite
+      timing: after_durable_staging_marker_before_any_source_validation_waveform_byte_access
+      retention: permanent
+      concurrent_or_retry_access: forbidden
+      sanitized: true
+    retained_staging_marker:
+      path: source-validation-access-armed.json
+      creation: atomic_create_new_no_overwrite
+      timing: durably_staged_before_external_claim_and_before_any_source_validation_waveform_byte_access
+      retention: success_or_post_claim_failure
+      sanitized: true
+      state: SOURCE_VALIDATION_ACCESS_ARMED
+      contains_owner_nonce: true
+      binds_external_claim_file_sha256: true
+    pre_claim_marker_only_crash:
+      proves_source_validation_access: false
+      automatic_retry_or_cleanup: forbidden
+      resolution: manual_forensic_review_under_a_new_protocol
+    sanitized_content_forbids: raw_ids_embeddings_scores_logits_probabilities_waveforms_or_paths
+  post_claim_or_post_validation_failure:
+    preserve_existing_evidence: true
+    external_claim_retention: permanent
+    staging_marker_retention: required
+    failure_receipt: emit_atomically_when_possible
+    success_manifest: forbidden
+    retry_or_resume: forbidden
+  success_manifest:
+    path: success-manifest.json
+    schema_version: 1
+    artifact_type: ecg_trust.ood_completion_success_manifest
+    protocol_id: trust-sentinel-ood-completion-v1
+    status: SUCCESS
+    public: false
+    inventory_order: ascending_relative_path_utf8_byte_order
+    inventory_entry_fields: [relative_path, file_sha256, size_bytes]
+    file_sha256_encoding: sha256_prefixed_lowercase_hex
+    exact_inventory:
+      - distribution-policy.json
+      - ood-completion-result.json
+      - private/reference-embeddings.json
+      - private/reference-embeddings.npz
+      - private/source-validation-embeddings.json
+      - private/source-validation-embeddings.npz
+      - private/threshold-fit-embeddings.json
+      - private/threshold-fit-embeddings.npz
+      - source-validation-access-armed.json
+    manifest_excluded_from_own_inventory: true
+    self_hash_field: artifact_sha256
+    self_hash_algorithm: sha256_over_canonical_json_excluding_artifact_sha256
+    canonical_json:
+      allow_nan: false
+      ensure_ascii: true
+      separators: [",", ":"]
+      sort_keys: true
+      trailing_newline_in_hash: false
+      file_trailing_newline: true
+    creation: atomic_create_new_no_overwrite
+    write_order: last_after_post_commit_verification
+  bundle_verification:
+    require_success_manifest: true
+    require_external_one_shot_claim: true
+    reject_failure_receipt: true
+    expected_output_files: exact_success_manifest_inventory_plus_manifest_itself
+    reject_missing_expected_artifact: true
+    reject_extra_artifact: true
+    reject_file_size_or_sha256_mismatch: true
+    reject_external_claim_sha256_mismatch_with_marker: true
+    reject_manifest_self_hash_mismatch: true
+  automatic_publication: false
+
+execution:
+  require_clean_committed_revision: true
+  require_verified_input_hashes_before_decode: true
+  validation_access_before_detector_seal: preregistered_label_free_identity_and_official_checksum_metadata_only
+  skipped_records: forbidden
+  overwrite_or_resume_existing_output_root: forbidden
+  concurrent_or_retry_source_validation_access: forbidden
+  success_manifest_must_be_final_output_write: true
+  bundle_use_requires_success_manifest_verification: true
+  source_artifact_mutation: forbidden
+  automatic_model_retraining: forbidden
+  automatic_release: false
+
+claims:
+  allowed_scope: retrospective_ptbxl_source_domain_development_only
+  allowed:
+    - source_support_threshold_fitted_on_reserved_source_role
+    - source_false_rejection_evaluated_on_patient_disjoint_source_role
+  forbidden:
+    - validated_ood_detection
+    - unknown_disease_discovery
+    - probability_of_being_out_of_distribution
+    - external_generalization
+    - unseen_site_or_device_performance
+    - clinical_validation
+    - clinical_safety
+    - diagnosis
+    - treatment_recommendation
+    - medical_device
+    - complete_vnext_release

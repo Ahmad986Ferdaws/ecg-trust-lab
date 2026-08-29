@@ -820,8 +820,7 @@ class DemoInferenceBackend:
         inputs = normalized.unsqueeze(0)
         with torch.inference_mode():
             if isinstance(self.model, ResNet1D):
-                feature_map = self.model.forward_features(inputs)
-                embedding = self.model.global_pool(feature_map).squeeze(-1)
+                embedding = self.model.forward_embedding(inputs)
             elif isinstance(self.model, ECGTransformer):
                 embedding = self.model.forward_features(inputs)
             else:  # pragma: no cover - loading already restricts architectures.

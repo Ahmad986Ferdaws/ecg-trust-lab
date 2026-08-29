@@ -200,7 +200,12 @@ class ResNet1D(nn.Module):
         self._validate_input(inputs)
         return cast(Tensor, self.stages(self.stem(inputs)))
 
-    def forward(self, inputs: Tensor) -> Tensor:
+    def forward_embedding(self, inputs: Tensor) -> Tensor:
+        """Return the pooled pre-classifier representation for each ECG."""
+
         features = self.forward_features(inputs)
-        pooled = self.global_pool(features).squeeze(-1)
-        return cast(Tensor, self.classifier(self.classifier_dropout(pooled)))
+        return cast(Tensor, self.global_pool(features).squeeze(-1))
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        embedding = self.forward_embedding(inputs)
+        return cast(Tensor, self.classifier(self.classifier_dropout(embedding)))

@@ -150,14 +150,50 @@ def test_invalid_model_configs_fail_fast(constructor: Callable[[], object]) -> N
 
 def test_feature_interfaces_expose_attribution_tensors() -> None:
     inputs = torch.randn(2, 12, 1000)
-    resnet_features: Tensor = _small_resnet().eval().forward_features(inputs)
+    resnet = _small_resnet().eval()
+    resnet_features: Tensor = resnet.forward_features(inputs)
+    resnet_embedding: Tensor = resnet.forward_embedding(inputs)
     transformer = _small_transformer().eval()
     transformer_tokens: Tensor = transformer.forward_tokens(inputs)
     transformer_features: Tensor = transformer.forward_features(inputs)
 
     assert resnet_features.ndim == 3
+    assert resnet_embedding.shape == (2, resnet.config.stage_channels[-1])
+    assert torch.isfinite(resnet_embedding).all()
+    torch.testing.assert_close(
+        resnet_embedding,
+        resnet.global_pool(resnet_features).squeeze(-1),
+        rtol=0.0,
+        atol=0.0,
+    )
     assert transformer_tokens.shape == (2, 21, 64)
     assert transformer_features.shape == (2, 64)
+
+
+def test_resnet_embedding_is_the_exact_preclassifier_contract() -> None:
+    torch.manual_seed(41)
+    model = _small_resnet().eval()
+    inputs = torch.randn(3, 12, 1000)
+
+    with torch.inference_mode():
+        embedding = model.forward_embedding(inputs)
+        expected_logits = model.classifier(model.classifier_dropout(embedding))
+        observed_logits = model(inputs)
+
+    assert embedding.shape == (3, model.config.stage_channels[-1])
+    assert torch.isfinite(embedding).all()
+    torch.testing.assert_close(observed_logits, expected_logits, rtol=0.0, atol=0.0)
+
+
+def test_default_resnet_embedding_contract_is_512_values_per_ecg() -> None:
+    model = ResNet1D().eval()
+
+    with torch.inference_mode():
+        embedding = model.forward_embedding(torch.zeros(1, 12, 128))
+
+    assert embedding.shape == (1, 512)
+    assert embedding.dtype is torch.float32
+    assert torch.isfinite(embedding).all()
 
 
 def test_training_prevalence_predictor_is_parameter_free() -> None:

@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ from ecg_trust.demo_backend import (
 from ecg_trust.demo_sentinel_adapter import DemoSentinelModelRunner
 from ecg_trust.experiment_config import ModelConfig
 from ecg_trust.experiment_runner import build_experiment_model
-from ecg_trust.models import count_parameters
+from ecg_trust.models import ResNet1D, count_parameters
 from ecg_trust.protocol import TRAIN_FOLDS, ExperimentProtocol
 from ecg_trust.registry import (
     ArtifactRole,
@@ -252,6 +252,22 @@ def test_backend_exports_deterministic_embedding_for_sentinel_ood_gate(
     assert evidence.release_id == "release-vnext"
     assert evidence.embedding == tuple(float(value) for value in first.tolist())
     assert len(evidence.calibrated_probabilities) == len(SUPERCLASSES)
+
+
+def test_resnet_backend_embedding_matches_legacy_pooling_path(tmp_path: Path) -> None:
+    backend = _load_backend(_write_demo_files(tmp_path, architecture="resnet1d"))
+    model = cast(ResNet1D, backend.model)
+    physical = torch.zeros(12, 1000, dtype=torch.float32)
+    normalized = ((physical - backend._mean) / backend._std).contiguous()
+
+    with torch.inference_mode():
+        feature_map = model.forward_features(normalized.unsqueeze(0))
+        legacy = model.global_pool(feature_map).squeeze(-1)[0].to(torch.float32).contiguous()
+    observed = backend.extract_embedding_signal(physical)
+
+    assert observed.shape == (model.config.stage_channels[-1],)
+    assert torch.isfinite(observed).all()
+    torch.testing.assert_close(observed, legacy, rtol=0.0, atol=0.0)
 
 
 def test_demo_runner_loads_model_only_from_verified_runtime_parent_identities(

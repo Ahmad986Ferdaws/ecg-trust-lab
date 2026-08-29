@@ -31,8 +31,11 @@ The vNext code now contains the assurance contracts, quality and uncertainty
 primitives, five-state service boundary, synthetic Failure Lab, monitoring,
 audit, governance, and future-study scaffolds described in that document. It
 is still development infrastructure: source calibration is not a promoted
-release, embedding-based unfamiliar-input detection remains pending, and the
-system is not authorized for patient care.
+release, its original unfamiliar-input field remains permanently pending, and
+the system is not authorized for patient care. A separate, immutable
+[OOD-completion protocol](docs/TRUST_SENTINEL_OOD_COMPLETION_PROTOCOL.md) now
+defines how source-support embeddings may be fitted and evaluated without
+rewriting that source artifact.
 
 ## Demo walkthrough
 
@@ -56,7 +59,7 @@ demonstration, not a clinical-use demonstration.
   pass.
 - Train-only normalization is frozen from 14,955 records in folds 1–7 with
   provenance hash `55dd86001dee2006cb241ff8b4f3970d8fcbb1ae9ecd430f5dd61478673ce235`.
-- Project-local Python 3.12.13, PyTorch 2.13.0 + CUDA 13.0, cuDNN 9.2, and BF16
+- Project-local Python 3.12.13, PyTorch 2.13.0 + CUDA 13.0, cuDNN 9.20, and BF16
   pass the real RTX 5070 Ti forward/backward check.
 - The matched 12-candidate sweep, paired seeds 2026/2027/2028 confirmation,
   architecture freeze, and all six fresh folds-1–8 refits are complete. Fold 8
@@ -93,6 +96,12 @@ demonstration, not a clinical-use demonstration.
   roles. Its untuned 465-ECG source-validation point estimate was macro AUROC
   `0.914492`. Embedding-based unfamiliar-input detection remains pending, so
   this is explicitly not a complete release or clinical validation.
+- The separate OOD-completion v1 preregistration and implementation are frozen
+  before ECG embedding access. They bind patient-disjoint R/B/C roles, two
+  exact CUDA FP32 passes, private row-level artifacts, a 10,000-replicate
+  patient-cluster interval, and aggregate-only results. No OOD-positive cohort
+  is included, so this work cannot validate OOD detection or unknown-disease
+  discovery.
 - The historical August 9 r3 repository gate passed all 434 tests, Ruff, and
   strict mypy. The current post-SPH repository gate separately passed all 494
   tests, Ruff, and strict mypy. Pytest emitted one upstream Starlette/httpx
