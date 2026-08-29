@@ -1,0 +1,996 @@
+schema_version: 1
+protocol_id: trust-sentinel-ood-external-v2-1-parent
+status: frozen_parent_preregistration_pre_waveform
+drafted_on: "2026-08-29"
+frozen_at_utc: "2026-08-29T22:03:25Z"
+research_only: true
+
+purpose: >-
+  Transparently supersede an infeasible metadata-only v2 parent, then evaluate
+  the exact sealed Trust Sentinel OOD-completion-v1 distribution policy,
+  without refitting or threshold adjustment, on two declared external
+  acquisition and population domains while separately evaluating the frozen
+  signal-quality gate on natural technical-quality labels.
+
+design_history:
+  written_after_v1_result_was_observed: true
+  v1_observed_status: SOURCE_SUPPORT_GATE_TARGET_MISSED
+  v1_observed_source_record_false_rejection_rate: 0.053763440860215055
+  v1_observed_one_sided_95_upper_bound: 0.07296137339055794
+  independent_of_v1_claim: false
+  required_disclosure: >-
+    This successor protocol was designed after the aggregate v1 result and
+    metadata-only v2 feasibility inventory were known. It is a new external
+    stress-test protocol, not an independent replication or a retry of v1.
+  predecessor:
+    protocol_id: trust-sentinel-ood-external-v2-parent
+    config_path: configs/trust_sentinel_ood_external_v2.yaml
+    config_file_sha256: sha256:3aacb31be939d1a2bea96bb29f193d60a4b54c38a40a1a7e2a490cfe60c3b0d9
+    status: PRE_INFERENCE_PROTOCOL_INFEASIBLE
+    termination_reason: exact_ZZU_augmented_lead_name_case_mismatch
+    waveform_or_model_access_occurred: false
+    original_claim_or_output_created: false
+  written_after_metadata_only_v2_feasibility_inventory: true
+  metadata_observed_before_this_successor:
+    - release_licenses_sizes_and_checksums
+    - wfdb_headers_without_sample_decode
+    - lead_names_sampling_rates_sample_counts_and_units
+    - challenge_quality_reference_lists
+    - zzu_patient_role_lead_count_and_duration_metadata
+    - ordered_record_identities_and_file_hashes
+  external_waveform_quality_embedding_score_logit_or_metric_observed: false
+  v1_c_influence:
+    allowed:
+      - historical_aggregate_context_only
+      - exact_whole_bundle_integrity_verifier_execution_only
+    forbidden:
+      - waveform_or_embedding_analysis
+      - row_identity_exposure_to_successor
+      - score_exposure_to_successor
+      - subgroup_or_error_analysis
+      - detector_fit
+      - threshold_fit
+      - method_selection
+      - operating_point_selection
+
+immutability:
+  v1_output_must_remain_byte_identical: true
+  v1_distribution_policy_reused_exactly: true
+  v1_detector_refit: forbidden
+  v1_threshold_change: forbidden
+  external_target_fitting_or_adaptation: forbidden
+  post_external_waveform_access_protocol_change: forbidden
+  unfavorable_results_must_be_retained: true
+  predecessor_parent_and_termination_must_remain_byte_identical: true
+
+revision_boundary:
+  implementation_to_execution_commit_count: 1
+  execution_parent_must_equal_implementation_revision: true
+  execution_commit_additive_paths_exactly:
+    - configs/trust_sentinel_ood_external_v2_1_execution.json
+    - artifacts/trust_sentinel/ood_external_v2_1_preflight/public/external-inventory-summary.json
+  private_inventory_committed: false
+  remote:
+    name: origin
+    fetch_url: https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git
+    push_url: https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git
+    tracking_ref: refs/remotes/origin/main
+    live_remote_query: git_ls_remote_symref_exact_https_url_all_advertised_refs
+    live_remote_exact_lines:
+      - ref:_refs/heads/main_TAB_HEAD
+      - execution_revision_TAB_HEAD
+      - execution_revision_TAB_refs/heads/main
+    any_other_advertised_remote_ref: forbidden
+    must_equal_implementation_revision_at_child_freeze: true
+    must_equal_execution_revision_preclaim_and_post_evaluation: true
+  exact_head_blob_proof:
+    successor_parent_must_be_tracked: true
+    git_show_revision_path_bytes_must_equal_worktree_and_frozen_hash: true
+    project_source_tree: >-
+      every tracked src/ecg_trust/**/*.py plus inventory, freeze, evaluate,
+      and verify operational entrypoints; exact path, size, SHA-256, X blob,
+      Y blob, and final worktree re-enumeration
+    execution_child_and_public_projection_Y_blobs_must_equal_loaded_bytes: true
+    timing: [child_freeze, immediately_preclaim, post_evaluation]
+  git_execution:
+    executable: exact_bound_mingw64_bin_git_exe
+    version: git_version_2.53.0.windows.2
+    full_mingw64_tree_path_free_hash_bound: true
+    sanitized_environment_and_exact_git_dir_work_tree: true
+    global_system_includes_replacements_alternates_grafts_sparse_and_worktree_config: forbidden
+    local_config: exact_section_key_value_allowlist_only
+    status_hardening:
+      core_fsmonitor: false
+      core_untrackedCache: false
+      core_ignoreStat: false
+      core_preloadIndex: false
+      core_checkStat: default
+      core_trustctime: true
+  forbidden_private_history:
+    command: git_log_all_reflog_format_H_double_dash_exact_glob_pathspecs
+    required_output: exact_empty_stdout
+    timing: [child_freeze, immediately_preclaim, post_evaluation]
+    paths:
+      - :(glob)data/raw/external-ood/**
+      - :(glob)artifacts/trust_sentinel/ood_external_v2_preflight/private/**
+      - :(glob)artifacts/trust_sentinel/ood_external_v2_1_preflight/private/**
+      - artifacts/trust_sentinel/ood_external_v2
+      - artifacts/trust_sentinel/ood_external_v2_1
+      - artifacts/trust_sentinel/.ood_external_v2.one-shot-claim.json
+      - artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json
+      - :(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**
+      - :(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**
+      - :(glob)artifacts/trust_sentinel/.ood_external_v2_1.runtime-*/**
+    proven_scope: protected_pathnames_reachable_from_local_refs_and_reflogs
+    limitation: unreachable_object_contents_are_not_claimed_absent
+
+bindings:
+  predecessor_termination:
+    path: configs/trust_sentinel_ood_external_v2_termination.yaml
+    file_sha256: sha256:289736acc200be025075c0f4094ac6d1719b4e50d55dfcf3b628b287158e240a
+    required_status: PRE_INFERENCE_PROTOCOL_INFEASIBLE
+  predecessor_termination_note:
+    path: docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_INFEASIBILITY.md
+    file_sha256: sha256:5d16d2ebddf15acc8a5915ba274ba565bc8a35ac9b3bcdf99ccd9a03a6eedc89
+  v1_completion_bundle:
+    output_root: artifacts/trust_sentinel/ood_completion_v1
+    verifier: ecg_trust.ood_completion.verify_ood_completion_bundle
+    eligibility_verifier_must_not_be_substituted: true
+    verifier_scope: >-
+      The named verifier may parse private v1 members only to authenticate the
+      exact immutable bundle. No v1 C identity, row, waveform, embedding,
+      score, subgroup, or error output may be returned to or analyzed by the
+      successor evaluation.
+    result:
+      path: artifacts/trust_sentinel/ood_completion_v1/ood-completion-result.json
+      file_sha256: sha256:844bbe7f2a85b229f553cd12df14f7db712b9e0090fe6fd6823319a557777c12
+      artifact_sha256: sha256:dd76258b30c95a3ac8f865da54973a42a93d0135caba09da0c6412267f041b53
+      required_status: SOURCE_SUPPORT_GATE_TARGET_MISSED
+      required_research_bundle_eligible: false
+    success_manifest:
+      path: artifacts/trust_sentinel/ood_completion_v1/success-manifest.json
+      file_sha256: sha256:2db65dabd06bc5dfcebd7f1d1556b45b012c8b05cf73c4384e46fc7416293206
+      artifact_sha256: sha256:6f97e0697d661372e62f4aee9245f26014312e6a1d681615314bc9fcb77c5732
+    distribution_policy:
+      path: artifacts/trust_sentinel/ood_completion_v1/distribution-policy.json
+      file_sha256: sha256:817d6e5c4a3058c064cdc7bdceafb774c7ea4bb0b6cf725be1b8f12c7aae9c1c
+      artifact_sha256: sha256:d544c28ad18b764e3e30cc316b092a41d75125a8334f1d41ed58c31ec37568db
+      method: shrinkage_mahalanobis_embedding_distance
+      threshold: 270.9668613705653
+      threshold_comparison: score_strictly_greater_than_threshold
+      embedding_dimension: 512
+      shrinkage: 0.1
+      ridge: 0.000001
+  v1_checkpoint:
+    path: runs/refit/ptbxl_matched_equal_budget_v1/resnet1d_refit_folds1-8_seed2026/attempt00/final.ckpt
+    file_sha256: sha256:d3b8a19ab891db34afa6039179edab9847a8812e466a65c4cb408df12b402b35
+  v1_resolved_config:
+    path: runs/refit/ptbxl_matched_equal_budget_v1/resnet1d_refit_folds1-8_seed2026/attempt00/resolved_refit_config.json
+    file_sha256: sha256:d00643dadc1c27a241da5c100bccd45f314fe0b94b16c9e3ce9d88ed22656d49
+    inner_config_sha256: sha256:003125474caa877585e609b7b248727aa3ecaf7c716d8c249966ff4b9188e71e
+  normalization:
+    path: artifacts/preprocessing/ptbxl_v1.0.3_train_folds_1-7_normalization.json
+    file_sha256: sha256:4a6cb489098361d8221403c14871c242672c346975af3a07f731ceac97264363
+    refit_on_external_data: false
+  signal_quality_implementation:
+    path: src/ecg_trust/quality/signal_quality.py
+    file_sha256: sha256:ee86c6f979b2b44f8dceacb3d5266b917428483c8d79a518a05d9e04e3a718a9
+    config_version: canonical-12x1000-mv-v1
+    threshold_override: forbidden
+  dependency_lock:
+    path: uv.lock
+    file_sha256: sha256:73234642bb4982a0e2cb4e25774f8d82e7a51a650033faec2297d45032da2d07
+  project_manifest:
+    path: pyproject.toml
+    file_sha256: sha256:e1de755829678d588784bbcc34becc8c031c742d9b3f05458e76e67f577da3cd
+  source_calibration_result:
+    path: artifacts/trust_sentinel/source_calibration_v1/source-calibration-result.json
+    file_sha256: sha256:8bae3acdebac42504167afc7bb7d2051b7ac2c48019aa429ed6544f14a59f38f
+    artifact_sha256: sha256:b9063fd2965b194806f9e544f3ea6390cc19bc8a93b27d3e88a674bf0aa7c839
+    frozen_components_sha256: sha256:a3180e2f5da6cfd7b44499e590202416fe669d51099298353926d828ab2004ca
+    required_status: PREPARED_NOT_RELEASE_READY
+  historical_demo_policy:
+    path: artifacts/demo/ptbxl_matched_equal_budget_v1/resnet1d-seed2026.coverage80.demo-policy.json
+    file_sha256: sha256:539d9e7dfc84edc49ab285775cdd0f6e93b2f5bb804c6fe7be7d00bc2aff4d42
+
+raw_source_bindings:
+  extraction_roots:
+    physionet_challenge_2011_set_a: data/raw/external-ood/challenge-2011-v1.0.0/extracted/set-a
+    zzu_pecg_v1: data/raw/external-ood/zzu-pecg-v1/extracted/Child_ecg
+    exact_match_required: true
+  files:
+    challenge_archive:
+      path: data/raw/external-ood/challenge-2011-v1.0.0/set-a.tar.gz
+      size_bytes: 107909323
+      sha256: 3e9d079fbc65eda8700d11549853b8ab97bb5103967df319e5c507d82129eb99
+      expected_md5: e52c32636d715f2d94e4c7ee1fd57811
+    challenge_records:
+      path: data/raw/external-ood/challenge-2011-v1.0.0/extracted/set-a/RECORDS
+      size_bytes: 8000
+      sha256: efda061ab8d5f26b6ca8fb3cbecf716225ae9672fc8d0a0ca4b07a4275c63d47
+      expected_md5: null
+    challenge_records_acceptable:
+      path: data/raw/external-ood/challenge-2011-v1.0.0/extracted/set-a/RECORDS-acceptable
+      size_bytes: 6184
+      sha256: b7a4dc903c8c5404caa6a69dc861f717ffa83a9f9c423799d0a6944be6ffdbd0
+      expected_md5: null
+    challenge_records_unacceptable:
+      path: data/raw/external-ood/challenge-2011-v1.0.0/extracted/set-a/RECORDS-unacceptable
+      size_bytes: 1800
+      sha256: a48acad13fc38144a4d13d5379787a923b893e6cbecc3918111856d031c9ce57
+      expected_md5: null
+    zzu_archive_z01:
+      path: data/raw/external-ood/zzu-pecg-v1/Child_ecg.z01
+      size_bytes: 2147483648
+      sha256: 97e1ae5dfefb063975ba1c8a55d099532d2cb23d2bad423f356de07a8f070fce
+      expected_md5: 4782e8c17b478745853db85210ce46aa
+    zzu_archive_zip:
+      path: data/raw/external-ood/zzu-pecg-v1/Child_ecg.zip
+      size_bytes: 1908237306
+      sha256: dca8d2b2775351dce1e683033cb6193b2889f7e28315d9ded705ef2116a0adcb
+      expected_md5: d7bb207d0f559c5f697bd7e442975718
+    zzu_attributes_dictionary:
+      path: data/raw/external-ood/zzu-pecg-v1/AttributesDictionary.csv
+      size_bytes: 7717825
+      sha256: cb7338fd440529b22a52b7c4a4010c5f0511655be2a67b16fa21e316b433d7ad
+      expected_md5: ffbbb7ebd8ad4425b3a859739eb65eb1
+    zzu_disease_code:
+      path: data/raw/external-ood/zzu-pecg-v1/DiseaseCode.csv
+      size_bytes: 2965
+      sha256: 03024f73377243a85cee1f0ae882250c00f1dd93fc34e20f75d45c26db47b3e2
+      expected_md5: 0bff597c23397c0d05a937fe09807ad4
+    zzu_ecg_code:
+      path: data/raw/external-ood/zzu-pecg-v1/ECGCode.csv
+      size_bytes: 3632
+      sha256: d330f76ab0b4d573fa89464911f26c4d31533cf1bbeb99beaa1bd8d802fb34ac
+      expected_md5: 7612c5af0e01e052eb85792c5e362f12
+    zzu_example_notebook:
+      path: data/raw/external-ood/zzu-pecg-v1/ExampleReadingCode.ipynb
+      size_bytes: 159034
+      sha256: d2689dd9146863f9638967244a547176873290d516885ce8f0107bc7e8450279
+      expected_md5: 66694258f55ea75bf3454546d486a0e5
+  archive_extraction_closure:
+    timing: metadata_and_byte_only_before_claim_and_after_evaluation
+    challenge:
+      method: exact_tar_member_path_size_and_content_hash_comparison
+      required_members: >-
+        all 3004 regular-file release members: 1000 .hea, 1000 .dat,
+        1000 .txt, RECORDS, RECORDS-acceptable, RECORDS-unacceptable, and
+        HEADER.shtml
+      operational_inputs: 1000_header_data_pairs_and_three_reference_lists_only
+      ignored_but_integrity_closed_release_members: 1000_txt_and_HEADER_shtml
+      exact_role_counts:
+        wfdb_header: 1000
+        wfdb_data: 1000
+        quality_reference: 3
+        ignored_release_file: 1001
+    zzu:
+      method: >-
+        validate exact safe split-ZIP member paths, test the bound archive,
+        extract once into an isolated fresh temporary directory, and compare
+        every candidate file path, size, and SHA-256 with the evaluated tree
+      archive_test_required: true
+      required_members: every_candidate_header_data_pair
+    path_traversal_links_duplicates_extra_or_missing_file_members: forbidden
+    domain_separated_manifest_hash_bound_in_child: true
+    aggregate_member_counts_and_manifest_hash_allowed_in_public_projection: true
+
+fixed_selection:
+  detector_candidates: [sealed_v1_distribution_policy_only]
+  model_candidates: [resnet1d-seed2026-only]
+  score_ensembling: forbidden
+  hyperparameter_search: forbidden
+  threshold_calibration: forbidden
+  source_or_external_recalibration: forbidden
+  external_label_use_for_distribution_decisions: forbidden
+
+frozen_uncertainty_routing:
+  source: bindings.source_calibration_result
+  label_order: [NORM, MI, STTC, CD, HYP]
+  temperature:
+    method: single_positive_temperature_binary_nll
+    value: 1.319620052379425
+  entropy:
+    method: mean_normalized_binary_entropy
+    maximum: 0.5975748221759414
+    acceptance_rule: entropy_less_than_or_equal_to_maximum
+  conformal:
+    method: labelwise_binary_split_conformal
+    alpha: 0.1
+    n_calibration_samples: 834
+    quantile_rank: 752
+    quantile_level: 0.9016786570743405
+    thresholds:
+      NORM: 0.5943209280399379
+      MI: 0.5720188933250413
+      STTC: 0.5936070307854548
+      CD: 0.5512516601251809
+      HYP: 0.48857772684700007
+  abstain_rule: >-
+    After quality PASS and distribution support, ABSTAIN when entropy exceeds
+    the frozen maximum or any labelwise conformal decision is non-singleton.
+    PREDICTION_ALLOWED requires both gates to pass.
+  fitting_or_recalibration_on_external_data: forbidden
+
+external_sources:
+  physionet_challenge_2011_set_a:
+    role: natural_technical_quality_primary_and_external_ood_positive
+    title: Improving the Quality of ECGs Collected using Mobile Phones
+    publisher: PhysioNet
+    version: 1.0.0
+    subset: set-a
+    version_url: https://physionet.org/content/challenge-2011/1.0.0/
+    subset_url: https://physionet.org/content/challenge-2011/1.0.0/set-a/
+    files_url: https://physionet.org/files/challenge-2011/1.0.0/set-a/
+    license: Open Data Commons Attribution License v1.0
+    license_spdx: ODC-By-1.0
+    access: open
+    expected_records: 1000
+    expected_sampling_frequency_hz: 500
+    expected_duration_seconds: 10
+    expected_leads: 12
+    expected_resolution_bits: 16
+    observed_metadata_only_counts:
+      records: 1000
+      acceptable: 773
+      indeterminate: 2
+      unacceptable: 225
+    acquisition_note: conventional_ecg_machines_not_original_mobile_hardware
+    record_selection:
+      include: every_official_set_a_wfdb_header_data_pair_exactly_once
+      identity: official_set_a_record_stem
+      csv_txt_representation: ignored_as_redundant_signal_representation
+      demographic_filtering: forbidden
+      quality_filtering_before_quality_evaluation: forbidden
+    patient_identity:
+      available: false
+      record_id_must_not_be_claimed_as_patient_id: true
+    natural_quality_reference:
+      primary: true
+      group_1: acceptable
+      group_2: indeterminate_excluded_from_primary_quality_metrics
+      group_3: unacceptable
+      label_use: quality_evaluation_only
+      exact_rederivation_before_and_after_required: true
+      indeterminate_rule: records_minus_acceptable_minus_unacceptable
+
+  zzu_pecg_v1:
+    role: pediatric_population_and_acquisition_ood_positive
+    title: A pediatric ECG database with disease diagnosis covering 11643 children
+    publisher: figshare
+    version: 1
+    article_id: 27078763
+    version_doi: https://doi.org/10.6084/m9.figshare.27078763.v1
+    official_url: https://figshare.com/articles/dataset/A_pediatric_ECG_database_with_disease_diagnosis_covering_11643_children/27078763
+    license: Creative Commons Attribution 4.0 International
+    license_spdx: CC-BY-4.0
+    access: open
+    upstream_counts:
+      records_total: 14190
+      patients_total: 11643
+      twelve_lead_records: 12334
+      nine_lead_records: 1856
+    observed_metadata_only_counts:
+      candidate_records: 14190
+      candidate_patients: 11643
+      selected_records: 12328
+      selected_patients: 10350
+      excluded_non_12_lead: 1856
+      excluded_under_10_seconds: 6
+      excluded_other: 0
+    expected_sampling_frequency_hz: 500
+    source_duration_seconds_range: [5, 120]
+    age_years_range: [0, 14]
+    record_selection:
+      lead_count: exactly_12_source_specific_names_with_bijective_canonical_map
+      minimum_source_samples: 5000
+      minimum_duration_seconds: 10
+      duration_or_lead_failure: exclude_before_waveform_decode_from_header_metadata
+      include: all_and_only_records_meeting_the_above_contract
+      demographic_or_disease_filtering: forbidden
+      selected_record_and_patient_counts: >-
+        Bind exact counts and the ordered identity hash in the pre-inference
+        child execution contract after metadata-only inventory and before any
+        waveform decoding, quality scoring, embedding extraction, or model result.
+      all_and_only_selection_rederived_before_and_after: true
+      patient_mapping_source: AttributesDictionary.csv
+    patient_identity:
+      available: true
+      unit: dataset_scoped_patient_id
+    disease_labels:
+      allowed_use: descriptive_upstream_provenance_only
+      forbidden_uses:
+        - ood_positive_definition
+        - detector_fit
+        - threshold_fit
+        - record_selection
+        - disease_performance_claim
+
+forbidden_sources:
+  ptbxl_fold9_source_validation_c:
+    reason: already_opened_one_shot_v1_cohort
+    patient_hash_range: "[0.8,1.0)"
+    waveform_embedding_score_or_identity_access: forbidden
+  ptbxl_fold10:
+    reason: previously_observed_final_test
+  sph:
+    reason: previously_observed_external_transport_stress_test
+  physionet_challenge_2011_set_b:
+    reason: not_selected_by_parent_protocol
+  physionet_challenge_2011_set_c:
+    reason: not_public_and_not_selected_by_parent_protocol
+  zzu_nine_lead_records:
+    reason: incompatible_input_contract
+  zzu_records_shorter_than_10_seconds:
+    reason: padding_or_signal_fabrication_forbidden
+
+metadata_role_integrity:
+  timing: before_claim_and_after_evaluation
+  challenge:
+    sources:
+      - raw_source_bindings.files.challenge_records
+      - raw_source_bindings.files.challenge_records_acceptable
+      - raw_source_bindings.files.challenge_records_unacceptable
+    requirements:
+      - exact_RECORDS_order_and_membership_rederived
+      - acceptable_and_unacceptable_membership_rederived
+      - indeterminate_is_exact_set_difference
+      - every_inventory_quality_label_matches_rederived_role
+      - every_patient_key_is_null
+  zzu:
+    patient_mapping_source: raw_source_bindings.files.zzu_attributes_dictionary
+    requirements:
+      - every_candidate_filename_ECG_ID_and_Patient_ID_mapping_rederived
+      - all_14190_candidate_headers_accounted_for
+      - all_and_only_eligible_records_selected
+      - exact_selected_patient_assignments_match_inventory
+      - exact_exclusion_reason_counts_match_frozen_metadata_counts
+  failure_policy: fail_before_claim_when_preclaim_or_preserve_failure_after_claim
+
+successor_inventory_contract:
+  schema_version: 2
+  creation: immutable_atomic_create_new_no_overwrite
+  private_path: artifacts/trust_sentinel/ood_external_v2_1_preflight/private/external-waveform-inventory.json
+  public_projection_path: artifacts/trust_sentinel/ood_external_v2_1_preflight/public/external-inventory-summary.json
+  predecessor_inventory_reuse: forbidden
+  exact_selected_counts:
+    challenge_records: 1000
+    zzu_records: 12328
+    zzu_patients: 10350
+    total_records: 13328
+  per_record_private_bindings:
+    - exact_dataset_and_record_reference
+    - exact_patient_role_or_null
+    - exact_challenge_quality_role_or_null
+    - exact_header_and_data_file_size_and_sha256
+    - exact_source_rate_sample_count_and_units
+    - exact_raw_ordered_lead_names
+    - exact_canonical_ordered_lead_names
+    - exact_per_channel_WFDB_data_file_leaf_names
+  public_projection: aggregate_allowlist_only
+  private_inventory_must_remain_git_ignored: true
+  aggregate_projection_must_be_committed_with_child_contract: true
+
+canonicalization:
+  lead_order: [I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6]
+  physical_units: mV
+  require_named_unique_leads: true
+  raw_lead_contract_by_dataset:
+    physionet_challenge_2011_set_a:
+      accepted_names: [I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6]
+      aliases: {}
+    zzu_pecg_v1:
+      accepted_names: [I, II, III, AVR, AVL, AVF, V1, V2, V3, V4, V5, V6]
+      aliases:
+        AVR: aVR
+        AVL: aVL
+        AVF: aVF
+  alias_rules:
+    dataset_specific_exact_match_only: true
+    generic_casefolding: forbidden
+    unsupported_aliases: fail_as_adapter_contract_error
+    map_changes_channel_names_only: true
+    signal_values_sign_units_gain_and_channel_identity_must_not_change: true
+  raw_and_canonical_ordered_names_preserved_separately: true
+  raw_and_canonical_names_verified_before_and_after: true
+  wfdb_data_file_binding:
+    every_channel_file_name: exact_record_stem_dot_dat_leaf
+    directories_or_alternate_files: forbidden
+    raw_and_loaded_header_bindings_must_match: true
+  deterministic_reordering_by_exact_canonical_lead_names: allowed
+  missing_lead_derivation_or_imputation: forbidden
+  silent_amplitude_rescaling: forbidden
+  segment:
+    selection: first_10_seconds
+    source_samples_at_500_hz: 5000
+    timing: before_resampling
+    random_or_quality_based_window_selection: forbidden
+  resampling:
+    implementation: scipy.signal.resample_poly
+    up: 1
+    down: 5
+    axis: time
+    window: [kaiser, 5.0]
+    padtype: constant
+    target_sampling_frequency_hz: 100
+    target_samples_per_lead: 1000
+    output_dtype: float32
+    require_c_contiguous: true
+  quality_input: canonical_physical_mv_before_ptbxl_normalization
+  model_input: canonical_signal_after_unchanged_ptbxl_normalization
+
+evidence_separation:
+  input_contract_failure_state: INVALID_INPUT
+  quality_failure_state: REACQUIRE
+  distribution_failure_state: UNSUPPORTED_INPUT
+  uncertainty_failure_state: ABSTAIN
+  prediction_state: PREDICTION_ALLOWED
+  state_order:
+    - INVALID_INPUT
+    - REACQUIRE
+    - UNSUPPORTED_INPUT
+    - ABSTAIN
+    - PREDICTION_ALLOWED
+  distribution_scoring_population: quality_status_PASS_only
+  technical_quality_success_must_not_count_as_distribution_success: true
+  distribution_rejection_must_not_count_as_quality_success: true
+
+external_ood_definition:
+  unit: quality_passing_external_record
+  challenge_set_a: external_acquisition_and_population_domain
+  zzu_pecg: pediatric_population_and_external_acquisition_domain
+  every_quality_passing_selected_record_is_operational_ood_positive: true
+  native_disease_label_required: false
+  semantic_unknown_disease_interpretation: forbidden
+  ood_probability_interpretation: forbidden
+  claim_text: >-
+    OOD-positive means only that the record comes from a preregistered external
+    acquisition or population domain relative to the PTB-XL-fitted policy. It
+    does not mean that the record contains an unknown disease.
+
+runtime:
+  device: cuda:0
+  model_mode: eval
+  gradient_mode: inference_mode
+  autocast: false
+  tf32: false
+  torch_compile: false
+  deterministic_algorithms: true
+  cudnn_benchmark: false
+  batch_size: 128
+  num_workers: 4
+  shuffle: false
+  drop_last: false
+  full_embedding_passes_per_external_role: 2
+  pass_semantics:
+    stored_scientific_embedding_passes: exactly_two_first_and_repeated
+    integrity_only_adapter_and_full_backbone_replays: >-
+      May be repeated by staged, preterminal, and postpublication semantic
+      verification under the same already-consumed claim. They must reproduce
+      the stored scientific tensors exactly and may not create, replace,
+      select, or publish another scientific output.
+    integrity_replays_are_retries: false
+    integrity_replays_create_new_claims: false
+    zero_quality_pass_semantics: >-
+      Store and verify canonical empty embedding, logit, probability, score,
+      and decision arrays; do not invoke CUDA inference on an empty batch.
+  pass_comparison: exact_alignment_and_embedding_tensor_sha256
+  mismatch_policy: fail_closed
+  scientific_packages:
+    numpy: 2.5.1
+    pydantic: 2.13.4
+    pydantic-core: 2.46.4
+    PyYAML: 6.0.3
+    scipy: 1.18.0
+    torch: 2.13.0+cu130
+    wfdb: 4.3.1
+  isolated_launcher:
+    interpreter: exact_project_dot_venv_Scripts_python_exe
+    required_flags: [-I, -S, -B, -X_pycache_prefix]
+    working_directory: exact_project_root
+    sys_path_order:
+      - cpython_zip
+      - cpython_DLLs
+      - cpython_stdlib
+      - cpython_base
+      - venv_site_packages
+      - project_src
+    site_module_pth_sitecustomize_usercustomize: forbidden
+    parent_child_handoff: random_256_bit_token_exact_owned_runtime_root_and_single_use_file
+    runtime_root_namespace: artifacts/trust_sentinel/.ood_external_v2_1.runtime-<token>
+    ephemeral_environment_roles:
+      APPDATA: runtime_home_AppData_Roaming
+      LOCALAPPDATA: runtime_home_AppData_Local
+      TEMP: runtime_temp
+      TMP: runtime_temp
+      USERPROFILE: runtime_home
+    child_binding_uses_path_neutral_role_names: true
+    pycache_temp_and_application_cache_leaves_must_be_empty_before_terminal_success_and_before_success_return: true
+    dirty_scratch_failure_receipt_retention: still_required
+    caller_environment_not_on_allowlist: forbidden
+    inventory_builder_boundary:
+      preflight_before_any_raw_or_inventory_read: frozen_parent_clean_X_live_remote_history_runtime_git_source_main_and_absent_claim_output
+      postflight_before_success_report: exact_same_preflight_plus_strict_private_public_output_hashes
+  complete_runtime_tree_binding:
+    cpython_base:
+      source: resolved_exact_cpython_3.12.13_target_of_the_one_allowed_project_alias_junction
+      every_regular_file_and_directory_bound: true
+      exclusions: []
+    venv_site_packages:
+      every_regular_file_and_directory_bound: true
+      includes_dist_info_pth_pyc_native_libraries_and_licenses: true
+      exclusions: []
+    member_identity: canonical_relative_path_size_sha256
+    aggregate: domain_separated_sha256_file_count_directory_count_total_bytes
+    verification_timing: [child_freeze, immediately_preclaim, post_evaluation, terminal_semantic_reread]
+  installed_distribution_tree_binding:
+    schema_version: 1
+    packages: [PyYAML, numpy, pydantic, pydantic-core, scipy, torch, wfdb]
+    import_roots:
+      PyYAML: [yaml, _yaml]
+      numpy: [numpy, numpy.libs]
+      pydantic: [pydantic]
+      pydantic-core: [pydantic_core]
+      scipy: [scipy, scipy.libs]
+      torch: [torch, functorch, torchgen]
+      wfdb: [wfdb]
+    note: additional_import_root_projection_inside_the_complete_site_packages_tree
+    excluded_members: [members_outside_each_declared_import_root]
+    every_declared_import_root_must_be_present: true
+    member_identity: canonical_relative_installed_path_size_and_sha256
+    aggregate: domain_separated_sha256_plus_file_count_and_total_bytes
+    absolute_install_paths_published: false
+    verification_timing: child_freeze_preclaim_and_post_evaluation
+  active_package_versions_must_equal_child_binding: true
+  python_executable_bytes_and_environment_identity_bound_in_child: true
+  loaded_module_origin_audit:
+    all_sys_modules_entries_checked: true
+    exact_main_must_be_one_of_four_bound_operational_entrypoints: true
+    built_in_and_frozen_loader_ownership_verified: true
+    namespace_search_locations_must_enter_bound_trees: true
+    pyc_pyo_and_unbound_file_origins: forbidden
+    every_loaded_native_image_enumerated: true
+    non_OS_native_images_must_enter_complete_cpython_or_site_packages_tree: true
+    uv_redirector: separately_hash_bound_but_not_required_to_remain_loaded
+    process_main_image: exact_resolved_cpython_base_tree_python_exe
+  cuda_cache:
+    CUDA_CACHE_DISABLE: "1"
+    TORCHINDUCTOR_CACHE_DIR: isolated_runtime_temp_role
+    scratch_must_remain_empty_after_synthetic_and_full_inference: true
+  git_tool:
+    launcher_name: git.exe
+    launcher_size_bytes: 46464
+    launcher_sha256: 37c5725818d602e951ba2563b870d62763322956b73373da4c33a0b566a80bc9
+    executable_name: git.exe
+    executable_size_bytes: 4344192
+    executable_sha256: c39b1b4f7a57935bbeadf246dc2466316619453a6a9da77c4a9c6bd6d8fb21d3
+    version: git_version_2.53.0.windows.2
+    mingw64_file_count: 4565
+    mingw64_directory_count: 194
+    mingw64_total_bytes: 224959003
+    mingw64_tree_sha256: 086bd1898a3859d59d4c7184f1039d73cdf75c07de76f70fc375495ed922d9e2
+  nvidia_driver_tool:
+    driver_version: "596.49"
+    files:
+      nvidia-smi.exe: {size_bytes: 1624808, sha256: 74348eb0bee800304ef5214d1fe8e643d7220ef8585a4e60c564fc24a06d3939}
+      nvml.dll: {size_bytes: 1391848, sha256: 046b733c849261658cd318aab6e26fec94f330a9981a1dc4a30617dfea862673}
+      nvcuda.dll: {size_bytes: 4466920, sha256: ec9942ff94bcf2a6714531932720d0d36bd1f362df768af9ae21f2388c08ef7c}
+    query_environment: exact_system32_PATH_plus_canonical_ProgramFiles_and_ProgramW6432
+    query_working_directory: exact_System32
+    exact_file_hashes_rechecked_pre_and_post: true
+  split_archive_tool:
+    implementation: 7zip
+    version: "26.02"
+    executable_name: 7z.exe
+    executable_size_bytes: 576000
+    executable_sha256: 83967f1b02b43c4efeda302795722c809e0e81b8307de73558d10484d5676a7d
+    library_name: 7z.dll
+    library_size_bytes: 1906688
+    library_sha256: 69fd4df057985c40e510e2fac182881c7f85e90aa13ec703f763a8fdb2ce61f8
+    resolved_executable_version_size_and_sha256_bound_in_child: true
+    absolute_user_path_publication: forbidden
+    unchanged_before_and_after_required: true
+    execution_isolation:
+      application_directory: fresh_verified_direct_two_file_replica_of_bound_exe_and_dll
+      codecs_formats_or_other_adjacent_plugins: absent
+      working_directory: separate_fresh_verified_empty_directory
+      environment: minimal_fixed_SystemRoot_System32_TEMP_TMP_and_PATH
+      PATH: replica_tool_directory_then_System32_only
+      caller_cwd_and_environment: forbidden
+      replica_and_original_hashes_rechecked_before_and_after_each_call: true
+
+evaluation:
+  primary_endpoints:
+    challenge_group3_technical_block_sensitivity:
+      numerator: selected_group3_records_with_quality_status_exactly_REACQUIRE
+      denominator: all_selected_group3_records
+      direction: higher_is_better
+      minimum: 0.95
+      resampling_unit: record
+    challenge_group1_quality_pass_rate:
+      numerator: group1_records_with_quality_status_PASS
+      denominator: all_selected_group1_records
+      direction: higher_is_better
+      minimum: 0.90
+      resampling_unit: record
+    challenge_external_distribution_recall:
+      numerator: quality_PASS_selected_records_with_score_strictly_above_v1_threshold
+      denominator: all_quality_PASS_selected_records
+      direction: higher_is_better
+      minimum: 0.90
+      resampling_unit: record
+    zzu_external_distribution_recall:
+      numerator: quality_PASS_selected_records_with_score_strictly_above_v1_threshold
+      denominator: all_quality_PASS_selected_records
+      direction: higher_is_better
+      minimum: 0.90
+      resampling_unit: patient_cluster
+      replicate_statistic: record_weighted_recall
+  multiplicity:
+    family: exact_four_co_primary_endpoints
+    family_wise_alpha: 0.05
+    method: bonferroni
+    one_sided_alpha_per_endpoint: 0.0125
+    required_one_sided_confidence_level: 0.9875
+    all_four_endpoints_must_pass: true
+  bootstrap:
+    resamples: 10000
+    random_generator: numpy.random.Generator_PCG64
+    quantile_method: linear
+    lower_quantile_for_minimum_gates: 0.0125
+    challenge:
+      seed: 20260901
+      unit: record
+      record_order: ascending_official_record_stem_utf8
+      draw_rule: draw_n_records_with_replacement
+      generator_scope: reinitialize_PCG64_with_the_same_seed_for_each_endpoint
+      exact_algorithm: >-
+        numpy.random.Generator(numpy.random.PCG64(seed)).integers is used to
+        draw n ordered record indices with replacement for every replicate;
+        a binomial shortcut is forbidden even though its distribution matches.
+    zzu:
+      seed: 20260902
+      unit: patient_cluster
+      patient_order: ascending_canonical_dataset_scoped_patient_id
+      record_order_within_patient: ascending_official_record_identity_utf8
+      draw_rule: draw_n_patients_with_replacement_and_include_all_patient_records
+    nonfinite_empty_or_undefined_replicate_policy: fail_closed
+  hard_gates:
+    challenge_reference_label_alignment_complete: true
+    challenge_invalid_input_count: 0
+    challenge_quality_pass_records_minimum: 1
+    zzu_invalid_input_count: 0
+    zzu_quality_pass_record_coverage_minimum: 0.80
+    zzu_quality_pass_patient_coverage_minimum: 0.80
+    challenge_group3_prediction_allowed_count: 0
+    skipped_selected_records: 0
+    target_site_fitting_performed: false
+    v1_policy_bytes_unchanged_before_and_after: true
+    exact_v1_whole_bundle_verifier_passes: true
+    external_raw_source_sizes_sha256_and_expected_md5_verified_before_and_after: true
+    exact_dataset_roots_verified: true
+    exact_selected_input_inventory_verified_before_and_after: true
+    exact_quality_labels_patient_roles_and_all_and_only_selection_rederived: true
+    raw_and_canonical_lead_and_data_file_bindings_verified: true
+    active_scientific_package_versions_match_child: true
+    deterministic_repeated_embeddings_match: true
+    raw_source_to_canonical_signal_replay_matches: true
+    canonical_signal_to_full_backbone_embedding_replay_matches: true
+    aggregate_only_publication_verified: true
+  secondary_report_only: []
+  secondary_report_rationale: >-
+    No post-hoc exploratory subgroup summaries are preregistered. Public output
+    is limited to the four co-primary endpoints, deterministic hard-gate
+    aggregates, and exact five-state route counts; the two-record Challenge
+    indeterminate group is not separately published.
+  final_route_counts:
+    exact_order: [INVALID_INPUT, REACQUIRE, UNSUPPORTED_INPUT, ABSTAIN, PREDICTION_ALLOWED]
+    include_explicit_zero_counts: true
+    rederived_from_private_rows_by_terminal_verifier: true
+  unsupported_metrics:
+    ood_auroc: NOT_EVALUATED_NO_EXTERNAL_IN_DISTRIBUTION_CONTROL
+    ood_average_precision: NOT_EVALUATED_NO_EXTERNAL_IN_DISTRIBUTION_CONTROL
+    unknown_disease_recall: NOT_EVALUATED
+    diagnostic_performance: NOT_EVALUATED
+
+one_shot_external_access:
+  preclaim_allowed:
+    - download_and_license_inventory
+    - file_size_and_checksum_verification
+    - header_and_nonwaveform_metadata_parsing
+    - challenge_reference_quality_label_parsing
+    - zzu_patient_role_and_lead_duration_inventory
+    - exact_ordered_selection_identity_hashing
+  preclaim_forbidden:
+    - waveform_sample_decode
+    - quality_policy_execution
+    - embedding_extraction
+    - distribution_scoring
+    - model_logits_or_probabilities
+    - endpoint_or_subgroup_metrics
+  prerequisites:
+    - parent_protocol_frozen_and_committed
+    - child_execution_contract_with_exact_input_hashes_frozen_and_committed
+    - exact_v1_bundle_verified
+    - exact_raw_source_hashes_and_semantic_roles_rederived
+    - exact_python_scientific_package_tree_and_7zip_identities_verified
+    - quality_implementation_hash_verified
+    - output_root_absent
+    - clean_committed_revision
+  output_root: artifacts/trust_sentinel/ood_external_v2_1
+  output_root_must_be_absent: true
+  retained_armed_marker: external-access-armed.json
+  external_claim:
+    path: artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json
+    creation: atomic_create_new_no_overwrite
+    timing: after_durable_armed_marker_before_first_waveform_sample_decode
+    durability: >-
+      POSIX file flush plus parent-directory fsync; on Windows file
+      FlushFileBuffers plus a writable backup-semantics directory handle and
+      FlushFileBuffers. Unsupported durability guarantees fail closed.
+    visibility_consumes_one_shot_before_durability_completion: true
+    scope: both_selected_external_sources_in_one_claim
+    retention: permanent
+  retry_resume_or_second_inference: forbidden
+  postclaim_failure:
+    preserve_existing_evidence: true
+    emit_sanitized_failure_receipt: required_when_claim_entry_became_visible
+    ordinary_failure_success_manifest: forbidden
+    ambiguous_terminal_commit: >-
+      If a candidate success-manifest link became visible but its directory
+      durability or independent reread failed, retain it beside a required
+      failure receipt. This is AMBIGUOUS_TERMINAL_COMMIT, not success; the
+      verifier must reject coexistence.
+    new_protocol_and_new_output_root_required: true
+  success_commit_order:
+    - complete_and_verify_all_pre_manifest_evidence_in_staging
+    - atomically_commit_pre_manifest_root_to_final_output
+    - build_and_preverify_manifest_bytes_against_final_root
+    - atomically_publish_success_manifest_as_terminal_success_write
+    - independently_reread_full_terminal_bundle_and_adjacent_claim
+    - return_only_the_independently_reloaded_result
+  transaction_integrity:
+    common_namespace_parent_direct_ancestry_and_file_identity_captured_before_any_write: true
+    common_namespace_parent_identity_rechecked_before_and_after_staging_claim_rename_terminal_failure_and_fsync: true
+    owner_directory_file_identity_captured_before_claim: true
+    owner_nonce_marker_and_directory_identity_rechecked_before_and_after_root_commit: true
+    owner_nonce_marker_and_directory_identity_rechecked_immediately_before_and_after_terminal_or_failure_link: true
+    complete_tree_file_ID_size_timestamp_and_sha256_snapshot_before_deep_semantics: true
+    second_complete_tree_enumeration_and_hash_after_deep_semantics: true
+    adjacent_claim_file_ID_and_hash_stable_across_verification: true
+    runtime_scratch_empty_before_terminal_success_and_after_terminal_semantic_reread: true
+    failure_receipt_must_remain_publishable_when_scratch_check_fails: true
+    terminal_semantic_verifier_requires_live_project_root_and_bound_7zip: true
+    terminal_semantic_verifier_rechecks_canonical_parent_child_X_Y_runtime_raw_metadata_and_archive_closure: true
+    terminal_semantic_verifier_replays_every_raw_adapter_against_canonical_signal_shards: true
+    changed_or_foreign_directory_never_receives_a_receipt: true
+    threat_scope: trusted_local_operator_accidental_drift_persistent_substitution_and_ordinary_races
+    active_privileged_syscall_timed_swap_restore_or_self_check_code_modification_resistance_claimed: false
+
+artifacts:
+  artifact_types:
+    child_contract: ecg_trust.ood_external_v2_1_child_contract
+    aggregate_result: ecg_trust.ood_external_v2_1_result
+    private_record_evidence: ecg_trust.ood_external_v2_1_record_evidence
+    private_embedding_evidence: ecg_trust.ood_external_v2_1_embeddings
+    private_bootstrap_evidence: ecg_trust.ood_external_v2_1_bootstrap_replicates
+    private_quality_shard: ecg_trust.ood_external_v2_1_quality_audit_shard
+    private_quality_index: ecg_trust.ood_external_v2_1_quality_audit_index
+    private_canonical_signals: ecg_trust.ood_external_v2_1_canonical_signals
+    private_routing_contract: ecg_trust.ood_external_v2_1_routing_contract
+    success_manifest: ecg_trust.ood_external_v2_1_success_manifest
+    access_claim: ecg_trust.ood_external_v2_1_access_claim
+    access_marker: ecg_trust.ood_external_v2_1_access_marker
+    failure_receipt: ecg_trust.ood_external_v2_1_failure
+  private:
+    - exact_input_manifest
+    - challenge_quality_alignment
+    - zzu_patient_alignment
+    - canonicalization_audit
+    - embeddings
+    - distribution_scores
+    - per_record_quality_and_route_decisions
+    - bootstrap_replicates
+    - verified_v1_policy_copy_or_content_binding
+    - exact_sealed_v1_aggregate_result_copy_with_exact_historical_source_gate_rederivation
+    - exact_parent_and_child_contract_copies
+    - exact_frozen_checkpoint_resolved_config_and_normalization_copies
+    - every_adapter_success_canonical_signal_in_53_inventory_aligned_npz_chunks
+    - canonical_signal_sidecar_with_exact_indices_refs_hashes_and_chunk_hashes
+    - quality_audit_index_and_53_canonical_json_shards_of_at_most_8MiB_each
+    - per_record_canonical_signal_tensor_sha256
+    - complete_signal_quality_report_metrics_issues_and_boundaries
+    - first_and_repeated_logits_tensor_sha256
+    - first_logits_and_calibrated_probabilities
+    - five_labelwise_conformal_decisions
+    - model_state_sha256_before_and_after
+    - first_and_repeated_embedding_and_logit_tensors_stored_separately
+  private_semantic_reverification:
+    - quality_status_and_reason_codes_rederived_from_complete_report_evidence
+    - distribution_scores_rederived_from_stored_embeddings_and_frozen_policy
+    - entropy_and_acceptance_rederived_from_stored_probabilities
+    - conformal_singleton_gate_rederived_from_five_decisions
+    - final_route_rederived_in_frozen_state_order
+    - adapter_or_provenance_contract_failure_is_terminal_failure_not_INVALID_INPUT
+    - raw_sources_redecoded_by_every_adapter_and_array_equal_to_stored_canonical_signals
+    - exact_raw_source_sizes_hashes_and_expected_md5_rechecked_after_adapter_replay
+    - canonical_signals_reassessed_with_the_frozen_quality_implementation
+    - both_logit_passes_replayed_by_manifest_covered_head_on_exact_cuda_runtime
+    - quality_PASS_canonical_signals_normalized_by_manifest_covered_exact_artifact
+    - two_full_backbone_cuda_embedding_passes_match_both_stored_embedding_tensors
+    - head_only_replay_uses_exact_batch_128_path_and_requires_array_equal
+    - cpu_replay_or_numeric_tolerance_for_logits_forbidden
+    - every_endpoint_count_rate_gate_and_bootstrap_quantile_rederived_from_rows
+    - public_source_gate_exactly_equals_the_historical_gate_rebuilt_from_the_copied_sealed_v1_result
+  aggregate_result:
+    filename: ood-external-v2-1-result.json
+    public_fields: allowlisted_aggregate_only
+  success_manifest:
+    filename: success-manifest.json
+    creation: atomic_create_new_no_overwrite_as_final_success_write
+    terminal_write_after_output_root_commit: true
+  public_forbidden:
+    - record_ids
+    - patient_ids
+    - file_paths
+    - waveforms
+    - embeddings
+    - row_scores
+    - logits
+    - probabilities
+    - bootstrap_replicate_arrays
+    - raw_demographics
+    - native_disease_labels
+  automatic_publication: false
+
+eligibility:
+  external_evidence_eligible_when:
+    - all_four_multiplicity_adjusted_primary_gates_pass
+    - every_hard_gate_passes
+    - immutable_success_bundle_verifies
+    - no_failure_receipt_exists
+  complete_but_failed_status: EXTERNAL_OOD_TARGET_MISSED
+  insufficient_status: EXTERNAL_OOD_INSUFFICIENT_EVIDENCE
+  success_status: EXTERNAL_OOD_EVIDENCE_COMPLETE
+  unfavorable_result_is_completed_evidence: true
+  insufficient_result_semantics: >-
+    A valid completed run with an empty preregistered endpoint denominator
+    omits only that undefined endpoint and its bootstrap array, yields
+    EXTERNAL_OOD_INSUFFICIENT_EVIDENCE, and is retained in a terminally
+    verified immutable bundle. Undefined 0/0 is never coerced to a target miss
+    or success. Input, hash, runtime, code-integrity, or implementation errors
+    instead produce a postclaim failure receipt and forbid a success manifest.
+  insufficient_result_is_completed_bundle_when_integrity_remains_verified: true
+  system_integration:
+    automatic: false
+    require_external_evidence_eligible: true
+    require_separate_source_support_evidence_eligible: true
+    current_v1_source_support_evidence_eligible: false
+    current_consequence: >-
+      This protocol cannot by itself authorize Sentinel integration even if all
+      external endpoints pass. A distinct future source-retention protocol,
+      without reusing C, must first produce eligible evidence.
+
+claims:
+  allowed_scope: retrospective_external_acquisition_and_population_stress_test
+  required_language:
+    - designed_after_observing_v1
+    - successor_written_after_metadata_only_v2_feasibility_failure
+    - no_external_waveform_or_model_output_observed_before_successor_freeze
+    - exact_v1_distribution_policy_no_tuning_or_recalibration
+    - operational_external_domain_ood_not_unknown_disease
+    - technical_quality_and_distribution_support_evaluated_separately
+    - research_only
+    - not_clinical_validation
+  forbidden:
+    - independent_replication_of_v1
+    - validated_unknown_disease_detection
+    - probability_of_being_ood
+    - diagnostic_validation
+    - pediatric_diagnostic_validation
+    - clinical_validation
+    - clinical_safety
+    - treatment_recommendation
+    - medical_device
+    - deployment_ready
+    - complete_vnext_release

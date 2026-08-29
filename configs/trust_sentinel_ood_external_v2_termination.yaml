@@ -1,0 +1,81 @@
+schema_version: 1
+artifact_type: ecg_trust.ood_external_v2_pre_inference_termination
+protocol_id: trust-sentinel-ood-external-v2-parent
+status: PRE_INFERENCE_PROTOCOL_INFEASIBLE
+recorded_at_utc: "2026-08-29T18:22:31Z"
+research_only: true
+
+parent:
+  path: configs/trust_sentinel_ood_external_v2.yaml
+  file_sha256: sha256:3aacb31be939d1a2bea96bb29f193d60a4b54c38a40a1a7e2a490cfe60c3b0d9
+  frozen_at_utc: "2026-08-29T17:36:32Z"
+
+boundary_state:
+  external_access_armed: false
+  external_claim_created: false
+  output_root_created: false
+  waveform_samples_decoded: false
+  signal_quality_executed: false
+  embeddings_extracted: false
+  distribution_scores_computed: false
+  model_logits_or_probabilities_computed: false
+  endpoint_or_subgroup_metrics_computed: false
+
+allowed_metadata_observed:
+  - archive_sizes_and_cryptographic_checksums
+  - licenses_and_release_metadata
+  - wfdb_headers_without_waveform_sample_decode
+  - lead_names_sampling_rates_sample_counts_and_units
+  - challenge_reference_quality_lists
+  - zzu_patient_role_lead_count_and_duration_metadata
+  - exact_ordered_record_identity_and_file_hash_inventory
+
+preflight_evidence:
+  private_inventory:
+    path: artifacts/trust_sentinel/ood_external_v2_preflight/private/external-waveform-inventory.json
+    file_sha256: sha256:01b33b992c3e9a777eb253571f35907e8aa99e3d36b34a19a3c374e7732aef13
+    inventory_sha256: sha256:d170f03a6ed5350c0b7b3e0a90b319751e642bb5ec3d86c1bae3325f51ae0966
+  aggregate_public_projection:
+    path: artifacts/trust_sentinel/ood_external_v2_preflight/public/external-inventory-summary.json
+    file_sha256: sha256:8de32fce76e73fd00958878e74250c9117cdae7e3f4d9f453f2231fcf16a5814
+    projection_sha256: sha256:15cc600e2b825b8c9e68502da2e3c579529cb115601dae45233305f58887eed3
+  selected_counts:
+    challenge_records: 1000
+    zzu_records: 12328
+    zzu_patients: 10350
+    total_records: 13328
+
+infeasibility:
+  category: frozen_input_contract_does_not_match_selected_source_metadata
+  parent_rule: >-
+    The v2 parent requires exact mixed-case canonical lead names and states
+    that no lead may be relabeled.
+  observed_source_fact: >-
+    Selected ZZU WFDB headers use the exact augmented-lead spellings AVR, AVL,
+    and AVF rather than aVR, aVL, and aVF.
+  consequence: >-
+    The selected ZZU cohort cannot be decoded under the frozen v2
+    canonicalization contract without introducing an unregistered name map.
+  decision: terminate_before_claim_and_before_waveform_decode
+
+disposition:
+  original_parent_must_remain_byte_identical: true
+  original_claim_and_output_paths_must_never_be_used: true
+  unfavorable_or_infeasible_evidence_must_be_retained: true
+  retry_under_original_protocol: forbidden
+  successor_requirements:
+    - new_protocol_identifier
+    - new_parent_and_child_contracts
+    - new_inventory_namespace
+    - new_output_root_and_one_shot_claim
+    - exact_dataset_specific_case_alias_map_frozen_before_waveform_decode
+    - raw_and_canonical_lead_names_preserved_and_verified_separately
+    - disclosure_that_successor_was_written_after_metadata_only_feasibility_access
+
+claims:
+  allowed: metadata_only_pre_inference_feasibility_failure
+  forbidden:
+    - model_evaluation_completed
+    - external_ood_result
+    - clinical_validation
+    - waveform_or_patient_level_finding

@@ -8,6 +8,7 @@ import random
 import subprocess
 from collections.abc import Sized
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, cast
 
 import numpy as np
@@ -80,6 +81,7 @@ def configure_deterministic_cuda(
     expected_cuda_runtime: str,
     expected_cudnn_version: int,
     expected_nvidia_driver_version: str,
+    nvidia_smi_executable: str | Path | None = None,
 ) -> DeterministicCUDARuntime:
     """Resolve and fail-closed configure the exact preregistered CUDA runtime."""
 
@@ -108,7 +110,11 @@ def configure_deterministic_cuda(
     observed_torch = str(torch.__version__)
     observed_cuda = torch.version.cuda
     observed_cudnn = torch.backends.cudnn.version()  # type: ignore[no-untyped-call]
-    observed_driver = _nvidia_driver_version()
+    observed_driver = (
+        _nvidia_driver_version()
+        if nvidia_smi_executable is None
+        else _nvidia_driver_version(nvidia_smi_executable)
+    )
     resolved_device = str(device)
     observed_device_type = device.type
     observed_capability_text = f"{observed_capability[0]}.{observed_capability[1]}"
@@ -216,11 +222,49 @@ def _immutable_float32_copy(value: Float32Array) -> Float32Array:
     return cast(Float32Array, immutable)
 
 
-def _nvidia_driver_version() -> str:
+def _nvidia_driver_version(executable: str | Path = "nvidia-smi") -> str:
+    requested: str | Path
+    environment: dict[str, str] | None = None
+    working_directory: Path | None = None
+    if isinstance(executable, Path):
+        try:
+            requested = executable.resolve(strict=True)
+        except OSError as error:
+            raise OODRuntimeError("bound NVIDIA driver tool is unavailable") from error
+        junction = getattr(requested, "is_junction", None)
+        if (
+            not requested.is_absolute()
+            or requested.is_symlink()
+            or bool(junction is not None and junction())
+            or not requested.is_file()
+        ):
+            raise OODRuntimeError("bound NVIDIA driver tool is indirect")
+        working_directory = requested.parent
+        for name in ("ProgramFiles", "ProgramW6432"):
+            if os.environ.get(name) != r"C:\Program Files":
+                raise OODRuntimeError(
+                    "bound NVIDIA driver environment is not canonical"
+                )
+        environment = {
+            name: value
+            for name in (
+                "COMSPEC",
+                "ProgramFiles",
+                "ProgramW6432",
+                "SYSTEMROOT",
+                "TEMP",
+                "TMP",
+                "WINDIR",
+            )
+            if (value := os.environ.get(name))
+        }
+        environment["PATH"] = str(requested.parent)
+    else:
+        requested = executable
     try:
         completed = subprocess.run(
             [
-                "nvidia-smi",
+                requested,
                 "--id=0",
                 "--query-gpu=driver_version",
                 "--format=csv,noheader,nounits",
@@ -229,13 +273,15 @@ def _nvidia_driver_version() -> str:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            cwd=working_directory,
+            env=environment,
             errors="strict",
             timeout=15,
         )
     except (OSError, subprocess.SubprocessError, UnicodeError) as error:
         raise OODRuntimeError("NVIDIA driver version could not be queried") from error
     values = tuple(line.strip() for line in completed.stdout.splitlines() if line.strip())
-    if completed.returncode != 0 or len(values) != 1:
+    if completed.returncode != 0 or completed.stderr or len(values) != 1:
         raise OODRuntimeError("NVIDIA driver version query was not canonical")
     return values[0]
 
@@ -286,11 +332,73 @@ def extract_embeddings_twice(
         drop_last=False,
         persistent_workers=True,
     )
-    first = _extract_single_pass(model, loader=loader, runtime=runtime)
-    repeated = _extract_single_pass(model, loader=loader, runtime=runtime)
-    if first.shape[0] != record_count:
-        raise OODRuntimeError("embedding extraction did not return every dataset record")
-    return RepeatedEmbeddingExtraction(first=first, repeated=repeated)
+    try:
+        first = _extract_single_pass(model, loader=loader, runtime=runtime)
+        repeated = _extract_single_pass(model, loader=loader, runtime=runtime)
+        if first.shape[0] != record_count:
+            raise OODRuntimeError("embedding extraction did not return every dataset record")
+        return RepeatedEmbeddingExtraction(first=first, repeated=repeated)
+    finally:
+        _shutdown_persistent_embedding_loader(loader)
+
+
+def _shutdown_persistent_embedding_loader(
+    loader: DataLoader[tuple[Tensor, Tensor]],
+) -> None:
+    """Synchronously close the frozen persistent-worker loader on every exit path."""
+
+    if str(torch.__version__) != "2.13.0+cu130":
+        raise OODRuntimeError("embedding loader cleanup requires the frozen PyTorch")
+    if (
+        loader.num_workers != _NUM_WORKERS
+        or loader.pin_memory is not True
+        or loader.persistent_workers is not True
+    ):
+        raise OODRuntimeError("embedding loader cleanup contract differs")
+
+    # PyTorch has no public eager-shutdown API for a persistent DataLoader.  The
+    # frozen 2.13.0 runtime exposes this exact iterator method; relying on the
+    # iterator destructor is unsafe when an exception traceback retains frames.
+    iterator = getattr(loader, "_iterator", None)
+    if iterator is None:
+        return
+    shutdown_workers = getattr(iterator, "_shutdown_workers", None)
+    workers = getattr(iterator, "_workers", None)
+    pin_memory_thread = getattr(iterator, "_pin_memory_thread", None)
+    if (
+        not callable(shutdown_workers)
+        or not isinstance(workers, list)
+        or len(workers) != _NUM_WORKERS
+        or getattr(iterator, "_persistent_workers", None) is not True
+    ):
+        raise OODRuntimeError("frozen embedding loader cleanup API is unavailable")
+
+    cleanup_error: Exception | None = None
+    try:
+        shutdown_workers()
+    except Exception as error:  # pragma: no cover - defensive frozen-runtime guard
+        cleanup_error = error
+    finally:
+        # Break the loader-to-iterator reference even when the extraction
+        # traceback itself is retained by the post-claim failure path.
+        loader._iterator = None
+
+    worker_state_invalid = False
+    for worker in workers:
+        is_alive = getattr(worker, "is_alive", None)
+        if not callable(is_alive) or bool(is_alive()):
+            worker_state_invalid = True
+    pin_thread_alive = False
+    if pin_memory_thread is not None:
+        pin_is_alive = getattr(pin_memory_thread, "is_alive", None)
+        pin_thread_alive = not callable(pin_is_alive) or bool(pin_is_alive())
+    if (
+        cleanup_error is not None
+        or getattr(iterator, "_shutdown", None) is not True
+        or worker_state_invalid
+        or pin_thread_alive
+    ):
+        raise OODRuntimeError("embedding loader workers could not be closed") from cleanup_error
 
 
 def _extract_single_pass(

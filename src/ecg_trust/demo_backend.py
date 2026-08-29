@@ -25,7 +25,6 @@ from ecg_trust.data.dataset import (
 from ecg_trust.data.manifest import sha256_file
 from ecg_trust.experiment_config import ExperimentConfigError, ModelConfig
 from ecg_trust.experiment_runner import DevelopmentRunnerError, build_experiment_model
-from ecg_trust.explain import grad_cam_1d, integrated_gradients
 from ecg_trust.models import ECGTransformer, ResNet1D, count_parameters
 from ecg_trust.protocol import CALIBRATION_FOLDS, TRAIN_FOLDS, ExperimentProtocol
 from ecg_trust.training import CHECKPOINT_SCHEMA_VERSION
@@ -760,8 +759,12 @@ class DemoInferenceBackend:
             if attribution_method == "grad_cam":
                 if not isinstance(self.model, ResNet1D):
                     raise DemoInputError("grad_cam attribution is supported only for ResNet1D")
+                from ecg_trust.explain import grad_cam_1d
+
                 values = grad_cam_1d(self.model, inputs, target_index)[0]
             elif attribution_method == "integrated_gradients":
+                from ecg_trust.explain import integrated_gradients
+
                 values = integrated_gradients(
                     self.model,
                     inputs,

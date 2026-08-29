@@ -1,0 +1,10791 @@
+"""One-shot external OOD v2 execution against the exact sealed v1 policy.
+
+This module deliberately has no fitting, threshold, method-selection, or target
+adaptation API.  The only model score accepted by the execution path is the
+score produced by the byte-bound v1 distribution policy.  The authoritative v1
+whole-bundle verifier touches private v1 bytes solely to establish integrity;
+this module never exposes, subsets, scores, or analyzes those private bytes.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import hashlib
+import importlib
+import importlib.metadata
+import json
+import math
+import os
+import platform
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+from collections import Counter
+from collections.abc import Callable, Mapping
+from contextlib import suppress
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from fractions import Fraction
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from types import MappingProxyType, ModuleType
+from typing import Any, Final, cast
+
+import numpy as np
+import torch
+import yaml  # type: ignore[import-untyped]
+from numpy.typing import NDArray
+from torch import Tensor
+from torch.utils.data import Dataset
+
+from ecg_trust.conformal import BinaryDecision, LabelwiseBinaryConformal
+from ecg_trust.constants import LEADS, SUPERCLASSES, TARGET_COLUMNS
+from ecg_trust.data.dataset import NormalizationStats
+from ecg_trust.demo_backend import FrozenDecisionPolicy
+from ecg_trust.experiment_config import ModelConfig
+from ecg_trust.experiment_runner import build_experiment_model
+from ecg_trust.foundation.adapter import model_state_sha256
+from ecg_trust.models.resnet1d import ResNet1D
+from ecg_trust.ood_completion.models import (
+    DistributionPolicy,
+    OODCompletionResult,
+    OODCompletionSuccessManifest,
+    load_distribution_policy_bytes,
+    load_ood_completion_result_bytes,
+)
+from ecg_trust.ood_completion.pipeline import verify_ood_completion_bundle
+from ecg_trust.ood_completion.runtime import (
+    DeterministicCUDARuntime,
+    configure_deterministic_cuda,
+    extract_embeddings_twice,
+    prepare_resnet_for_embedding,
+)
+from ecg_trust.ood_v2.adapters import (
+    ADAPTER_VERSION,
+    PHYSICAL_UNITS,
+    RESAMPLE_PADTYPE,
+    RESAMPLE_WINDOW,
+    TARGET_FREQUENCY_HZ,
+    TARGET_SAMPLES,
+    WINDOW_SECONDS,
+    AdapterProvenance,
+    CanonicalExternalSignal,
+    ExternalECGAdapterError,
+    load_challenge_2011_signal,
+    load_zzu_pediatric_signal,
+)
+from ecg_trust.ood_v2.bundle import (
+    ACCESS_CLAIM_ARTIFACT_TYPE,
+    ACCESS_MARKER_ARTIFACT_TYPE,
+    ACCESS_MARKER_FILENAME,
+    CANONICAL_SIGNAL_MEMBER_MAX_BYTES,
+    CANONICAL_SIGNAL_NPZ_PATH,
+    CANONICAL_SIGNAL_SHARD_COUNT,
+    CANONICAL_SIGNAL_SHARD_RECORDS,
+    CANONICAL_SIGNAL_SIDECAR_PATH,
+    FAILURE_RECEIPT_FILENAME,
+    QUALITY_AUDIT_EXPECTED_RECORDS,
+    QUALITY_AUDIT_INDEX_PATH,
+    QUALITY_AUDIT_SHARD_COUNT,
+    QUALITY_AUDIT_SHARD_MAX_BYTES,
+    QUALITY_AUDIT_SHARD_PATHS,
+    QUALITY_AUDIT_SHARD_RECORDS,
+    SUCCESS_MANIFEST_FILENAME,
+    build_success_manifest,
+    canonical_json_bytes,
+    canonical_sha256,
+    preverify_external_v2_bundle,
+    sha256_bytes,
+    sha256_file,
+    verify_external_v2_bundle,
+)
+from ecg_trust.ood_v2.inventory import (
+    CHALLENGE_2011_DATASET,
+    CHALLENGE_2011_VERSION,
+    ZZU_PEDIATRIC_DATASET,
+    ZZU_PEDIATRIC_VERSION,
+    ArchiveExtractionClosure,
+    ExternalInventoryRecord,
+    ExternalWaveformInventory,
+    SevenZipToolBinding,
+    build_external_inventory,
+    external_inventory_public_projection,
+    load_external_inventory,
+    parse_challenge_2011_quality_lists,
+    parse_zzu_pediatric_attributes_csv,
+    resolve_inventory_record_base,
+    select_zzu_pediatric_inventory_records,
+    validate_challenge_2011_set_a_inventory,
+    verify_challenge_tar_extraction_closure,
+    verify_external_inventory,
+    verify_seven_zip_tool_binding,
+    verify_wfdb_candidate_file_set,
+    verify_zzu_split_zip_extraction_closure,
+)
+from ecg_trust.ood_v2.models import (
+    OOD_V2_ARTIFACT_TYPE,
+    OOD_V2_RESULT_FILENAME,
+    AggregateRouteCounts,
+    EvidenceRequirements,
+    ExternalCohortRole,
+    ExternalOODHardGates,
+    HistoricalSourceBootstrapInterval,
+    OODAxis,
+    OODV2IntegritySummary,
+    OODV2Result,
+    OODV2ResultBody,
+    OODV2Status,
+    ResamplingUnit,
+    SourceGateSummary,
+    load_ood_v2_result_bytes,
+    ood_v2_result_json_bytes,
+    seal_ood_v2_result,
+)
+from ecg_trust.ood_v2.statistics import (
+    evaluate_external_ood_gate,
+    evaluate_technical_quality_gate,
+)
+from ecg_trust.open_world import normalized_bernoulli_entropy
+from ecg_trust.quality.signal_quality import (
+    DEFAULT_SIGNAL_QUALITY_CONFIG,
+    QualityStatus,
+    ReasonCode,
+    SignalMetadata,
+    SignalQualityReport,
+    assess_signal_quality,
+)
+from ecg_trust.source_calibration.models import SourceCalibrationResult
+from ecg_trust.source_calibration.pipeline import load_source_calibration_result_bytes
+
+Float32Array = NDArray[np.float32]
+Float64Array = NDArray[np.float64]
+BoolArray = NDArray[np.bool_]
+Int64Array = NDArray[np.int64]
+
+ORIGINAL_PROTOCOL_ID: Final = "trust-sentinel-ood-external-v2-parent"
+PROTOCOL_ID: Final = "trust-sentinel-ood-external-v2-1-parent"
+PARENT_CONFIG_DEFAULT: Final = "configs/trust_sentinel_ood_external_v2.yaml"
+SUCCESSOR_PARENT_CONFIG_PATH: Final = "configs/trust_sentinel_ood_external_v2_1.yaml"
+SUCCESSOR_CHILD_CONFIG_PATH: Final = (
+    "configs/trust_sentinel_ood_external_v2_1_execution.json"
+)
+SUCCESSOR_PRIVATE_INVENTORY_PATH: Final = (
+    "artifacts/trust_sentinel/ood_external_v2_1_preflight/private/"
+    "external-waveform-inventory.json"
+)
+SUCCESSOR_PUBLIC_PROJECTION_PATH: Final = (
+    "artifacts/trust_sentinel/ood_external_v2_1_preflight/public/"
+    "external-inventory-summary.json"
+)
+EXPECTED_PARENT_CONFIG_SHA256: Final = (
+    "sha256:3aacb31be939d1a2bea96bb29f193d60a4b54c38a40a1a7e2a490cfe60c3b0d9"
+)
+EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256: Final[str | None] = (
+    "sha256:b60c757c5da69ec0a0929c5d503d434302b406fd35c0d6237aaf23f3ea243f98"
+)
+SUCCESSOR_PROTOCOL_ID: Final = PROTOCOL_ID
+PREDECESSOR_TERMINATION_PATH: Final = (
+    "configs/trust_sentinel_ood_external_v2_termination.yaml"
+)
+PREDECESSOR_TERMINATION_FILE_SHA256: Final = (
+    "sha256:289736acc200be025075c0f4094ac6d1719b4e50d55dfcf3b628b287158e240a"
+)
+PREDECESSOR_TERMINATION_NOTE_PATH: Final = (
+    "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_INFEASIBILITY.md"
+)
+PREDECESSOR_TERMINATION_NOTE_FILE_SHA256: Final = (
+    "sha256:5d16d2ebddf15acc8a5915ba274ba565bc8a35ac9b3bcdf99ccd9a03a6eedc89"
+)
+PREDECESSOR_PREFLIGHT_PRIVATE_PATH: Final = (
+    "artifacts/trust_sentinel/ood_external_v2_preflight/private/"
+    "external-waveform-inventory.json"
+)
+PREDECESSOR_PREFLIGHT_PRIVATE_FILE_SHA256: Final = (
+    "sha256:01b33b992c3e9a777eb253571f35907e8aa99e3d36b34a19a3c374e7732aef13"
+)
+PREDECESSOR_PREFLIGHT_PUBLIC_PATH: Final = (
+    "artifacts/trust_sentinel/ood_external_v2_preflight/public/"
+    "external-inventory-summary.json"
+)
+PREDECESSOR_PREFLIGHT_PUBLIC_FILE_SHA256: Final = (
+    "sha256:8de32fce76e73fd00958878e74250c9117cdae7e3f4d9f453f2231fcf16a5814"
+)
+PREDECESSOR_OUTPUT_PATH: Final = "artifacts/trust_sentinel/ood_external_v2"
+PREDECESSOR_CLAIM_PATH: Final = (
+    "artifacts/trust_sentinel/.ood_external_v2.one-shot-claim.json"
+)
+SUCCESSOR_OUTPUT_PATH: Final = "artifacts/trust_sentinel/ood_external_v2_1"
+SUCCESSOR_CLAIM_PATH: Final = (
+    "artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json"
+)
+FORBIDDEN_GIT_HISTORY_PATHS: Final[tuple[str, ...]] = (
+    ":(glob)data/raw/external-ood/**",
+    ":(glob)artifacts/trust_sentinel/ood_external_v2_preflight/private/**",
+    ":(glob)artifacts/trust_sentinel/ood_external_v2_1_preflight/private/**",
+    PREDECESSOR_OUTPUT_PATH,
+    SUCCESSOR_OUTPUT_PATH,
+    PREDECESSOR_CLAIM_PATH,
+    SUCCESSOR_CLAIM_PATH,
+    ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
+    ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**",
+    ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.runtime-*/**",
+)
+EXPECTED_SOURCE_CALIBRATION_FILE_SHA256: Final = (
+    "sha256:8bae3acdebac42504167afc7bb7d2051b7ac2c48019aa429ed6544f14a59f38f"
+)
+EXPECTED_DEMO_POLICY_FILE_SHA256: Final = (
+    "sha256:539d9e7dfc84edc49ab285775cdd0f6e93b2f5bb804c6fe7be7d00bc2aff4d42"
+)
+EXPECTED_DISTRIBUTION_POLICY_ARTIFACT_SHA256: Final = (
+    "sha256:d544c28ad18b764e3e30cc316b092a41d75125a8334f1d41ed58c31ec37568db"
+)
+EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256: Final = (
+    "sha256:b9063fd2965b194806f9e544f3ea6390cc19bc8a93b27d3e88a674bf0aa7c839"
+)
+EXPECTED_DEMO_POLICY_ARTIFACT_SHA256: Final = (
+    "sha256:6f97e0697d661372e62f4aee9245f26014312e6a1d681615314bc9fcb77c5732"
+)
+EXPECTED_DISTRIBUTION_THRESHOLD: Final = 270.9668613705653
+EXPECTED_TEMPERATURE: Final = 1.319620052379425
+EXPECTED_ENTROPY_MAXIMUM: Final = 0.5975748221759414
+EXPECTED_CONFORMAL_THRESHOLDS: Final[tuple[float, ...]] = (
+    0.5943209280399379,
+    0.5720188933250413,
+    0.5936070307854548,
+    0.5512516601251809,
+    0.48857772684700007,
+)
+EXPECTED_CHECKPOINT_FILE_SHA256: Final = (
+    "sha256:d3b8a19ab891db34afa6039179edab9847a8812e466a65c4cb408df12b402b35"
+)
+EXPECTED_RESOLVED_CONFIG_FILE_SHA256: Final = (
+    "sha256:d00643dadc1c27a241da5c100bccd45f314fe0b94b16c9e3ce9d88ed22656d49"
+)
+EXPECTED_RESOLVED_CONFIG_SHA256: Final = (
+    "sha256:003125474caa877585e609b7b248727aa3ecaf7c716d8c249966ff4b9188e71e"
+)
+CHILD_CONTRACT_ARTIFACT_TYPE: Final = "ecg_trust.ood_external_v2_1_child_contract"
+PRIVATE_EVIDENCE_ARTIFACT_TYPE: Final = "ecg_trust.ood_external_v2_1_record_evidence"
+PRIVATE_EMBEDDING_ARTIFACT_TYPE: Final = "ecg_trust.ood_external_v2_1_embeddings"
+PRIVATE_BOOTSTRAP_ARTIFACT_TYPE: Final = "ecg_trust.ood_external_v2_1_bootstrap_replicates"
+PRIVATE_QUALITY_AUDIT_ARTIFACT_TYPE: Final = (
+    "ecg_trust.ood_external_v2_1_quality_audit_shard"
+)
+PRIVATE_QUALITY_AUDIT_INDEX_ARTIFACT_TYPE: Final = (
+    "ecg_trust.ood_external_v2_1_quality_audit_index"
+)
+PRIVATE_CANONICAL_SIGNAL_ARTIFACT_TYPE: Final = (
+    "ecg_trust.ood_external_v2_1_canonical_signals"
+)
+PRIVATE_ROUTING_CONTRACT_ARTIFACT_TYPE: Final = (
+    "ecg_trust.ood_external_v2_1_routing_contract"
+)
+_QUALITY_REPORT_DOMAIN: Final = b"ecg_trust.ood_external_v2_1.quality_report.v1\x00"
+FAILURE_ARTIFACT_TYPE: Final = "ecg_trust.ood_external_v2_1_failure"
+
+_CONFIG_MAX_BYTES = 1_000_000
+_CHILD_MAX_BYTES = 2_000_000
+_BOUND_MAX_BYTES = 1_000_000_000
+_V1_RESULT_MAX_BYTES = 2_000_000
+_V1_POLICY_MAX_BYTES = 16_000_000
+_V1_SUCCESS_MAX_BYTES = 2_000_000
+_ACCESS_RECORD_MAX_BYTES = 16_384
+_PRIVATE_JSON_MAX_BYTES = 64_000_000
+_PRIVATE_NPZ_MAX_BYTES = 2_000_000_000
+_PRIVATE_NPZ_MEMBER_MAX_BYTES = 256_000_000
+_PRIVATE_NPZ_MEMBER_COUNT_MAX = 1_024
+_SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_MD5 = re.compile(r"md5:[0-9a-f]{32}\Z")
+_GIT_REVISION = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+_OWNER_NONCE = re.compile(r"[0-9a-f]{64}\Z")
+
+REQUIRED_RUNTIME_BINDING_PATHS: Final[tuple[str, ...]] = (
+    "scripts/evaluate_trust_sentinel_ood_external_v2.py",
+    "src/ecg_trust/conformal/multilabel.py",
+    "src/ecg_trust/data/dataset.py",
+    "src/ecg_trust/demo_backend.py",
+    "src/ecg_trust/experiment_config.py",
+    "src/ecg_trust/experiment_runner.py",
+    "src/ecg_trust/foundation/adapter.py",
+    "src/ecg_trust/models/resnet1d.py",
+    "src/ecg_trust/ood_completion/models.py",
+    "src/ecg_trust/ood_completion/pipeline.py",
+    "src/ecg_trust/ood_completion/runtime.py",
+    "src/ecg_trust/ood_v2/adapters.py",
+    "src/ecg_trust/ood_v2/bundle.py",
+    "src/ecg_trust/ood_v2/inventory.py",
+    "src/ecg_trust/ood_v2/models.py",
+    "src/ecg_trust/ood_v2/pipeline.py",
+    "src/ecg_trust/ood_v2/statistics.py",
+    "src/ecg_trust/open_world/scores.py",
+    "src/ecg_trust/quality/signal_quality.py",
+    "src/ecg_trust/source_calibration/models.py",
+    "src/ecg_trust/source_calibration/pipeline.py",
+)
+PROJECT_SOURCE_ROOT: Final = "src/ecg_trust"
+PROJECT_EVALUATION_ENTRYPOINT: Final = (
+    "scripts/evaluate_trust_sentinel_ood_external_v2.py"
+)
+PROJECT_OPERATIONAL_ENTRYPOINTS: Final[tuple[str, ...]] = (
+    "scripts/build_trust_sentinel_ood_v2_inventory.py",
+    PROJECT_EVALUATION_ENTRYPOINT,
+    "scripts/freeze_trust_sentinel_ood_external_v2.py",
+    "scripts/verify_trust_sentinel_ood_external_v2.py",
+)
+RUNTIME_FILESYSTEM_TREE_KINDS: Final[tuple[str, str, str]] = (
+    "cpython_base_runtime",
+    "venv_site_packages",
+    "git_mingw64_runtime",
+)
+EXPECTED_GIT_VERSION: Final = "git version 2.53.0.windows.2"
+EXPECTED_GIT_LAUNCHER_NAME: Final = "git.exe"
+EXPECTED_GIT_LAUNCHER_SIZE_BYTES: Final = 46_464
+EXPECTED_GIT_LAUNCHER_SHA256: Final = (
+    "sha256:37c5725818d602e951ba2563b870d62763322956b73373da4c33a0b566a80bc9"
+)
+EXPECTED_GIT_EXECUTABLE_NAME: Final = "git.exe"
+EXPECTED_GIT_EXECUTABLE_SIZE_BYTES: Final = 4_344_192
+EXPECTED_GIT_EXECUTABLE_SHA256: Final = (
+    "sha256:c39b1b4f7a57935bbeadf246dc2466316619453a6a9da77c4a9c6bd6d8fb21d3"
+)
+EXPECTED_GIT_RUNTIME_FILE_COUNT: Final = 4_565
+EXPECTED_GIT_RUNTIME_DIRECTORY_COUNT: Final = 194
+EXPECTED_GIT_RUNTIME_TOTAL_BYTES: Final = 224_959_003
+EXPECTED_GIT_RUNTIME_TREE_SHA256: Final = (
+    "sha256:086bd1898a3859d59d4c7184f1039d73cdf75c07de76f70fc375495ed922d9e2"
+)
+_GIT_RUNTIME_TREE_VERIFIED = False
+EXPECTED_NVIDIA_DRIVER_VERSION: Final = "596.49"
+EXPECTED_NVIDIA_DRIVER_FILES: Final[
+    Mapping[str, tuple[int, str]]
+] = MappingProxyType(
+    {
+        "nvidia-smi.exe": (
+            1_624_808,
+            "sha256:74348eb0bee800304ef5214d1fe8e643d7220ef8585a4e60c564fc24a06d3939",
+        ),
+        "nvml.dll": (
+            1_391_848,
+            "sha256:046b733c849261658cd318aab6e26fec94f330a9981a1dc4a30617dfea862673",
+        ),
+        "nvcuda.dll": (
+            4_466_920,
+            "sha256:ec9942ff94bcf2a6714531932720d0d36bd1f362df768af9ae21f2388c08ef7c",
+        ),
+    }
+)
+EXPECTED_RUNTIME_SYS_PATH_LAYOUT: Final[tuple[str, ...]] = (
+    "cpython_zip",
+    "cpython_dlls",
+    "cpython_stdlib",
+    "cpython_base",
+    "venv_site_packages",
+    "project_src",
+)
+EXPECTED_PYTHON_BASE_ALIAS_NAME: Final = "cpython-3.12-windows-x86_64-none"
+EXPECTED_PYTHON_BASE_TARGET_NAME: Final = "cpython-3.12.13-windows-x86_64-none"
+FORBIDDEN_CODE_ENVIRONMENT_VARIABLES: Final[tuple[str, ...]] = (
+    "COVERAGE_PROCESS_START",
+    "COVERAGE_RCFILE",
+    "PYTHONHOME",
+    "PYTHONINSPECT",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PYTHONUSERBASE",
+)
+FORBIDDEN_BOOTSTRAP_MODULES: Final[tuple[str, ...]] = (
+    "_editable_impl_ecg_trust",
+    "_virtualenv",
+    "sitecustomize",
+    "usercustomize",
+)
+ALLOWED_RUNTIME_ENVIRONMENT_VARIABLES: Final[frozenset[str]] = frozenset(
+    {
+        "ALLUSERSPROFILE",
+        "APPDATA",
+        "COMMONPROGRAMFILES",
+        "COMMONPROGRAMFILES(X86)",
+        "COMMONPROGRAMW6432",
+        "COMSPEC",
+        "CUBLAS_WORKSPACE_CONFIG",
+        "CUDA_CACHE_DISABLE",
+        "DRIVERDATA",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "LOCALAPPDATA",
+        "NUMBER_OF_PROCESSORS",
+        "OS",
+        "PATHEXT",
+        "PATH",
+        "PROCESSOR_ARCHITECTURE",
+        "PROCESSOR_IDENTIFIER",
+        "PROCESSOR_LEVEL",
+        "PROCESSOR_REVISION",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "PROGRAMW6432",
+        "SYSTEMDRIVE",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TORCHINDUCTOR_CACHE_DIR",
+        "USERDOMAIN",
+        "USERDOMAIN_ROAMINGPROFILE",
+        "USERNAME",
+        "USERPROFILE",
+        "WINDIR",
+    }
+)
+
+REQUIRED_RAW_SOURCE_BINDING_KEYS: Final[tuple[str, ...]] = (
+    "challenge_archive",
+    "challenge_records",
+    "challenge_records_acceptable",
+    "challenge_records_unacceptable",
+    "zzu_archive_z01",
+    "zzu_archive_zip",
+    "zzu_attributes_dictionary",
+    "zzu_disease_code",
+    "zzu_ecg_code",
+    "zzu_example_notebook",
+)
+
+EXPECTED_DATASET_ROOTS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        CHALLENGE_2011_DATASET: (
+            "data/raw/external-ood/challenge-2011-v1.0.0/extracted/set-a"
+        ),
+        ZZU_PEDIATRIC_DATASET: (
+            "data/raw/external-ood/zzu-pecg-v1/extracted/Child_ecg"
+        ),
+    }
+)
+
+EXPECTED_RAW_SOURCE_PATHS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "challenge_archive": (
+            "data/raw/external-ood/challenge-2011-v1.0.0/set-a.tar.gz"
+        ),
+        "challenge_records": (
+            "data/raw/external-ood/challenge-2011-v1.0.0/extracted/set-a/RECORDS"
+        ),
+        "challenge_records_acceptable": (
+            "data/raw/external-ood/challenge-2011-v1.0.0/extracted/set-a/"
+            "RECORDS-acceptable"
+        ),
+        "challenge_records_unacceptable": (
+            "data/raw/external-ood/challenge-2011-v1.0.0/extracted/set-a/"
+            "RECORDS-unacceptable"
+        ),
+        "zzu_archive_z01": "data/raw/external-ood/zzu-pecg-v1/Child_ecg.z01",
+        "zzu_archive_zip": "data/raw/external-ood/zzu-pecg-v1/Child_ecg.zip",
+        "zzu_attributes_dictionary": (
+            "data/raw/external-ood/zzu-pecg-v1/AttributesDictionary.csv"
+        ),
+        "zzu_disease_code": "data/raw/external-ood/zzu-pecg-v1/DiseaseCode.csv",
+        "zzu_ecg_code": "data/raw/external-ood/zzu-pecg-v1/ECGCode.csv",
+        "zzu_example_notebook": (
+            "data/raw/external-ood/zzu-pecg-v1/ExampleReadingCode.ipynb"
+        ),
+    }
+)
+
+# The exact frozen v2 parent is retained as a transparent pre-inference
+# infeasibility.  Its canonical-lead wording forbids the case-only augmented
+# lead aliases present in the already inventoried ZZU headers.  No execution
+# against these parent bytes may consume the permanent external-access claim.
+FROZEN_V2_PREINFERENCE_INFEASIBILITY: Final = (
+    "the frozen v2 parent forbids AVR/AVL/AVF to aVR/aVL/aVF lead-name "
+    "canonicalization required by the selected ZZU source"
+)
+EXPECTED_SCIENTIFIC_PACKAGE_VERSIONS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "PyYAML": "6.0.3",
+        "numpy": "2.5.1",
+        "pydantic": "2.13.4",
+        "pydantic-core": "2.46.4",
+        "scipy": "1.18.0",
+        "torch": "2.13.0+cu130",
+        "wfdb": "4.3.1",
+    }
+)
+EXPECTED_SCIENTIFIC_PACKAGE_IMPORT_ROOTS: Final[Mapping[str, tuple[str, ...]]] = (
+    MappingProxyType(
+        {
+            "PyYAML": ("yaml", "_yaml"),
+            "numpy": ("numpy", "numpy.libs"),
+            "pydantic": ("pydantic",),
+            "pydantic-core": ("pydantic_core",),
+            "scipy": ("scipy", "scipy.libs"),
+            "torch": ("torch", "functorch", "torchgen"),
+            "wfdb": ("wfdb",),
+        }
+    )
+)
+EXPECTED_GIT_REMOTE_NAME: Final = "origin"
+EXPECTED_GIT_REMOTE_URL: Final = (
+    "https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git"
+)
+EXPECTED_GIT_REMOTE_MAIN_REF: Final = "refs/remotes/origin/main"
+_ARCHIVE_MEMBER_ROLES: Final[tuple[str, ...]] = (
+    "ignored_release_file",
+    "quality_reference",
+    "wfdb_data",
+    "wfdb_header",
+)
+FROZEN_ROUTE_ORDER: Final[tuple[str, ...]] = (
+    "INVALID_INPUT",
+    "REACQUIRE",
+    "UNSUPPORTED_INPUT",
+    "ABSTAIN",
+    "PREDICTION_ALLOWED",
+)
+
+
+class OODExternalV2ConfigError(ValueError):
+    """Raised when the parent or child preregistration is invalid."""
+
+
+class OODExternalV2IntegrityError(RuntimeError):
+    """Raised when immutable inputs or evidence fail verification."""
+
+
+class OODExternalV2ExecutionError(RuntimeError):
+    """Raised when a one-shot v2 execution cannot complete safely."""
+
+
+@dataclass(frozen=True, slots=True)
+class BoundFile:
+    relative_path: str
+    file_sha256: str
+    artifact_sha256: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RawSourceBinding:
+    relative_path: str
+    file_sha256: str
+    size_bytes: int
+    official_md5: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeEnvironmentBinding:
+    python_implementation: str
+    python_version: str
+    python_executable_file_sha256: str
+    python_executable_size_bytes: int
+    python_base_alias_name: str
+    python_base_target_name: str
+    python_environment_sha256: str
+    numpy_version: str
+    scipy_version: str
+    wfdb_version: str
+    package_trees: tuple[RuntimePackageTreeBinding, ...]
+    python_base_tree: RuntimeFilesystemTreeBinding
+    site_packages_tree: RuntimeFilesystemTreeBinding
+    pyvenv_config_file_sha256: str
+    pyvenv_config_size_bytes: int
+    isolated_mode: bool
+    no_site: bool
+    dont_write_bytecode: bool
+    user_site_disabled: bool
+    pycache_prefix_verified_empty: bool
+    sys_path_layout: tuple[str, ...]
+    git_tool: GitToolBinding
+    nvidia_driver_tool: NvidiaDriverToolBinding
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimePackageTreeBinding:
+    distribution: str
+    version: str
+    import_roots: tuple[str, ...]
+    file_count: int
+    total_bytes: int
+    tree_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeFilesystemTreeBinding:
+    tree_kind: str
+    file_count: int
+    directory_count: int
+    total_bytes: int
+    tree_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class GitToolBinding:
+    version: str
+    launcher_name: str
+    launcher_size_bytes: int
+    launcher_sha256: str
+    executable_name: str
+    executable_size_bytes: int
+    executable_sha256: str
+    runtime_tree: RuntimeFilesystemTreeBinding
+
+
+@dataclass(frozen=True, slots=True)
+class NvidiaDriverToolBinding:
+    driver_version: str
+    nvidia_smi_name: str
+    nvidia_smi_size_bytes: int
+    nvidia_smi_sha256: str
+    nvml_name: str
+    nvml_size_bytes: int
+    nvml_sha256: str
+    nvcuda_name: str
+    nvcuda_size_bytes: int
+    nvcuda_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectSourceFileBinding:
+    relative_path: str
+    size_bytes: int
+    file_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectSourceTreeBinding:
+    files: tuple[ProjectSourceFileBinding, ...]
+    file_count: int
+    total_bytes: int
+    tree_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class OODExternalV2ParentConfig:
+    path: Path
+    file_sha256: str
+    status: str
+    v1_result: BoundFile
+    v1_success_manifest: BoundFile
+    v1_distribution_policy: BoundFile
+    checkpoint: BoundFile
+    resolved_config: BoundFile
+    resolved_config_sha256: str
+    normalization: BoundFile
+    quality_implementation: BoundFile
+    quality_config_version: str
+    dependency_lock: BoundFile
+    project_manifest: BoundFile
+    threshold: float
+    challenge_expected_records: int
+    bootstrap_resamples: int
+    challenge_bootstrap_seed: int
+    zzu_bootstrap_seed: int
+    confidence_level: float
+    challenge_group3_minimum: float
+    challenge_group1_minimum: float
+    challenge_distribution_minimum: float
+    zzu_distribution_minimum: float
+    output_root: str
+    claim_path: str
+    raw_source_bindings: Mapping[str, RawSourceBinding] | None
+    seven_zip_tool_binding: SevenZipToolBinding | None
+
+
+@dataclass(frozen=True, slots=True)
+class SuccessorParentPreflight:
+    path: Path
+    file_sha256: str
+    status: str
+    raw_source_bindings: Mapping[str, RawSourceBinding]
+    seven_zip_tool_binding: SevenZipToolBinding
+
+
+@dataclass(frozen=True, slots=True)
+class InventoryBuilderPreflight:
+    """Path-free proof that metadata-only inventory construction may begin."""
+
+    status: str
+    parent_config_file_sha256: str
+    implementation_revision: str
+    project_source_tree_sha256: str
+    python_environment_sha256: str
+    git_runtime_tree_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class InventoryBuilderPostflight:
+    """Aggregate-only proof that the builder wrote exactly its intended files."""
+
+    status: str
+    preflight: InventoryBuilderPreflight
+    inventory_file_sha256: str
+    inventory_sha256: str
+    public_projection_file_sha256: str
+    public_projection_artifact_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveClosureSummaryBinding:
+    dataset: str
+    archive_format: str
+    archive_file_count: int
+    archive_bytes_total: int
+    member_count: int
+    member_bytes_total: int
+    member_role_counts: tuple[int, int, int, int]
+    closure_sha256: str
+    tool_binding: SevenZipToolBinding | None
+
+
+@dataclass(frozen=True, slots=True)
+class InventoryBinding:
+    relative_path: str
+    file_sha256: str
+    inventory_sha256: str
+    selected_records_total: int
+    challenge_records: int
+    zzu_records: int
+    zzu_patients: int
+    archive_closures: tuple[ArchiveClosureSummaryBinding, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OODExternalV2ChildContract:
+    path: Path
+    file_sha256: str
+    artifact_sha256: str
+    frozen_at_utc: datetime
+    parent_config_file_sha256: str
+    implementation_revision: str
+    inventory: InventoryBinding
+    dataset_roots: Mapping[str, str]
+    decision_bindings: Mapping[str, BoundFile]
+    raw_source_bindings: Mapping[str, RawSourceBinding]
+    runtime_environment: RuntimeEnvironmentBinding
+    runtime_bindings: Mapping[str, str]
+    project_source_tree: ProjectSourceTreeBinding
+    public_inventory_projection: BoundFile | None
+    output_root: str
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedV1PublicEvidence:
+    result: OODCompletionResult
+    policy: DistributionPolicy
+    success_manifest: OODCompletionSuccessManifest
+    claim_file_sha256: str
+    snapshots: Mapping[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedExternalV2Inputs:
+    project_root: Path
+    parent: OODExternalV2ParentConfig
+    child: OODExternalV2ChildContract
+    inventory: ExternalWaveformInventory
+    inventory_path: Path
+    dataset_roots: Mapping[str, Path]
+    raw_source_paths: Mapping[str, Path]
+    v1: VerifiedV1PublicEvidence
+    checkpoint_path: Path
+    resolved_config_path: Path
+    normalization_path: Path
+    routing: FrozenRoutingComponents
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenRoutingComponents:
+    source_calibration_result: SourceCalibrationResult
+    historical_demo_policy: FrozenDecisionPolicy
+    conformal: LabelwiseBinaryConformal
+    temperature: float
+    maximum_entropy: float
+    source_calibration_file_sha256: str
+    demo_policy_file_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class _PrivateRecordEvidence:
+    dataset: str
+    record_ref: str
+    patient_key: str | None
+    challenge_quality_label: str | None
+    adapter_provenance_sha256: str | None
+    adapter_source_sample_count: int | None
+    adapter_raw_physical_units: tuple[str, ...] | None
+    canonical_signal_sha256: str | None
+    quality_report_sha256: str | None
+    quality_report: dict[str, object] | None
+    quality_status: str
+    quality_reason_codes: tuple[str, ...]
+    route: str
+    distribution_score: float | None
+    entropy: float | None
+    entropy_accepted: bool | None
+    conformal_decisions: tuple[str, ...] | None
+    all_conformal_decisions_singleton: bool | None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "adapter_provenance_sha256": self.adapter_provenance_sha256,
+            "adapter_raw_physical_units": (
+                None
+                if self.adapter_raw_physical_units is None
+                else list(self.adapter_raw_physical_units)
+            ),
+            "adapter_source_sample_count": self.adapter_source_sample_count,
+            "canonical_signal_sha256": self.canonical_signal_sha256,
+            "challenge_quality_label": self.challenge_quality_label,
+            "dataset": self.dataset,
+            "distribution_score": self.distribution_score,
+            "entropy": self.entropy,
+            "entropy_accepted": self.entropy_accepted,
+            "conformal_decisions": (
+                None
+                if self.conformal_decisions is None
+                else list(self.conformal_decisions)
+            ),
+            "all_conformal_decisions_singleton": (
+                self.all_conformal_decisions_singleton
+            ),
+            "patient_key": self.patient_key,
+            "quality_reason_codes": list(self.quality_reason_codes),
+            "quality_report_sha256": self.quality_report_sha256,
+            "quality_status": self.quality_status,
+            "record_ref": self.record_ref,
+            "route": self.route,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _EvaluatedExternalRecords:
+    records: tuple[_PrivateRecordEvidence, ...]
+    adapter_success_inventory_indices: Int64Array
+    canonical_signals: Float32Array
+    quality_pass_inventory_indices: Int64Array
+    embeddings: Float32Array
+    repeated_embeddings: Float32Array
+    repeated_embedding_sha256: str
+    embedding_sha256: str
+    scores: Float64Array
+    logits: Float64Array
+    repeated_logits: Float64Array
+    probabilities: Float64Array
+    first_logits_sha256: str
+    repeated_logits_sha256: str
+    probabilities_sha256: str
+    model_state_before_sha256: str
+    model_state_after_sha256: str
+    model_state_unchanged: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _EndpointEvidence:
+    external_cohorts: tuple[object, ...]
+    technical_quality_endpoints: tuple[object, ...]
+    bootstrap_replicates: Mapping[str, Float64Array]
+    challenge_group3_prediction_allowed_count: int
+    route_counts: Mapping[str, int]
+
+
+class _NormalizedSignalDataset(Dataset[tuple[Tensor, Tensor]]):
+    """In-memory quality-passing signals normalized by the frozen PTB statistics."""
+
+    def __init__(self, signals: Float32Array, normalization: NormalizationStats) -> None:
+        values = np.asarray(signals)
+        if (
+            values.ndim != 3
+            or values.shape[0] == 0
+            or values.shape[1:] != (len(LEADS), 1000)
+            or values.dtype != np.dtype(np.float32)
+            or not np.isfinite(values).all()
+        ):
+            raise OODExternalV2ExecutionError("quality-passing signal matrix is invalid")
+        self._signals = np.ascontiguousarray(values, dtype=np.float32)
+        # Reuse the exact bound PTB dataset's Torch-float32 arithmetic.  A
+        # NumPy reimplementation is not accepted because rounding at a strict
+        # downstream threshold can differ.
+        self._mean = torch.tensor(normalization.mean, dtype=torch.float32).unsqueeze(1)
+        self._std = torch.tensor(normalization.std, dtype=torch.float32).unsqueeze(1)
+        self._target = torch.zeros(len(SUPERCLASSES), dtype=torch.float32)
+
+    def __len__(self) -> int:
+        return int(self._signals.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[Tensor, Tensor]:
+        signal = torch.from_numpy(self._signals[index])
+        normalized = (signal - self._mean) / self._std
+        if not torch.isfinite(normalized).all().item():
+            raise OODExternalV2ExecutionError(
+                "external signal became nonfinite after normalization"
+            )
+        return normalized.contiguous(), self._target
+
+
+def load_parent_config(path: str | Path) -> OODExternalV2ParentConfig:
+    """Load execution-critical values from the exact parent YAML."""
+
+    source = Path(os.path.abspath(os.fspath(path)))
+    raw = _read_bounded(source, _CONFIG_MAX_BYTES, "parent protocol")
+    file_sha256 = sha256_bytes(raw)
+    if file_sha256 != EXPECTED_PARENT_CONFIG_SHA256:
+        raise OODExternalV2ConfigError("parent protocol differs from frozen bytes")
+    try:
+        text = raw.decode("utf-8")
+        _reject_duplicate_yaml_keys(text)
+        decoded: object = yaml.safe_load(text)
+    except (UnicodeError, yaml.YAMLError) as error:
+        raise OODExternalV2ConfigError("parent protocol is not valid UTF-8 YAML") from error
+    root = _mapping(decoded, "parent protocol")
+    if (
+        root.get("schema_version") != 1
+        or root.get("protocol_id") != ORIGINAL_PROTOCOL_ID
+        or root.get("status") != "frozen_parent_preregistration_pre_download"
+        or root.get("research_only") is not True
+    ):
+        raise OODExternalV2ConfigError("parent protocol identity or status is invalid")
+
+    design = _mapping(root.get("design_history"), "design_history")
+    immutable = _mapping(root.get("immutability"), "immutability")
+    if (
+        design.get("written_after_v1_result_was_observed") is not True
+        or design.get("independent_of_v1_claim") is not False
+        or immutable.get("v1_output_must_remain_byte_identical") is not True
+        or immutable.get("v1_distribution_policy_reused_exactly") is not True
+        or immutable.get("v1_detector_refit") != "forbidden"
+        or immutable.get("v1_threshold_change") != "forbidden"
+        or immutable.get("external_target_fitting_or_adaptation") != "forbidden"
+    ):
+        raise OODExternalV2ConfigError("parent immutability boundary was weakened")
+    c_boundary = _mapping(design.get("v1_c_influence"), "design_history.v1_c_influence")
+    forbidden_c = c_boundary.get("forbidden")
+    required_c_forbidden = {
+        "waveform_access",
+        "embedding_access",
+        "row_identity_access",
+        "score_access",
+        "subgroup_or_error_analysis",
+        "detector_fit",
+        "threshold_fit",
+        "method_selection",
+        "operating_point_selection",
+    }
+    if not isinstance(forbidden_c, list) or not required_c_forbidden.issubset(forbidden_c):
+        raise OODExternalV2ConfigError("sealed v1 C prohibition is incomplete")
+
+    bindings = _mapping(root.get("bindings"), "bindings")
+    v1_bundle = _mapping(bindings.get("v1_completion_bundle"), "v1 completion bundle")
+    result = _bound_file(v1_bundle.get("result"), "v1 result", require_artifact=True)
+    success = _bound_file(
+        v1_bundle.get("success_manifest"),
+        "v1 success manifest",
+        require_artifact=True,
+    )
+    policy = _bound_file(
+        v1_bundle.get("distribution_policy"),
+        "v1 distribution policy",
+        require_artifact=True,
+    )
+    policy_mapping = _mapping(v1_bundle.get("distribution_policy"), "v1 policy")
+    threshold = _exact_float(policy_mapping.get("threshold"), "v1 threshold")
+    if (
+        threshold != 270.9668613705653
+        or policy_mapping.get("method") != "shrinkage_mahalanobis_embedding_distance"
+        or policy_mapping.get("threshold_comparison")
+        != "score_strictly_greater_than_threshold"
+    ):
+        raise OODExternalV2ConfigError("v1 distribution policy contract changed")
+
+    checkpoint = _bound_file(bindings.get("v1_checkpoint"), "checkpoint")
+    resolved = _bound_file(bindings.get("v1_resolved_config"), "resolved config")
+    resolved_mapping = _mapping(bindings.get("v1_resolved_config"), "resolved config")
+    normalization = _bound_file(bindings.get("normalization"), "normalization")
+    quality = _bound_file(
+        bindings.get("signal_quality_implementation"),
+        "quality implementation",
+    )
+    quality_mapping = _mapping(
+        bindings.get("signal_quality_implementation"),
+        "quality implementation",
+    )
+    dependency_lock = _bound_file(bindings.get("dependency_lock"), "dependency lock")
+    project_manifest = _bound_file(bindings.get("project_manifest"), "project manifest")
+
+    external = _mapping(root.get("external_sources"), "external_sources")
+    challenge = _mapping(
+        external.get(CHALLENGE_2011_DATASET),
+        "Challenge 2011 source",
+    )
+    zzu = _mapping(external.get(ZZU_PEDIATRIC_DATASET), "ZZU source")
+    if (
+        challenge.get("version") != CHALLENGE_2011_VERSION
+        or challenge.get("license_spdx") != "ODC-By-1.0"
+        or zzu.get("version") != 1
+        or zzu.get("license_spdx") != "CC-BY-4.0"
+    ):
+        raise OODExternalV2ConfigError("external source version or license changed")
+
+    evaluation = _mapping(root.get("evaluation"), "evaluation")
+    primary = _mapping(evaluation.get("primary_endpoints"), "primary endpoints")
+    multiplicity = _mapping(evaluation.get("multiplicity"), "multiplicity")
+    bootstrap = _mapping(evaluation.get("bootstrap"), "bootstrap")
+    if (
+        multiplicity.get("family") != "exact_four_co_primary_endpoints"
+        or multiplicity.get("method") != "bonferroni"
+        or multiplicity.get("all_four_endpoints_must_pass") is not True
+        or _exact_float(multiplicity.get("required_one_sided_confidence_level"), "confidence")
+        != 0.9875
+    ):
+        raise OODExternalV2ConfigError("co-primary multiplicity contract changed")
+    challenge_bootstrap = _mapping(bootstrap.get("challenge"), "Challenge bootstrap")
+    zzu_bootstrap = _mapping(bootstrap.get("zzu"), "ZZU bootstrap")
+    if (
+        challenge_bootstrap.get("unit") != "record"
+        or zzu_bootstrap.get("unit") != "patient_cluster"
+    ):
+        raise OODExternalV2ConfigError("bootstrap resampling units changed")
+
+    one_shot = _mapping(root.get("one_shot_external_access"), "one-shot access")
+    claim = _mapping(one_shot.get("external_claim"), "external claim")
+    return OODExternalV2ParentConfig(
+        path=source,
+        file_sha256=file_sha256,
+        status=cast(str, root["status"]),
+        v1_result=result,
+        v1_success_manifest=success,
+        v1_distribution_policy=policy,
+        checkpoint=checkpoint,
+        resolved_config=resolved,
+        resolved_config_sha256=_digest(
+            resolved_mapping.get("inner_config_sha256"),
+            "resolved config logical hash",
+        ),
+        normalization=normalization,
+        quality_implementation=quality,
+        quality_config_version=_exact_string(
+            quality_mapping.get("config_version"),
+            "canonical-12x1000-mv-v1",
+            "quality config version",
+        ),
+        dependency_lock=dependency_lock,
+        project_manifest=project_manifest,
+        threshold=threshold,
+        challenge_expected_records=_exact_integer(
+            challenge.get("expected_records"),
+            1000,
+            "Challenge expected records",
+        ),
+        bootstrap_resamples=_exact_integer(
+            bootstrap.get("resamples"),
+            10_000,
+            "bootstrap resamples",
+        ),
+        challenge_bootstrap_seed=_exact_integer(
+            challenge_bootstrap.get("seed"),
+            20_260_901,
+            "Challenge bootstrap seed",
+        ),
+        zzu_bootstrap_seed=_exact_integer(
+            zzu_bootstrap.get("seed"),
+            20_260_902,
+            "ZZU bootstrap seed",
+        ),
+        confidence_level=0.9875,
+        challenge_group3_minimum=_endpoint_minimum(
+            primary,
+            "challenge_group3_technical_block_sensitivity",
+            0.95,
+        ),
+        challenge_group1_minimum=_endpoint_minimum(
+            primary,
+            "challenge_group1_quality_pass_rate",
+            0.90,
+        ),
+        challenge_distribution_minimum=_endpoint_minimum(
+            primary,
+            "challenge_external_distribution_recall",
+            0.90,
+        ),
+        zzu_distribution_minimum=_endpoint_minimum(
+            primary,
+            "zzu_external_distribution_recall",
+            0.90,
+        ),
+        output_root=_relative_path(one_shot.get("output_root"), "output root"),
+        claim_path=_relative_path(claim.get("path"), "external claim path"),
+        # The preserved original was frozen before download and therefore has
+        # no authoritative raw-source byte table.  Its execution is refused.
+        # The v2.1 loader must populate this from successor-parent bytes.
+        raw_source_bindings=None,
+        seven_zip_tool_binding=None,
+    )
+
+
+def verify_successor_parent_preflight(
+    path: str | Path,
+    *,
+    project_root: str | Path,
+) -> SuccessorParentPreflight:
+    """Verify the draft/frozen v2.1 lineage without enabling execution."""
+
+    root_path = _strict_project_root(project_root)
+    source = Path(os.path.abspath(os.fspath(path)))
+    expected_source = root_path.joinpath(
+        *PurePosixPath(SUCCESSOR_PARENT_CONFIG_PATH).parts
+    )
+    if source != expected_source or _is_indirect(source) or not source.is_file():
+        raise OODExternalV2ConfigError(
+            "successor parent must use its exact canonical project path"
+        )
+    raw = _read_bounded(source, _CONFIG_MAX_BYTES, "successor parent protocol")
+    try:
+        text = raw.decode("utf-8")
+        _reject_duplicate_yaml_keys(text)
+        decoded: object = yaml.safe_load(text)
+    except (UnicodeError, yaml.YAMLError) as error:
+        raise OODExternalV2ConfigError(
+            "successor parent is not valid unique-key UTF-8 YAML"
+        ) from error
+    payload = _mapping(decoded, "successor parent")
+    status = payload.get("status")
+    frozen_at = payload.get("frozen_at_utc")
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("protocol_id") != SUCCESSOR_PROTOCOL_ID
+        or payload.get("research_only") is not True
+        or status
+        not in {
+            "draft_successor_preregistration_pre_waveform",
+            "frozen_parent_preregistration_pre_waveform",
+        }
+        or (
+            status == "draft_successor_preregistration_pre_waveform"
+            and frozen_at is not None
+        )
+        or (
+            status == "frozen_parent_preregistration_pre_waveform"
+            and not isinstance(frozen_at, str)
+        )
+    ):
+        raise OODExternalV2ConfigError("successor parent identity or freeze state differs")
+
+    design = _mapping(payload.get("design_history"), "successor design history")
+    predecessor = _mapping(design.get("predecessor"), "successor predecessor")
+    if predecessor != {
+        "config_file_sha256": EXPECTED_PARENT_CONFIG_SHA256,
+        "config_path": PARENT_CONFIG_DEFAULT,
+        "original_claim_or_output_created": False,
+        "protocol_id": ORIGINAL_PROTOCOL_ID,
+        "status": "PRE_INFERENCE_PROTOCOL_INFEASIBLE",
+        "termination_reason": "exact_ZZU_augmented_lead_name_case_mismatch",
+        "waveform_or_model_access_occurred": False,
+    }:
+        raise OODExternalV2ConfigError("successor predecessor declaration differs")
+    predecessor_parent = root_path.joinpath(*PurePosixPath(PARENT_CONFIG_DEFAULT).parts)
+    if load_parent_config(predecessor_parent).file_sha256 != EXPECTED_PARENT_CONFIG_SHA256:
+        raise OODExternalV2IntegrityError("predecessor parent bytes differ")
+
+    bindings = _mapping(payload.get("bindings"), "successor bindings")
+    termination_binding = _mapping(
+        bindings.get("predecessor_termination"),
+        "predecessor termination binding",
+    )
+    note_binding = _mapping(
+        bindings.get("predecessor_termination_note"),
+        "predecessor termination note binding",
+    )
+    if termination_binding != {
+        "file_sha256": PREDECESSOR_TERMINATION_FILE_SHA256,
+        "path": PREDECESSOR_TERMINATION_PATH,
+        "required_status": "PRE_INFERENCE_PROTOCOL_INFEASIBLE",
+    } or note_binding != {
+        "file_sha256": PREDECESSOR_TERMINATION_NOTE_FILE_SHA256,
+        "path": PREDECESSOR_TERMINATION_NOTE_PATH,
+    }:
+        raise OODExternalV2ConfigError("predecessor termination bindings differ")
+    termination_path = root_path.joinpath(
+        *PurePosixPath(PREDECESSOR_TERMINATION_PATH).parts
+    )
+    note_path = root_path.joinpath(
+        *PurePosixPath(PREDECESSOR_TERMINATION_NOTE_PATH).parts
+    )
+    if (
+        sha256_file(termination_path) != PREDECESSOR_TERMINATION_FILE_SHA256
+        or sha256_file(note_path) != PREDECESSOR_TERMINATION_NOTE_FILE_SHA256
+    ):
+        raise OODExternalV2IntegrityError("predecessor termination evidence changed")
+    termination_raw = _read_bounded(
+        termination_path,
+        _CONFIG_MAX_BYTES,
+        "predecessor termination",
+    )
+    try:
+        termination_text = termination_raw.decode("utf-8")
+        _reject_duplicate_yaml_keys(termination_text)
+        termination_object: object = yaml.safe_load(termination_text)
+    except (UnicodeError, yaml.YAMLError) as error:
+        raise OODExternalV2IntegrityError(
+            "predecessor termination cannot be parsed"
+        ) from error
+    termination = _mapping(termination_object, "predecessor termination")
+    boundary = _mapping(termination.get("boundary_state"), "termination boundary")
+    termination_parent = _mapping(termination.get("parent"), "termination parent")
+    preflight = _mapping(
+        termination.get("preflight_evidence"),
+        "termination preflight evidence",
+    )
+    predecessor_private = _mapping(
+        preflight.get("private_inventory"),
+        "termination private inventory",
+    )
+    predecessor_public = _mapping(
+        preflight.get("aggregate_public_projection"),
+        "termination public projection",
+    )
+    selected_counts = _mapping(
+        preflight.get("selected_counts"),
+        "termination selected counts",
+    )
+    disposition = _mapping(termination.get("disposition"), "termination disposition")
+    if (
+        termination.get("schema_version") != 1
+        or termination.get("artifact_type")
+        != "ecg_trust.ood_external_v2_pre_inference_termination"
+        or termination.get("protocol_id") != ORIGINAL_PROTOCOL_ID
+        or termination.get("status") != "PRE_INFERENCE_PROTOCOL_INFEASIBLE"
+        or termination.get("research_only") is not True
+        or not boundary
+        or any(value is not False for value in boundary.values())
+        or termination_parent.get("path") != PARENT_CONFIG_DEFAULT
+        or termination_parent.get("file_sha256") != EXPECTED_PARENT_CONFIG_SHA256
+        or predecessor_private.get("path") != PREDECESSOR_PREFLIGHT_PRIVATE_PATH
+        or predecessor_private.get("file_sha256")
+        != PREDECESSOR_PREFLIGHT_PRIVATE_FILE_SHA256
+        or predecessor_private.get("inventory_sha256")
+        != "sha256:d170f03a6ed5350c0b7b3e0a90b319751e642bb5ec3d86c1bae3325f51ae0966"
+        or predecessor_public.get("path") != PREDECESSOR_PREFLIGHT_PUBLIC_PATH
+        or predecessor_public.get("file_sha256")
+        != PREDECESSOR_PREFLIGHT_PUBLIC_FILE_SHA256
+        or predecessor_public.get("projection_sha256")
+        != "sha256:15cc600e2b825b8c9e68502da2e3c579529cb115601dae45233305f58887eed3"
+        or selected_counts
+        != {
+            "challenge_records": 1_000,
+            "total_records": 13_328,
+            "zzu_patients": 10_350,
+            "zzu_records": 12_328,
+        }
+        or disposition.get("original_claim_and_output_paths_must_never_be_used")
+        is not True
+        or disposition.get("retry_under_original_protocol") != "forbidden"
+    ):
+        raise OODExternalV2IntegrityError("predecessor termination semantics differ")
+    for relative_path, expected_hash in (
+        (PREDECESSOR_PREFLIGHT_PRIVATE_PATH, PREDECESSOR_PREFLIGHT_PRIVATE_FILE_SHA256),
+        (PREDECESSOR_PREFLIGHT_PUBLIC_PATH, PREDECESSOR_PREFLIGHT_PUBLIC_FILE_SHA256),
+    ):
+        evidence_path = root_path.joinpath(*PurePosixPath(relative_path).parts)
+        if _is_indirect(evidence_path) or sha256_file(evidence_path) != expected_hash:
+            raise OODExternalV2IntegrityError("predecessor preflight evidence changed")
+    for forbidden_relative in (PREDECESSOR_OUTPUT_PATH, PREDECESSOR_CLAIM_PATH):
+        forbidden = root_path.joinpath(*PurePosixPath(forbidden_relative).parts)
+        if forbidden.exists() or _is_indirect(forbidden):
+            raise OODExternalV2IntegrityError(
+                "original v2 claim or output path was unexpectedly used"
+            )
+
+    inventory_contract = _mapping(
+        payload.get("successor_inventory_contract"),
+        "successor inventory contract",
+    )
+    one_shot = _mapping(payload.get("one_shot_external_access"), "successor one shot")
+    claim = _mapping(one_shot.get("external_claim"), "successor external claim")
+    if (
+        inventory_contract.get("private_path") != SUCCESSOR_PRIVATE_INVENTORY_PATH
+        or inventory_contract.get("public_projection_path")
+        != SUCCESSOR_PUBLIC_PROJECTION_PATH
+        or one_shot.get("output_root")
+        != "artifacts/trust_sentinel/ood_external_v2_1"
+        or claim.get("path")
+        != "artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json"
+    ):
+        raise OODExternalV2ConfigError("successor namespace paths differ")
+
+    raw_sources = _mapping(payload.get("raw_source_bindings"), "successor raw sources")
+    raw_files = _mapping(raw_sources.get("files"), "successor raw source files")
+    if set(raw_files) != set(REQUIRED_RAW_SOURCE_BINDING_KEYS):
+        raise OODExternalV2ConfigError("successor raw source set differs")
+    parsed_raw: dict[str, RawSourceBinding] = {}
+    for name in REQUIRED_RAW_SOURCE_BINDING_KEYS:
+        item = _mapping(raw_files[name], f"successor raw source {name}")
+        if set(item) != {"expected_md5", "path", "sha256", "size_bytes"}:
+            raise OODExternalV2ConfigError("successor raw source fields differ")
+        raw_sha = item["sha256"]
+        raw_md5 = item["expected_md5"]
+        if not isinstance(raw_sha, str) or re.fullmatch(r"[0-9a-f]{64}", raw_sha) is None:
+            raise OODExternalV2ConfigError("successor raw source SHA-256 is invalid")
+        if raw_md5 is not None and (
+            not isinstance(raw_md5, str)
+            or re.fullmatch(r"[0-9a-f]{32}", raw_md5) is None
+        ):
+            raise OODExternalV2ConfigError("successor raw source MD5 is invalid")
+        parsed_raw[name] = RawSourceBinding(
+            relative_path=_relative_path(item["path"], f"successor raw source {name}"),
+            file_sha256=f"sha256:{raw_sha}",
+            size_bytes=_positive_integer(item["size_bytes"], f"successor raw source {name}"),
+            official_md5=None if raw_md5 is None else f"md5:{raw_md5}",
+        )
+    if {
+        name: binding.relative_path for name, binding in parsed_raw.items()
+    } != dict(EXPECTED_RAW_SOURCE_PATHS):
+        raise OODExternalV2ConfigError("successor raw source paths differ")
+
+    runtime = _mapping(payload.get("runtime"), "successor runtime")
+    tool_payload = _mapping(runtime.get("split_archive_tool"), "split archive tool")
+    tool = SevenZipToolBinding(
+        implementation=_exact_string(
+            tool_payload.get("implementation"), "7zip", "7-Zip implementation"
+        ),
+        version=_exact_string(tool_payload.get("version"), "26.02", "7-Zip version"),
+        executable_name=_exact_string(
+            tool_payload.get("executable_name"), "7z.exe", "7-Zip executable"
+        ),
+        executable_size_bytes=_exact_integer(
+            tool_payload.get("executable_size_bytes"), 576_000, "7-Zip executable size"
+        ),
+        executable_sha256=_exact_string(
+            tool_payload.get("executable_sha256"),
+            "83967f1b02b43c4efeda302795722c809e0e81b8307de73558d10484d5676a7d",
+            "7-Zip executable SHA-256",
+        ),
+        library_name=_exact_string(
+            tool_payload.get("library_name"), "7z.dll", "7-Zip library"
+        ),
+        library_size_bytes=_exact_integer(
+            tool_payload.get("library_size_bytes"), 1_906_688, "7-Zip library size"
+        ),
+        library_sha256=_exact_string(
+            tool_payload.get("library_sha256"),
+            "69fd4df057985c40e510e2fac182881c7f85e90aa13ec703f763a8fdb2ce61f8",
+            "7-Zip library SHA-256",
+        ),
+    )
+    return SuccessorParentPreflight(
+        path=source,
+        file_sha256=sha256_bytes(raw),
+        status=status,
+        raw_source_bindings=MappingProxyType(parsed_raw),
+        seven_zip_tool_binding=tool,
+    )
+
+
+def load_successor_parent_config(
+    path: str | Path,
+    *,
+    project_root: str | Path,
+) -> OODExternalV2ParentConfig:
+    """Load v2.1 only after root freezes and explicitly enables its exact hash."""
+
+    preflight = verify_successor_parent_preflight(path, project_root=project_root)
+    if (
+        preflight.status != "frozen_parent_preregistration_pre_waveform"
+        or EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256 is None
+        or preflight.file_sha256 != EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256
+    ):
+        raise OODExternalV2ExecutionError(
+            "SUCCESSOR_PARENT_NOT_FROZEN: v2.1 execution remains disabled"
+        )
+    root = _strict_project_root(project_root)
+    predecessor = load_parent_config(
+        root.joinpath(*PurePosixPath(PARENT_CONFIG_DEFAULT).parts)
+    )
+    raw = _read_bounded(preflight.path, _CONFIG_MAX_BYTES, "successor parent")
+    decoded = _mapping(yaml.safe_load(raw.decode("utf-8")), "successor parent")
+    bindings = _mapping(decoded.get("bindings"), "successor bindings")
+
+    def require_binding(
+        value: object,
+        expected: BoundFile,
+        *,
+        context: str,
+        inner_hash_key: str | None = None,
+    ) -> None:
+        item = _mapping(value, context)
+        if (
+            item.get("path") != expected.relative_path
+            or item.get("file_sha256") != expected.file_sha256
+            or (
+                expected.artifact_sha256 is not None
+                and item.get("artifact_sha256") != expected.artifact_sha256
+            )
+            or (
+                inner_hash_key is not None
+                and item.get(inner_hash_key) != predecessor.resolved_config_sha256
+            )
+        ):
+            raise OODExternalV2ConfigError(f"{context} differs from sealed v1")
+
+    completion = _mapping(bindings.get("v1_completion_bundle"), "v1 bundle")
+    require_binding(completion.get("result"), predecessor.v1_result, context="v1 result")
+    require_binding(
+        completion.get("success_manifest"),
+        predecessor.v1_success_manifest,
+        context="v1 manifest",
+    )
+    require_binding(
+        completion.get("distribution_policy"),
+        predecessor.v1_distribution_policy,
+        context="v1 distribution policy",
+    )
+    require_binding(bindings.get("v1_checkpoint"), predecessor.checkpoint, context="checkpoint")
+    require_binding(
+        bindings.get("v1_resolved_config"),
+        predecessor.resolved_config,
+        context="resolved config",
+        inner_hash_key="inner_config_sha256",
+    )
+    require_binding(
+        bindings.get("normalization"),
+        predecessor.normalization,
+        context="normalization",
+    )
+    require_binding(
+        bindings.get("signal_quality_implementation"),
+        predecessor.quality_implementation,
+        context="quality implementation",
+    )
+    require_binding(
+        bindings.get("dependency_lock"),
+        predecessor.dependency_lock,
+        context="dependency lock",
+    )
+    require_binding(
+        bindings.get("project_manifest"),
+        predecessor.project_manifest,
+        context="project manifest",
+    )
+    evaluation = _mapping(decoded.get("evaluation"), "successor evaluation")
+    primary = _mapping(evaluation.get("primary_endpoints"), "successor endpoints")
+    bootstrap = _mapping(evaluation.get("bootstrap"), "successor bootstrap")
+    challenge_bootstrap = _mapping(bootstrap.get("challenge"), "Challenge bootstrap")
+    zzu_bootstrap = _mapping(bootstrap.get("zzu"), "ZZU bootstrap")
+    multiplicity = _mapping(evaluation.get("multiplicity"), "successor multiplicity")
+    if (
+        _endpoint_minimum(primary, "challenge_group3_technical_block_sensitivity", 0.95)
+        != predecessor.challenge_group3_minimum
+        or _endpoint_minimum(primary, "challenge_group1_quality_pass_rate", 0.90)
+        != predecessor.challenge_group1_minimum
+        or _endpoint_minimum(primary, "challenge_external_distribution_recall", 0.90)
+        != predecessor.challenge_distribution_minimum
+        or _endpoint_minimum(primary, "zzu_external_distribution_recall", 0.90)
+        != predecessor.zzu_distribution_minimum
+        or bootstrap.get("resamples") != 10_000
+        or challenge_bootstrap.get("seed") != 20_260_901
+        or zzu_bootstrap.get("seed") != 20_260_902
+        or multiplicity.get("required_one_sided_confidence_level") != 0.9875
+    ):
+        raise OODExternalV2ConfigError("successor endpoint/bootstrap constants differ")
+    return replace(
+        predecessor,
+        path=preflight.path,
+        file_sha256=preflight.file_sha256,
+        status=preflight.status,
+        output_root="artifacts/trust_sentinel/ood_external_v2_1",
+        claim_path="artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json",
+        raw_source_bindings=preflight.raw_source_bindings,
+        seven_zip_tool_binding=preflight.seven_zip_tool_binding,
+    )
+
+
+def _parse_successor_parent_copy(
+    path: Path,
+    *,
+    expected_file_sha256: str,
+) -> tuple[dict[str, object], Mapping[str, RawSourceBinding], SevenZipToolBinding]:
+    """Path-neutral parser for the exact manifest-covered successor copy."""
+
+    raw = _read_bounded(path, _CONFIG_MAX_BYTES, "private successor parent copy")
+    if (
+        EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256 is None
+        or expected_file_sha256 != EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256
+        or sha256_bytes(raw) != expected_file_sha256
+    ):
+        raise OODExternalV2IntegrityError("private successor parent hash differs")
+    try:
+        text = raw.decode("utf-8")
+        _reject_duplicate_yaml_keys(text)
+        decoded: object = yaml.safe_load(text)
+    except (UnicodeError, yaml.YAMLError) as error:
+        raise OODExternalV2IntegrityError(
+            "private successor parent cannot be parsed"
+        ) from error
+    payload = _mapping(decoded, "private successor parent")
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("protocol_id") != SUCCESSOR_PROTOCOL_ID
+        or payload.get("status") != "frozen_parent_preregistration_pre_waveform"
+        or not isinstance(payload.get("frozen_at_utc"), str)
+        or payload.get("research_only") is not True
+    ):
+        raise OODExternalV2IntegrityError("private successor parent identity differs")
+    raw_sources = _mapping(payload.get("raw_source_bindings"), "private raw sources")
+    raw_files = _mapping(raw_sources.get("files"), "private raw source files")
+    if set(raw_files) != set(REQUIRED_RAW_SOURCE_BINDING_KEYS):
+        raise OODExternalV2IntegrityError("private parent raw source set differs")
+    parsed_raw: dict[str, RawSourceBinding] = {}
+    for name in REQUIRED_RAW_SOURCE_BINDING_KEYS:
+        item = _mapping(raw_files[name], f"private raw source {name}")
+        raw_sha = item.get("sha256")
+        raw_md5 = item.get("expected_md5")
+        if (
+            set(item) != {"expected_md5", "path", "sha256", "size_bytes"}
+            or not isinstance(raw_sha, str)
+            or re.fullmatch(r"[0-9a-f]{64}", raw_sha) is None
+            or (
+                raw_md5 is not None
+                and (
+                    not isinstance(raw_md5, str)
+                    or re.fullmatch(r"[0-9a-f]{32}", raw_md5) is None
+                )
+            )
+        ):
+            raise OODExternalV2IntegrityError("private parent raw source differs")
+        parsed_raw[name] = RawSourceBinding(
+            relative_path=_relative_path(item.get("path"), f"private raw source {name}"),
+            file_sha256=f"sha256:{raw_sha}",
+            size_bytes=_positive_integer(item.get("size_bytes"), f"private raw source {name}"),
+            official_md5=None if raw_md5 is None else f"md5:{raw_md5}",
+        )
+    runtime = _mapping(payload.get("runtime"), "private successor runtime")
+    tool_payload = _mapping(runtime.get("split_archive_tool"), "private 7-Zip")
+    try:
+        tool = SevenZipToolBinding(
+            implementation=cast(str, tool_payload.get("implementation")),
+            version=cast(str, tool_payload.get("version")),
+            executable_name=cast(str, tool_payload.get("executable_name")),
+            executable_size_bytes=cast(int, tool_payload.get("executable_size_bytes")),
+            executable_sha256=cast(str, tool_payload.get("executable_sha256")),
+            library_name=cast(str, tool_payload.get("library_name")),
+            library_size_bytes=cast(int, tool_payload.get("library_size_bytes")),
+            library_sha256=cast(str, tool_payload.get("library_sha256")),
+        )
+    except Exception as error:
+        raise OODExternalV2IntegrityError("private parent 7-Zip binding differs") from error
+    expected_tool = SevenZipToolBinding(
+        implementation="7zip",
+        version="26.02",
+        executable_name="7z.exe",
+        executable_size_bytes=576_000,
+        executable_sha256=(
+            "83967f1b02b43c4efeda302795722c809e0e81b8307de73558d10484d5676a7d"
+        ),
+        library_name="7z.dll",
+        library_size_bytes=1_906_688,
+        library_sha256=(
+            "69fd4df057985c40e510e2fac182881c7f85e90aa13ec703f763a8fdb2ce61f8"
+        ),
+    )
+    if tool != expected_tool:
+        raise OODExternalV2IntegrityError("private parent 7-Zip identity differs")
+    return payload, MappingProxyType(parsed_raw), tool
+
+
+def _load_parent_for_operation(
+    path: str | Path,
+    *,
+    project_root: str | Path,
+) -> OODExternalV2ParentConfig:
+    root = _strict_project_root(project_root)
+    requested = Path(os.path.abspath(os.fspath(path)))
+    original = root.joinpath(*PurePosixPath(PARENT_CONFIG_DEFAULT).parts)
+    successor = root.joinpath(*PurePosixPath(SUCCESSOR_PARENT_CONFIG_PATH).parts)
+    if requested == original:
+        return load_parent_config(requested)
+    if requested == successor:
+        return load_successor_parent_config(requested, project_root=root)
+    raise OODExternalV2ConfigError("parent must use an exact canonical project path")
+
+
+def _archive_closure_summary(
+    closure: ArchiveExtractionClosure,
+) -> ArchiveClosureSummaryBinding:
+    role_counts = Counter(member.role for member in closure.members)
+    return ArchiveClosureSummaryBinding(
+        dataset=closure.dataset,
+        archive_format=closure.archive_format,
+        archive_file_count=len(closure.archive_files),
+        archive_bytes_total=closure.archive_bytes_total,
+        member_count=closure.member_count,
+        member_bytes_total=closure.member_bytes_total,
+        member_role_counts=(
+            role_counts.get("ignored_release_file", 0),
+            role_counts.get("quality_reference", 0),
+            role_counts.get("wfdb_data", 0),
+            role_counts.get("wfdb_header", 0),
+        ),
+        closure_sha256=closure.closure_sha256,
+        tool_binding=closure.tool_binding,
+    )
+
+
+def _archive_closure_summary_dict(
+    summary: ArchiveClosureSummaryBinding,
+) -> dict[str, object]:
+    return {
+        "archive_bytes_total": summary.archive_bytes_total,
+        "archive_file_count": summary.archive_file_count,
+        "archive_format": summary.archive_format,
+        "closure_sha256": summary.closure_sha256,
+        "dataset": summary.dataset,
+        "member_bytes_total": summary.member_bytes_total,
+        "member_count": summary.member_count,
+        "member_role_counts": {
+            role: count
+            for role, count in zip(
+                _ARCHIVE_MEMBER_ROLES,
+                summary.member_role_counts,
+                strict=True,
+            )
+        },
+        "tool_binding": (
+            None if summary.tool_binding is None else summary.tool_binding.to_dict()
+        ),
+    }
+
+
+def _parse_archive_closure_summary(
+    value: object,
+    *,
+    context: str,
+) -> ArchiveClosureSummaryBinding:
+    payload = _mapping(value, context)
+    expected = {
+        "archive_bytes_total",
+        "archive_file_count",
+        "archive_format",
+        "closure_sha256",
+        "dataset",
+        "member_bytes_total",
+        "member_count",
+        "member_role_counts",
+        "tool_binding",
+    }
+    if set(payload) != expected:
+        raise OODExternalV2ConfigError(f"{context} fields differ from protocol")
+    dataset = payload["dataset"]
+    archive_format = payload["archive_format"]
+    if dataset not in {CHALLENGE_2011_DATASET, ZZU_PEDIATRIC_DATASET} or archive_format not in {
+        "tar_gzip",
+        "split_zip_7zip",
+    }:
+        raise OODExternalV2ConfigError(f"{context} identity is invalid")
+    raw_roles = _mapping(payload["member_role_counts"], f"{context} roles")
+    if set(raw_roles) != set(_ARCHIVE_MEMBER_ROLES):
+        raise OODExternalV2ConfigError(f"{context} role fields differ")
+    role_counts = tuple(
+        _nonnegative_integer(raw_roles[role], f"{context} role {role}")
+        for role in _ARCHIVE_MEMBER_ROLES
+    )
+    raw_tool = payload["tool_binding"]
+    try:
+        tool_binding = (
+            None
+            if raw_tool is None
+            else SevenZipToolBinding.from_dict(_mapping(raw_tool, f"{context} tool"))
+        )
+    except Exception as error:
+        raise OODExternalV2ConfigError(f"{context} tool binding is invalid") from error
+    return ArchiveClosureSummaryBinding(
+        dataset=dataset,
+        archive_format=archive_format,
+        archive_file_count=_positive_integer(
+            payload["archive_file_count"],
+            f"{context} archive file count",
+        ),
+        archive_bytes_total=_positive_integer(
+            payload["archive_bytes_total"],
+            f"{context} archive bytes",
+        ),
+        member_count=_positive_integer(payload["member_count"], f"{context} members"),
+        member_bytes_total=_positive_integer(
+            payload["member_bytes_total"],
+            f"{context} member bytes",
+        ),
+        member_role_counts=cast(tuple[int, int, int, int], role_counts),
+        closure_sha256=_digest(payload["closure_sha256"], f"{context} closure"),
+        tool_binding=tool_binding,
+    )
+
+
+def _assert_production_archive_closures(
+    closures: tuple[ArchiveExtractionClosure, ...],
+    *,
+    expected_seven_zip_tool: SevenZipToolBinding | None = None,
+) -> tuple[ArchiveClosureSummaryBinding, ...]:
+    if tuple(closure.dataset for closure in closures) != (
+        CHALLENGE_2011_DATASET,
+        ZZU_PEDIATRIC_DATASET,
+    ):
+        raise OODExternalV2IntegrityError(
+            "inventory must contain exactly the two canonical archive closures"
+        )
+    summaries = tuple(_archive_closure_summary(closure) for closure in closures)
+    challenge, zzu = summaries
+    expected_challenge_roles = (1_001, 3, 1_000, 1_000)
+    expected_zzu_roles = (0, 0, 14_190, 14_190)
+    if (
+        challenge.archive_format != "tar_gzip"
+        or challenge.archive_file_count != 1
+        or challenge.member_count != 3_004
+        or challenge.member_role_counts != expected_challenge_roles
+        or challenge.tool_binding is not None
+        or zzu.archive_format != "split_zip_7zip"
+        or zzu.archive_file_count != 2
+        or zzu.member_count != 28_380
+        or zzu.member_role_counts != expected_zzu_roles
+        or zzu.tool_binding is None
+        or (
+            expected_seven_zip_tool is not None
+            and zzu.tool_binding != expected_seven_zip_tool
+        )
+    ):
+        raise OODExternalV2IntegrityError(
+            "archive closure release-tree counts or roles differ from v2.1"
+        )
+    return summaries
+
+
+def _verify_archive_closure_rebuilds(
+    inventory: ExternalWaveformInventory,
+    *,
+    dataset_roots: Mapping[str, Path],
+    raw_source_paths: Mapping[str, Path],
+    seven_zip_executable: str | Path,
+    expected_seven_zip_tool: SevenZipToolBinding | None = None,
+) -> None:
+    summaries = _assert_production_archive_closures(
+        inventory.archive_closures,
+        expected_seven_zip_tool=expected_seven_zip_tool,
+    )
+    challenge, zzu = inventory.archive_closures
+    requested_tool = Path(os.fspath(seven_zip_executable))
+    if zzu.tool_binding is None:
+        raise OODExternalV2IntegrityError("ZZU archive closure omits its 7-Zip binding")
+    if (
+        expected_seven_zip_tool is not None
+        and zzu.tool_binding != expected_seven_zip_tool
+    ):
+        raise OODExternalV2IntegrityError(
+            "ZZU closure tool differs from the successor-parent 7-Zip binding"
+        )
+    try:
+        verify_seven_zip_tool_binding(requested_tool, zzu.tool_binding)
+        challenge_hash = verify_challenge_tar_extraction_closure(
+            raw_source_paths["challenge_archive"],
+            dataset_roots[CHALLENGE_2011_DATASET],
+            challenge,
+        )
+        zzu_hash = verify_zzu_split_zip_extraction_closure(
+            raw_source_paths["zzu_archive_z01"],
+            raw_source_paths["zzu_archive_zip"],
+            dataset_roots[ZZU_PEDIATRIC_DATASET],
+            requested_tool,
+            zzu,
+        )
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "external archive/extraction/tool closure verification failed"
+        ) from error
+    if (challenge_hash, zzu_hash) != tuple(
+        summary.closure_sha256 for summary in summaries
+    ):
+        raise OODExternalV2IntegrityError("rebuilt archive closure hashes differ")
+
+
+def load_child_contract(path: str | Path) -> OODExternalV2ChildContract:
+    """Load the canonical, self-hashed child execution contract."""
+
+    source = Path(os.path.abspath(os.fspath(path)))
+    raw = _read_bounded(source, _CHILD_MAX_BYTES, "child execution contract")
+    try:
+        decoded: object = json.loads(
+            raw[:-1].decode("ascii") if raw.endswith(b"\n") else b"".decode(),
+            object_pairs_hook=_unique_json_object,
+        )
+    except OODExternalV2ConfigError:
+        raise
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OODExternalV2ConfigError("child contract is not canonical JSON") from error
+    if not isinstance(decoded, dict):
+        raise OODExternalV2ConfigError("child contract must contain a JSON object")
+    payload = cast(dict[str, object], decoded)
+    if canonical_json_bytes(payload) != raw:
+        raise OODExternalV2ConfigError("child contract is not in exact canonical form")
+    expected = {
+        "artifact_sha256",
+        "artifact_type",
+        "dataset_roots",
+        "decision_bindings",
+        "frozen_at_utc",
+        "implementation_revision",
+        "inventory",
+        "output_root",
+        "parent_config_file_sha256",
+        "project_source_tree",
+        "protocol_id",
+        "public_inventory_projection",
+        "raw_source_bindings",
+        "runtime_bindings",
+        "runtime_environment",
+        "schema_version",
+    }
+    if set(payload) != expected:
+        raise OODExternalV2ConfigError("child contract fields differ from protocol")
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("artifact_type") != CHILD_CONTRACT_ARTIFACT_TYPE
+        or payload.get("protocol_id") != PROTOCOL_ID
+    ):
+        raise OODExternalV2ConfigError("child contract identity is invalid")
+    artifact_sha256 = _digest(payload.get("artifact_sha256"), "child artifact")
+    if artifact_sha256 != canonical_sha256(
+        {key: value for key, value in payload.items() if key != "artifact_sha256"}
+    ):
+        raise OODExternalV2ConfigError("child contract logical hash differs")
+    frozen = _utc_datetime(payload.get("frozen_at_utc"), "child frozen_at_utc")
+    implementation_revision = _revision(
+        payload.get("implementation_revision"),
+        "child implementation revision",
+    )
+    raw_inventory = _mapping(payload.get("inventory"), "child inventory")
+    inventory_expected = {
+        "archive_closures",
+        "challenge_records",
+        "file_sha256",
+        "inventory_sha256",
+        "relative_path",
+        "selected_records_total",
+        "zzu_patients",
+        "zzu_records",
+    }
+    if set(raw_inventory) != inventory_expected:
+        raise OODExternalV2ConfigError("child inventory fields differ from protocol")
+    raw_archive_closures = raw_inventory["archive_closures"]
+    if not isinstance(raw_archive_closures, list) or len(raw_archive_closures) != 2:
+        raise OODExternalV2ConfigError(
+            "child inventory must bind exactly two archive closures"
+        )
+    archive_closures = tuple(
+        _parse_archive_closure_summary(
+            value,
+            context=f"child archive closure {index}",
+        )
+        for index, value in enumerate(raw_archive_closures)
+    )
+    if tuple(item.dataset for item in archive_closures) != (
+        CHALLENGE_2011_DATASET,
+        ZZU_PEDIATRIC_DATASET,
+    ):
+        raise OODExternalV2ConfigError(
+            "child archive closures are not in canonical dataset order"
+        )
+    inventory = InventoryBinding(
+        relative_path=_relative_path(raw_inventory.get("relative_path"), "inventory path"),
+        file_sha256=_digest(raw_inventory.get("file_sha256"), "inventory file"),
+        inventory_sha256=_digest(raw_inventory.get("inventory_sha256"), "inventory"),
+        selected_records_total=_positive_integer(
+            raw_inventory.get("selected_records_total"),
+            "selected record count",
+        ),
+        challenge_records=_positive_integer(
+            raw_inventory.get("challenge_records"),
+            "Challenge record count",
+        ),
+        zzu_records=_positive_integer(raw_inventory.get("zzu_records"), "ZZU record count"),
+        zzu_patients=_positive_integer(
+            raw_inventory.get("zzu_patients"),
+            "ZZU patient count",
+        ),
+        archive_closures=archive_closures,
+    )
+    raw_roots = _mapping(payload.get("dataset_roots"), "child dataset roots")
+    if set(raw_roots) != {CHALLENGE_2011_DATASET, ZZU_PEDIATRIC_DATASET}:
+        raise OODExternalV2ConfigError("child dataset roots must bind exactly both sources")
+    roots = MappingProxyType(
+        {
+            name: _relative_path(raw_roots[name], f"dataset root {name}")
+            for name in (CHALLENGE_2011_DATASET, ZZU_PEDIATRIC_DATASET)
+        }
+    )
+    if dict(roots) != dict(EXPECTED_DATASET_ROOTS):
+        raise OODExternalV2ConfigError(
+            "child dataset roots differ from the exact frozen extraction roots"
+        )
+    raw_decisions = _mapping(payload.get("decision_bindings"), "decision bindings")
+    if set(raw_decisions) != {"demo_policy", "source_calibration_result"}:
+        raise OODExternalV2ConfigError("child decision bindings differ from protocol")
+    decision_bindings = MappingProxyType(
+        {
+            name: _bound_file(raw_decisions[name], f"decision binding {name}")
+            for name in ("demo_policy", "source_calibration_result")
+        }
+    )
+    if (
+        decision_bindings["source_calibration_result"].artifact_sha256
+        != EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256
+        or decision_bindings["demo_policy"].artifact_sha256
+        != EXPECTED_DEMO_POLICY_ARTIFACT_SHA256
+    ):
+        raise OODExternalV2ConfigError(
+            "child decision artifact identities differ from frozen components"
+        )
+    raw_sources = _mapping(payload.get("raw_source_bindings"), "raw source bindings")
+    if set(raw_sources) != set(REQUIRED_RAW_SOURCE_BINDING_KEYS):
+        raise OODExternalV2ConfigError(
+            "child raw-source bindings differ from the exact acquisition set"
+        )
+    raw_source_bindings = MappingProxyType(
+        {
+            name: _raw_source_binding(raw_sources[name], f"raw source binding {name}")
+            for name in REQUIRED_RAW_SOURCE_BINDING_KEYS
+        }
+    )
+    for name, expected_path in EXPECTED_RAW_SOURCE_PATHS.items():
+        if raw_source_bindings[name].relative_path != expected_path:
+            raise OODExternalV2ConfigError(
+                f"raw source path differs from the exact frozen acquisition: {name}"
+            )
+    runtime_environment = _runtime_environment_binding(
+        payload.get("runtime_environment"),
+        context="child runtime environment",
+    )
+    project_source_tree = _project_source_tree_binding(
+        payload.get("project_source_tree"),
+        context="child project source tree",
+    )
+    raw_runtime = _mapping(payload.get("runtime_bindings"), "runtime bindings")
+    if set(raw_runtime) != set(REQUIRED_RUNTIME_BINDING_PATHS):
+        raise OODExternalV2ConfigError("child runtime bindings differ from exact evaluator set")
+    runtime_bindings = MappingProxyType(
+        {
+            path: _digest(raw_runtime[path], f"runtime binding {path}")
+            for path in REQUIRED_RUNTIME_BINDING_PATHS
+        }
+    )
+    raw_projection = payload.get("public_inventory_projection")
+    public_projection = (
+        None
+        if raw_projection is None
+        else _bound_file(raw_projection, "public inventory projection")
+    )
+    if public_projection is None or public_projection.artifact_sha256 is None:
+        raise OODExternalV2ConfigError(
+            "child must bind the public projection file and logical artifact hashes"
+        )
+    return OODExternalV2ChildContract(
+        path=source,
+        file_sha256=sha256_bytes(raw),
+        artifact_sha256=artifact_sha256,
+        frozen_at_utc=frozen,
+        parent_config_file_sha256=_digest(
+            payload.get("parent_config_file_sha256"),
+            "parent config",
+        ),
+        implementation_revision=implementation_revision,
+        inventory=inventory,
+        dataset_roots=roots,
+        decision_bindings=decision_bindings,
+        raw_source_bindings=raw_source_bindings,
+        runtime_environment=runtime_environment,
+        runtime_bindings=runtime_bindings,
+        project_source_tree=project_source_tree,
+        public_inventory_projection=public_projection,
+        output_root=_relative_path(payload.get("output_root"), "child output root"),
+    )
+
+
+def child_contract_bytes(body: Mapping[str, object]) -> bytes:
+    """Seal a complete child body for metadata-only inventory tooling.
+
+    The helper performs no waveform access.  Callers must provide every field
+    except ``artifact_sha256`` and then commit the resulting bytes before the
+    one-shot evaluation.
+    """
+
+    if "artifact_sha256" in body:
+        raise OODExternalV2ConfigError("child body must not self-assert artifact_sha256")
+    payload = dict(body)
+    payload["artifact_sha256"] = canonical_sha256(payload)
+    serialized = canonical_json_bytes(payload)
+    # Round-trip through the strict parser is intentionally left to the caller's
+    # destination path; this helper only supplies deterministic bytes.
+    return serialized
+
+
+def verify_external_v2_inputs(
+    parent: OODExternalV2ParentConfig,
+    child: OODExternalV2ChildContract,
+    *,
+    project_root: str | Path,
+    code_revision: str,
+    seven_zip_executable: str | Path = "7z",
+) -> VerifiedExternalV2Inputs:
+    """Verify all metadata, hashes, roles, and v1 public evidence before decode."""
+
+    if not isinstance(parent, OODExternalV2ParentConfig):
+        raise TypeError("parent must be OODExternalV2ParentConfig")
+    if not isinstance(child, OODExternalV2ChildContract):
+        raise TypeError("child must be OODExternalV2ChildContract")
+    revision = _revision(code_revision, "execution code revision")
+    root = _strict_project_root(project_root)
+    expected_parent_path = root.joinpath(
+        *PurePosixPath(SUCCESSOR_PARENT_CONFIG_PATH).parts
+    )
+    expected_child_path = root.joinpath(
+        *PurePosixPath(SUCCESSOR_CHILD_CONFIG_PATH).parts
+    )
+    if parent.file_sha256 != EXPECTED_PARENT_CONFIG_SHA256:
+        successor = verify_successor_parent_preflight(
+            parent.path,
+            project_root=root,
+        )
+        if (
+            parent.path != expected_parent_path
+            or child.path != expected_child_path
+            or successor.file_sha256 != parent.file_sha256
+            or dict(successor.raw_source_bindings)
+            != dict(parent.raw_source_bindings or {})
+            or successor.seven_zip_tool_binding != parent.seven_zip_tool_binding
+        ):
+            raise OODExternalV2IntegrityError(
+                "operational successor parent/child lineage differs"
+            )
+    if child.parent_config_file_sha256 != parent.file_sha256:
+        raise OODExternalV2IntegrityError("child does not bind the exact parent bytes")
+    if (
+        parent.raw_source_bindings is not None
+        and dict(child.raw_source_bindings) != dict(parent.raw_source_bindings)
+    ):
+        raise OODExternalV2IntegrityError(
+            "child raw-source provenance differs from the successor parent"
+        )
+    if child.output_root != parent.output_root:
+        raise OODExternalV2IntegrityError("child output root differs from parent")
+    if (
+        child.inventory.relative_path != SUCCESSOR_PRIVATE_INVENTORY_PATH
+        or child.public_inventory_projection is None
+        or child.public_inventory_projection.relative_path
+        != SUCCESSOR_PUBLIC_PROJECTION_PATH
+    ):
+        raise OODExternalV2IntegrityError(
+            "child inventory/projection paths differ from successor namespace"
+        )
+    for source, context in (
+        (parent.path, "parent protocol"),
+        (child.path, "child contract"),
+    ):
+        _require_project_file(root, source, context=context)
+    _verify_revision_boundary(root, child=child, execution_revision=revision)
+    _verify_private_history_absent(root)
+    _verify_tracked_head_blob(
+        root,
+        revision=revision,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=parent.file_sha256,
+    )
+    _verify_project_source_tree_at_revisions(
+        root,
+        child.project_source_tree,
+        implementation_revision=child.implementation_revision,
+        execution_revision=revision,
+    )
+    _verify_imported_project_module_origins(root, child.project_source_tree)
+    if _current_runtime_environment() != child.runtime_environment:
+        raise OODExternalV2IntegrityError(
+            "active Python/scientific runtime differs from the frozen child contract"
+        )
+    for relative_path, expected_hash in child.runtime_bindings.items():
+        runtime_path = _resolve_project_relative(root, relative_path, require_file=True)
+        if sha256_file(runtime_path) != expected_hash:
+            raise OODExternalV2IntegrityError(
+                f"runtime-critical file differs from child binding: {relative_path}"
+            )
+    projection_binding = child.public_inventory_projection
+    if projection_binding is None:
+        raise OODExternalV2IntegrityError("public inventory projection binding is absent")
+    projection_path = _resolve_project_relative(
+        root,
+        projection_binding.relative_path,
+        require_file=True,
+    )
+    if sha256_file(projection_path) != projection_binding.file_sha256:
+        raise OODExternalV2IntegrityError("public inventory projection hash differs")
+
+    raw_source_paths: dict[str, Path] = {}
+    for name, binding in child.raw_source_bindings.items():
+        source_path = _resolve_project_relative(
+            root,
+            binding.relative_path,
+            require_file=True,
+        )
+        try:
+            observed_size = source_path.stat().st_size
+        except OSError as error:
+            raise OODExternalV2IntegrityError(
+                f"raw source binding is unavailable: {name}"
+            ) from error
+        if (
+            observed_size != binding.size_bytes
+            or sha256_file(source_path) != binding.file_sha256
+            or (
+                binding.official_md5 is not None
+                and _md5_file(source_path) != binding.official_md5
+            )
+        ):
+            raise OODExternalV2IntegrityError(
+                f"raw source provenance differs from child binding: {name}"
+            )
+        raw_source_paths[name] = source_path
+
+    bound_paths: dict[str, Path] = {}
+    for name, bound in (
+        ("checkpoint", parent.checkpoint),
+        ("resolved_config", parent.resolved_config),
+        ("normalization", parent.normalization),
+        ("quality_implementation", parent.quality_implementation),
+        ("dependency_lock", parent.dependency_lock),
+        ("project_manifest", parent.project_manifest),
+    ):
+        path = _resolve_project_relative(root, bound.relative_path, require_file=True)
+        if sha256_file(path) != bound.file_sha256:
+            raise OODExternalV2IntegrityError(f"{name} hash differs from parent")
+        bound_paths[name] = path
+    if DEFAULT_SIGNAL_QUALITY_CONFIG.version != parent.quality_config_version:
+        raise OODExternalV2IntegrityError("loaded quality configuration version differs")
+
+    v1 = _verify_v1_public_evidence(parent, project_root=root)
+    inventory_path = _resolve_project_relative(
+        root,
+        child.inventory.relative_path,
+        require_file=True,
+    )
+    _require_git_ignored_and_untracked(
+        root,
+        inventory_path.relative_to(root).as_posix(),
+        context="private external inventory",
+    )
+    _require_git_ignored_and_untracked(
+        root,
+        f"{parent.output_root}/private",
+        context="private evidence output",
+    )
+    if sha256_file(inventory_path) != child.inventory.file_sha256:
+        raise OODExternalV2IntegrityError("external inventory file hash differs from child")
+    try:
+        inventory = load_external_inventory(inventory_path)
+    except Exception as error:
+        raise OODExternalV2IntegrityError("external inventory verification failed") from error
+    if inventory.inventory_sha256 != child.inventory.inventory_sha256:
+        raise OODExternalV2IntegrityError("external inventory logical identity differs")
+    _verify_inventory_counts(parent, child, inventory)
+    projection_artifact_sha256 = _verify_public_projection_file(
+        projection_path,
+        inventory=inventory,
+        challenge_records=child.inventory.challenge_records,
+        zzu_records=child.inventory.zzu_records,
+    )
+    if projection_artifact_sha256 != projection_binding.artifact_sha256:
+        raise OODExternalV2IntegrityError(
+            "public inventory projection logical hash differs from child binding"
+        )
+    observed_closures = _assert_production_archive_closures(
+        inventory.archive_closures,
+        expected_seven_zip_tool=parent.seven_zip_tool_binding,
+    )
+    if observed_closures != child.inventory.archive_closures:
+        raise OODExternalV2IntegrityError(
+            "inventory archive closures differ from the child contract"
+        )
+
+    dataset_roots = MappingProxyType(
+        {
+            name: _resolve_project_relative(
+                root,
+                child.dataset_roots[name],
+                require_directory=True,
+            )
+            for name in (CHALLENGE_2011_DATASET, ZZU_PEDIATRIC_DATASET)
+        }
+    )
+    _assert_external_roots_are_not_forbidden(root, dataset_roots)
+    _verify_raw_inventory(
+        inventory,
+        dataset_roots=dataset_roots,
+        raw_source_paths=MappingProxyType(raw_source_paths),
+        public_projection=(
+            None
+            if child.public_inventory_projection is None
+            else _resolve_project_relative(
+                root,
+                child.public_inventory_projection.relative_path,
+                require_file=True,
+            )
+        ),
+        parent=parent,
+    )
+    _verify_archive_closure_rebuilds(
+        inventory,
+        dataset_roots=dataset_roots,
+        raw_source_paths=MappingProxyType(raw_source_paths),
+        seven_zip_executable=seven_zip_executable,
+        expected_seven_zip_tool=parent.seven_zip_tool_binding,
+    )
+    routing = _load_routing_components(parent, child, project_root=root)
+    return VerifiedExternalV2Inputs(
+        project_root=root,
+        parent=parent,
+        child=child,
+        inventory=inventory,
+        inventory_path=inventory_path,
+        dataset_roots=dataset_roots,
+        raw_source_paths=MappingProxyType(raw_source_paths),
+        v1=v1,
+        checkpoint_path=bound_paths["checkpoint"],
+        resolved_config_path=bound_paths["resolved_config"],
+        normalization_path=bound_paths["normalization"],
+        routing=routing,
+    )
+
+
+def _verify_v1_public_evidence(
+    parent: OODExternalV2ParentConfig,
+    *,
+    project_root: Path,
+) -> VerifiedV1PublicEvidence:
+    """Run the authoritative v1 verifier, then retain only public aggregates.
+
+    The required whole-bundle verifier integrity-checks private v1 embedding
+    bytes.  V2 never exposes, subsets, scores, or analyzes those arrays; only
+    the verifier's public result, policy, and manifest objects cross this
+    function boundary.
+    """
+
+    paths = {
+        "result": _resolve_project_relative(
+            project_root,
+            parent.v1_result.relative_path,
+            require_file=True,
+        ),
+        "success": _resolve_project_relative(
+            project_root,
+            parent.v1_success_manifest.relative_path,
+            require_file=True,
+        ),
+        "policy": _resolve_project_relative(
+            project_root,
+            parent.v1_distribution_policy.relative_path,
+            require_file=True,
+        ),
+    }
+    try:
+        verified_whole = verify_ood_completion_bundle(paths["result"].parent)
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "authoritative sealed v1 whole-bundle verification failed"
+        ) from error
+    snapshots: dict[str, str] = {}
+    expected = {
+        "result": parent.v1_result.file_sha256,
+        "success": parent.v1_success_manifest.file_sha256,
+        "policy": parent.v1_distribution_policy.file_sha256,
+    }
+    for name, path in paths.items():
+        observed = sha256_file(path)
+        if observed != expected[name]:
+            raise OODExternalV2IntegrityError(f"sealed v1 {name} file hash differs")
+        snapshots[f"v1_{name}"] = observed
+    result = verified_whole.result
+    policy = verified_whole.policy
+    success = verified_whole.success_manifest
+    if (
+        result.artifact_sha256 != parent.v1_result.artifact_sha256
+        or policy.artifact_sha256 != parent.v1_distribution_policy.artifact_sha256
+        or success.artifact_sha256 != parent.v1_success_manifest.artifact_sha256
+    ):
+        raise OODExternalV2IntegrityError("sealed v1 logical identity differs from parent")
+    if result.status != "SOURCE_SUPPORT_GATE_TARGET_MISSED" or result.research_bundle_eligible:
+        raise OODExternalV2IntegrityError("historical v1 source result status changed")
+    if (
+        result.distribution_policy.artifact_sha256 != policy.artifact_sha256
+        or result.distribution_policy.file_sha256 != parent.v1_distribution_policy.file_sha256
+        or success.result_artifact_sha256 != result.artifact_sha256
+        or success.distribution_policy_artifact_sha256 != policy.artifact_sha256
+        or policy.detector.threshold != parent.threshold
+        or policy.threshold_comparison != "score_strictly_greater_than_threshold"
+    ):
+        raise OODExternalV2IntegrityError("v1 result, policy, and success metadata disagree")
+    public_member_hashes = {
+        member.relative_path: member.file_sha256
+        for member in success.members
+        if member.relative_path in {"distribution-policy.json", "ood-completion-result.json"}
+    }
+    if public_member_hashes != {
+        "distribution-policy.json": parent.v1_distribution_policy.file_sha256,
+        "ood-completion-result.json": parent.v1_result.file_sha256,
+    }:
+        raise OODExternalV2IntegrityError("v1 success metadata public members disagree")
+
+    # The adjacent claim is sanitized metadata.  Its hash is declared by the
+    # verified success manifest; no v1 private embedding member is opened here.
+    claim_path = paths["result"].parent.parent / success.validation_access_claim_filename
+    claim_path = _require_project_file(
+        project_root,
+        claim_path,
+        context="sealed v1 adjacent claim",
+    )
+    claim_hash = sha256_file(claim_path)
+    if claim_hash != success.validation_access_claim_file_sha256:
+        raise OODExternalV2IntegrityError("sealed v1 adjacent claim hash differs")
+    snapshots["v1_claim"] = claim_hash
+    return VerifiedV1PublicEvidence(
+        result=result,
+        policy=policy,
+        success_manifest=success,
+        claim_file_sha256=claim_hash,
+        snapshots=MappingProxyType(snapshots),
+    )
+
+
+def _verify_inventory_counts(
+    parent: OODExternalV2ParentConfig,
+    child: OODExternalV2ChildContract,
+    inventory: ExternalWaveformInventory,
+) -> None:
+    challenge = tuple(
+        record for record in inventory.records if record.dataset == CHALLENGE_2011_DATASET
+    )
+    zzu = tuple(record for record in inventory.records if record.dataset == ZZU_PEDIATRIC_DATASET)
+    if len(challenge) != parent.challenge_expected_records:
+        raise OODExternalV2IntegrityError("Challenge inventory is not complete Set A")
+    if len(challenge) != child.inventory.challenge_records:
+        raise OODExternalV2IntegrityError("Challenge inventory count differs from child")
+    if any(record.patient_key is not None for record in challenge):
+        raise OODExternalV2IntegrityError(
+            "Challenge inventory patient keys must all be exactly null"
+        )
+    if len(zzu) != child.inventory.zzu_records or not zzu:
+        raise OODExternalV2IntegrityError("ZZU inventory count differs from child")
+    patient_keys = {record.patient_key for record in zzu}
+    if None in patient_keys or len(patient_keys) != child.inventory.zzu_patients:
+        raise OODExternalV2IntegrityError("ZZU patient count differs from child")
+    if len(inventory.records) != child.inventory.selected_records_total:
+        raise OODExternalV2IntegrityError("total inventory count differs from child")
+    if len(challenge) + len(zzu) != len(inventory.records):
+        raise OODExternalV2IntegrityError("inventory contains a forbidden dataset")
+    try:
+        validate_challenge_2011_set_a_inventory(
+            build_external_inventory(challenge),
+            expected_record_count=parent.challenge_expected_records,
+        )
+    except Exception as error:
+        raise OODExternalV2IntegrityError("Challenge Set A role verification failed") from error
+
+
+def _verify_raw_inventory(
+    inventory: ExternalWaveformInventory,
+    *,
+    dataset_roots: Mapping[str, Path],
+    raw_source_paths: Mapping[str, Path],
+    public_projection: Path | None,
+    parent: OODExternalV2ParentConfig,
+) -> None:
+    for dataset in (CHALLENGE_2011_DATASET, ZZU_PEDIATRIC_DATASET):
+        records = tuple(record for record in inventory.records if record.dataset == dataset)
+        subset = build_external_inventory(records)
+        try:
+            verified = verify_external_inventory(dataset_roots[dataset], subset)
+        except Exception as error:
+            raise OODExternalV2IntegrityError(
+                f"raw external inventory failed verification for {dataset}"
+            ) from error
+        if verified != subset.inventory_sha256:
+            raise OODExternalV2IntegrityError("external subset inventory identity changed")
+        if dataset == CHALLENGE_2011_DATASET:
+            validate_challenge_2011_set_a_inventory(
+                subset,
+                expected_record_count=parent.challenge_expected_records,
+            )
+    _verify_role_metadata_rejoin(
+        inventory,
+        dataset_roots=dataset_roots,
+        raw_source_paths=raw_source_paths,
+        public_projection=public_projection,
+        parent=parent,
+    )
+
+
+def _assert_external_roots_are_not_forbidden(
+    project_root: Path,
+    dataset_roots: Mapping[str, Path],
+) -> None:
+    expected = {
+        dataset: _resolve_project_relative(
+            project_root,
+            relative_path,
+            require_directory=True,
+        )
+        for dataset, relative_path in EXPECTED_DATASET_ROOTS.items()
+    }
+    if dict(dataset_roots) != expected:
+        raise OODExternalV2IntegrityError(
+            "external roots must equal the two exact frozen extraction directories"
+        )
+    forbidden_roots = (
+        project_root / "artifacts" / "trust_sentinel" / "ood_completion_v1",
+        project_root / "data" / "raw" / "ptb-xl",
+        project_root / "runs",
+    )
+    for root in dataset_roots.values():
+        for forbidden in forbidden_roots:
+            try:
+                root.relative_to(forbidden)
+            except ValueError:
+                continue
+            raise OODExternalV2IntegrityError("external dataset root enters a forbidden source")
+        normalized = root.as_posix().casefold()
+        if any(fragment in normalized for fragment in ("/sph/", "fold10", "fold-10")):
+            raise OODExternalV2IntegrityError(
+                "external dataset root names a previously observed source"
+            )
+
+
+def _verify_revision_boundary(
+    project_root: Path,
+    *,
+    child: OODExternalV2ChildContract,
+    execution_revision: str,
+) -> None:
+    """Require a clean descendant whose only later files are the child freeze."""
+
+    try:
+        clean_head = _verify_clean_git_revision(project_root)
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "execution requires a clean committed revision"
+        ) from error
+    if clean_head != execution_revision:
+        raise OODExternalV2IntegrityError("execution revision differs from clean Git HEAD")
+    completed = _run_git(
+        project_root,
+        "merge-base",
+        "--is-ancestor",
+        child.implementation_revision,
+        execution_revision,
+        allow_empty=True,
+    )
+    if completed.returncode != 0:
+        raise OODExternalV2IntegrityError("execution is not a descendant of implementation freeze")
+    commit_count = _run_git(
+        project_root,
+        "rev-list",
+        "--count",
+        f"{child.implementation_revision}..{execution_revision}",
+    ).stdout.strip()
+    revision_line = _run_git(
+        project_root,
+        "rev-list",
+        "--parents",
+        "-n",
+        "1",
+        execution_revision,
+    ).stdout.strip().casefold()
+    if commit_count != "1" or revision_line.split() != [
+        execution_revision,
+        child.implementation_revision,
+    ]:
+        raise OODExternalV2IntegrityError(
+            "execution must be exactly one child-freeze commit after implementation"
+        )
+    _verify_git_remote_state(project_root, expected_revision=execution_revision)
+    expected_child = project_root.joinpath(
+        *PurePosixPath(SUCCESSOR_CHILD_CONFIG_PATH).parts
+    )
+    if child.path != expected_child:
+        raise OODExternalV2IntegrityError(
+            "operational child must use the exact canonical successor path"
+        )
+    child_relative = child.path.relative_to(project_root).as_posix()
+    allowed = {child_relative}
+    if child.public_inventory_projection is None:
+        raise OODExternalV2IntegrityError(
+            "operational child must bind the public inventory projection"
+        )
+    if (
+        child.inventory.relative_path != SUCCESSOR_PRIVATE_INVENTORY_PATH
+        or child.public_inventory_projection.relative_path
+        != SUCCESSOR_PUBLIC_PROJECTION_PATH
+    ):
+        raise OODExternalV2IntegrityError(
+            "operational child inventory paths differ from successor namespace"
+        )
+    allowed.add(child.public_inventory_projection.relative_path)
+    tracked = _run_git(
+        project_root,
+        "ls-files",
+        "--",
+        child.public_inventory_projection.relative_path,
+        allow_empty=True,
+    )
+    if tracked.stdout.strip().replace("\\", "/") != (
+        child.public_inventory_projection.relative_path
+    ):
+        raise OODExternalV2IntegrityError(
+            "public inventory projection must be tracked in execution Git HEAD"
+        )
+    _verify_revision_bound_file(
+        project_root,
+        revision=execution_revision,
+        relative_path=child_relative,
+        expected_file_sha256=child.file_sha256,
+        context="frozen child contract",
+    )
+    _verify_revision_bound_file(
+        project_root,
+        revision=execution_revision,
+        relative_path=child.public_inventory_projection.relative_path,
+        expected_file_sha256=child.public_inventory_projection.file_sha256,
+        context="public inventory projection",
+    )
+    diff = _run_git(
+        project_root,
+        "diff",
+        "--name-status",
+        "--no-renames",
+        f"{child.implementation_revision}..{execution_revision}",
+        "--",
+    )
+    changed: dict[str, str] = {}
+    for line in diff.stdout.splitlines():
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) != 2 or parts[0] != "A":
+            raise OODExternalV2IntegrityError("post-implementation Git diff is not additive-only")
+        changed[parts[1].replace("\\", "/")] = parts[0]
+    if set(changed) != allowed:
+        raise OODExternalV2IntegrityError(
+            "post-implementation Git diff must contain exactly the frozen child artifacts"
+        )
+
+
+def _verify_clean_git_revision(project_root: Path) -> str:
+    for option in ("-t", "-v"):
+        tagged = _run_git(project_root, "ls-files", option).stdout.splitlines()
+        if any(len(line) < 3 or not line.startswith("H ") for line in tagged):
+            raise OODExternalV2IntegrityError(
+                "tracked Git index contains skip-worktree or assume-unchanged state"
+            )
+    status = _run_git(
+        project_root,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+    ).stdout
+    if status != "":
+        raise OODExternalV2IntegrityError("Git worktree is not exactly clean")
+    revision = _run_git(project_root, "rev-parse", "HEAD").stdout.strip().casefold()
+    return _revision(revision, "clean Git revision")
+
+
+def _verify_git_remote_state(
+    project_root: Path,
+    *,
+    expected_revision: str,
+) -> None:
+    """Require the exact pushed GitHub origin/main state frozen by v2.1."""
+
+    remotes = tuple(
+        item for item in _run_git(project_root, "remote").stdout.splitlines() if item
+    )
+    fetch_urls = tuple(
+        item
+        for item in _run_git(
+            project_root,
+            "remote",
+            "get-url",
+            "--all",
+            EXPECTED_GIT_REMOTE_NAME,
+        ).stdout.splitlines()
+        if item
+    )
+    push_urls = tuple(
+        item
+        for item in _run_git(
+            project_root,
+            "remote",
+            "get-url",
+            "--push",
+            "--all",
+            EXPECTED_GIT_REMOTE_NAME,
+        ).stdout.splitlines()
+        if item
+    )
+    remote_revision = _run_git(
+        project_root,
+        "rev-parse",
+        "--verify",
+        EXPECTED_GIT_REMOTE_MAIN_REF,
+    ).stdout.strip().casefold()
+    live_remote_lines = tuple(
+        item
+        for item in _run_git(
+            project_root,
+            "ls-remote",
+            "--symref",
+            EXPECTED_GIT_REMOTE_URL,
+        ).stdout.splitlines()
+        if item
+    )
+    expected_live_lines = (
+        "ref: refs/heads/main\tHEAD",
+        f"{expected_revision}\tHEAD",
+        f"{expected_revision}\trefs/heads/main",
+    )
+    if (
+        remotes != (EXPECTED_GIT_REMOTE_NAME,)
+        or fetch_urls != (EXPECTED_GIT_REMOTE_URL,)
+        or push_urls != (EXPECTED_GIT_REMOTE_URL,)
+        or remote_revision != expected_revision
+        or live_remote_lines != expected_live_lines
+    ):
+        raise OODExternalV2IntegrityError(
+            "Git origin/main is not the exact pushed frozen revision"
+        )
+
+
+def _verify_private_history_absent(project_root: Path) -> None:
+    """Prove protected raw/private/claim/output paths never entered Git history."""
+
+    history = _run_git(
+        project_root,
+        "log",
+        "--all",
+        "--reflog",
+        "--format=%H",
+        "--",
+        *FORBIDDEN_GIT_HISTORY_PATHS,
+    )
+    if history.stdout != "":
+        raise OODExternalV2IntegrityError(
+            "protected raw/private/claim/output paths appear in Git history"
+        )
+
+
+def _build_project_source_tree(project_root: Path) -> ProjectSourceTreeBinding:
+    source_root = _assert_direct_ancestry(
+        project_root.joinpath(*PurePosixPath(PROJECT_SOURCE_ROOT).parts),
+        context="project Python source root",
+    )
+    if not source_root.is_dir():
+        raise OODExternalV2IntegrityError("project Python source root is unavailable")
+    paths: list[Path] = []
+    for current_text, directory_names, file_names in os.walk(
+        source_root,
+        followlinks=False,
+    ):
+        current = Path(current_text)
+        _assert_direct_ancestry(current, context="project source directory")
+        directory_names.sort()
+        file_names.sort()
+        for directory_name in directory_names:
+            directory = current / directory_name
+            _assert_direct_ancestry(directory, context="project source directory")
+            if not directory.is_dir():
+                raise OODExternalV2IntegrityError(
+                    "project source tree contains a non-directory entry"
+                )
+        for file_name in file_names:
+            path = current / file_name
+            if path.suffix != ".py":
+                continue
+            _assert_direct_ancestry(path, context="project Python source file")
+            if not path.is_file():
+                raise OODExternalV2IntegrityError(
+                    "project source tree contains a non-regular Python file"
+                )
+            paths.append(path)
+    for relative_entrypoint in PROJECT_OPERATIONAL_ENTRYPOINTS:
+        entrypoint = _assert_direct_ancestry(
+            project_root.joinpath(*PurePosixPath(relative_entrypoint).parts),
+            context="external protocol entrypoint",
+        )
+        if not entrypoint.is_file():
+            raise OODExternalV2IntegrityError(
+                "external protocol entrypoint is unavailable"
+            )
+        paths.append(entrypoint)
+    relative_paths = tuple(
+        sorted(path.relative_to(project_root).as_posix() for path in paths)
+    )
+    if (
+        not relative_paths
+        or len(relative_paths) != len(set(relative_paths))
+        or len({path.casefold() for path in relative_paths}) != len(relative_paths)
+    ):
+        raise OODExternalV2IntegrityError(
+            "project source tree contains duplicate or colliding paths"
+        )
+    files: list[ProjectSourceFileBinding] = []
+    for relative_path in relative_paths:
+        path = project_root.joinpath(*PurePosixPath(relative_path).parts)
+        entry = _stable_runtime_file_entry(path, context="project source file")
+        files.append(
+            ProjectSourceFileBinding(
+                relative_path=relative_path,
+                size_bytes=cast(int, entry["size_bytes"]),
+                file_sha256=cast(str, entry["sha256"]),
+            )
+        )
+    frozen_files = tuple(files)
+    return ProjectSourceTreeBinding(
+        files=frozen_files,
+        file_count=len(frozen_files),
+        total_bytes=sum(item.size_bytes for item in frozen_files),
+        tree_sha256=_project_source_tree_sha256(frozen_files),
+    )
+
+
+def _run_git_bytes(
+    project_root: Path,
+    *arguments: str,
+    maximum_bytes: int = 8_000_000,
+) -> bytes:
+    completed = _execute_bound_git(project_root, *arguments)
+    if completed.returncode != 0 or len(completed.stdout) > maximum_bytes:
+        raise OODExternalV2IntegrityError("Git blob preflight failed")
+    return completed.stdout
+
+
+def _verify_project_source_tree_at_revisions(
+    project_root: Path,
+    binding: ProjectSourceTreeBinding,
+    *,
+    implementation_revision: str,
+    execution_revision: str | None,
+) -> None:
+    observed = _build_project_source_tree(project_root)
+    if observed != binding:
+        raise OODExternalV2IntegrityError(
+            "project Python source tree differs from the frozen child binding"
+        )
+    bound_paths = tuple(item.relative_path for item in binding.files)
+    tracked_output = _run_git(
+        project_root,
+        "ls-files",
+        "--",
+        PROJECT_SOURCE_ROOT,
+        *PROJECT_OPERATIONAL_ENTRYPOINTS,
+    ).stdout.splitlines()
+    tracked_paths = tuple(
+        sorted(
+            path.replace("\\", "/")
+            for path in tracked_output
+            if path in PROJECT_OPERATIONAL_ENTRYPOINTS
+            or (path.startswith(f"{PROJECT_SOURCE_ROOT}/") and path.endswith(".py"))
+        )
+    )
+    if tracked_paths != bound_paths:
+        raise OODExternalV2IntegrityError(
+            "tracked project Python source set differs from the frozen binding"
+        )
+    revisions: tuple[str, ...] = (implementation_revision,)
+    if execution_revision is not None and execution_revision != implementation_revision:
+        revisions += (execution_revision,)
+    by_path = {item.relative_path: item for item in binding.files}
+    for relative_path in bound_paths:
+        current = _read_bounded(
+            project_root.joinpath(*PurePosixPath(relative_path).parts),
+            8_000_000,
+            "bound project source",
+        )
+        expected = by_path[relative_path]
+        if (
+            len(current) != expected.size_bytes
+            or sha256_bytes(current) != expected.file_sha256
+        ):
+            raise OODExternalV2IntegrityError(
+                "bound project source file differs from child metadata"
+            )
+        for revision in revisions:
+            blob = _run_git_bytes(
+                project_root,
+                "show",
+                f"{revision}:{relative_path}",
+            )
+            if blob != current:
+                raise OODExternalV2IntegrityError(
+                    "project source differs from its exact frozen Git blob"
+                )
+    if _build_project_source_tree(project_root) != binding:
+        raise OODExternalV2IntegrityError(
+            "project source tree changed during Git verification"
+        )
+
+
+def _verify_imported_project_module_origins(
+    project_root: Path,
+    binding: ProjectSourceTreeBinding,
+) -> None:
+    bound_paths = {item.relative_path for item in binding.files}
+    observed_modules = 0
+    for name, module in tuple(sys.modules.items()):
+        if name != "ecg_trust" and not name.startswith("ecg_trust."):
+            continue
+        if not isinstance(module, ModuleType):
+            raise OODExternalV2IntegrityError("project module registry is invalid")
+        spec = getattr(module, "__spec__", None)
+        origin = getattr(spec, "origin", None)
+        if not isinstance(origin, str) or origin in {"built-in", "frozen"}:
+            raise OODExternalV2IntegrityError("project module origin is unavailable")
+        source = _assert_direct_ancestry(Path(origin), context="project module origin")
+        try:
+            relative = source.relative_to(project_root).as_posix()
+        except ValueError as error:
+            raise OODExternalV2IntegrityError(
+                "project module was imported from outside the frozen worktree"
+            ) from error
+        if relative not in bound_paths or source.suffix != ".py":
+            raise OODExternalV2IntegrityError(
+                "project module origin is not among the frozen source files"
+            )
+        observed_modules += 1
+    if observed_modules == 0:
+        raise OODExternalV2IntegrityError("no frozen project modules are imported")
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _verify_all_file_backed_module_origins(
+    *,
+    project_root: Path,
+    project_sources: ProjectSourceTreeBinding,
+    python_base_alias: Path,
+    python_base_target: Path,
+    site_packages: Path,
+) -> None:
+    """Reject every loaded file-backed module outside the three bound trees."""
+
+    allowed_project = {item.relative_path for item in project_sources.files}
+    checked = 0
+    main_observed = False
+
+    def validate_file_origin(name: str, raw_origin: str) -> None:
+        nonlocal checked, main_observed
+        lexical = Path(os.path.abspath(raw_origin))
+        if lexical.suffix.casefold() in {".pyc", ".pyo"}:
+            raise OODExternalV2IntegrityError(
+                "loaded module originated from forbidden bytecode"
+            )
+        try:
+            alias_relative = lexical.relative_to(python_base_alias)
+        except ValueError:
+            alias_relative = None
+        if alias_relative is not None:
+            source = _assert_direct_ancestry(
+                python_base_target / alias_relative,
+                context="loaded CPython module origin",
+            )
+            if not source.is_file():
+                raise OODExternalV2IntegrityError(
+                    "loaded CPython module origin is unavailable"
+                )
+            checked += 1
+            return
+        source = _assert_direct_ancestry(lexical, context="loaded module origin")
+        for allowed_root in (python_base_target, site_packages):
+            try:
+                source.relative_to(allowed_root)
+                checked += 1
+                return
+            except ValueError:
+                continue
+        try:
+            relative = source.relative_to(project_root).as_posix()
+        except ValueError as error:
+            raise OODExternalV2IntegrityError(
+                "loaded module originated outside every frozen runtime tree"
+            ) from error
+        if relative not in allowed_project:
+            raise OODExternalV2IntegrityError(
+                "loaded project module origin is not frozen in the child tree"
+            )
+        if name == "__main__":
+            if relative not in PROJECT_OPERATIONAL_ENTRYPOINTS:
+                raise OODExternalV2IntegrityError(
+                    "active __main__ is not a frozen protocol entrypoint"
+                )
+            main_observed = True
+        checked += 1
+
+    def has_bound_dynamic_owner(name: str) -> bool:
+        parts = name.split(".")
+        for length in range(len(parts) - 1, 0, -1):
+            owner = sys.modules.get(".".join(parts[:length]))
+            if not isinstance(owner, ModuleType):
+                continue
+            owner_spec = getattr(owner, "__spec__", None)
+            owner_origin = getattr(owner_spec, "origin", None)
+            if isinstance(owner_origin, str) and owner_origin not in {
+                "built-in",
+                "frozen",
+            }:
+                validate_file_origin(name, owner_origin)
+                return True
+        return False
+
+    for name, module in tuple(sys.modules.items()):
+        if not isinstance(module, ModuleType):
+            if name in {"typing.io", "typing.re"} and type(module).__name__ == (
+                "_DeprecatedType"
+            ):
+                continue
+            raise OODExternalV2IntegrityError(
+                "module registry contains an unapproved non-module entry"
+            )
+        spec = getattr(module, "__spec__", None)
+        raw_origin = getattr(spec, "origin", None)
+        if raw_origin is None:
+            raw_origin = getattr(module, "__file__", None)
+        if raw_origin == "built-in":
+            if (
+                name not in sys.builtin_module_names
+                or getattr(spec, "loader", None)
+                is not importlib.machinery.BuiltinImporter
+            ):
+                raise OODExternalV2IntegrityError(
+                    "module falsely claims a built-in origin"
+                )
+            continue
+        if raw_origin == "frozen":
+            if (
+                name not in sys.stdlib_module_names
+                or getattr(spec, "loader", None)
+                is not importlib.machinery.FrozenImporter
+            ):
+                raise OODExternalV2IntegrityError(
+                    "module falsely claims a frozen origin"
+                )
+            continue
+        if raw_origin is None:
+            locations = getattr(spec, "submodule_search_locations", None)
+            if locations is not None:
+                raw_locations = tuple(locations)
+                if not raw_locations:
+                    raise OODExternalV2IntegrityError(
+                        "namespace module has no auditable search location"
+                    )
+                for location in raw_locations:
+                    if not isinstance(location, str):
+                        raise OODExternalV2IntegrityError(
+                            "namespace search location is invalid"
+                        )
+                    namespace_path = _assert_direct_ancestry(
+                        Path(location),
+                        context="namespace module search location",
+                    )
+                    if not namespace_path.is_dir() or not any(
+                        _path_is_within(namespace_path, root)
+                        for root in (python_base_target, site_packages, project_root)
+                    ):
+                        raise OODExternalV2IntegrityError(
+                            "namespace module search location is outside frozen trees"
+                        )
+                checked += 1
+                continue
+            if name == "__mp_main__" and module is sys.modules.get("__main__"):
+                continue
+            if has_bound_dynamic_owner(name):
+                continue
+            if name == "cython_runtime" or re.fullmatch(r"_cython_[0-9_]+", name):
+                checked += 1
+                continue
+            raise OODExternalV2IntegrityError(
+                "originless module has no bound file-backed owner"
+            )
+        if not isinstance(raw_origin, str) or not raw_origin:
+            raise OODExternalV2IntegrityError("loaded module origin is invalid")
+        validate_file_origin(name, raw_origin)
+    if checked == 0 or not main_observed:
+        raise OODExternalV2IntegrityError(
+            "module audit did not observe the exact frozen __main__ entrypoint"
+        )
+
+
+def _verify_tracked_head_blob(
+    project_root: Path,
+    *,
+    revision: str,
+    relative_path: str,
+    expected_file_sha256: str,
+) -> None:
+    tracked = _run_git(
+        project_root,
+        "ls-files",
+        "--",
+        relative_path,
+        allow_empty=True,
+    )
+    if tracked.stdout.strip().replace("\\", "/") != relative_path:
+        raise OODExternalV2IntegrityError("frozen parent is not tracked in Git")
+    blob = _run_git_bytes(project_root, "show", f"{revision}:{relative_path}")
+    working_path = project_root.joinpath(*PurePosixPath(relative_path).parts)
+    if (
+        sha256_bytes(blob) != expected_file_sha256
+        or _read_bounded(working_path, _CONFIG_MAX_BYTES, "tracked frozen parent")
+        != blob
+    ):
+        raise OODExternalV2IntegrityError(
+            "frozen parent working bytes differ from the exact Git HEAD blob"
+        )
+
+
+def _verify_revision_bound_file(
+    project_root: Path,
+    *,
+    revision: str,
+    relative_path: str,
+    expected_file_sha256: str,
+    context: str,
+) -> None:
+    source = project_root.joinpath(*PurePosixPath(relative_path).parts)
+    current = _read_bounded(source, _CHILD_MAX_BYTES, context)
+    blob = _run_git_bytes(project_root, "show", f"{revision}:{relative_path}")
+    if (
+        sha256_bytes(current) != expected_file_sha256
+        or sha256_bytes(blob) != expected_file_sha256
+        or blob != current
+    ):
+        raise OODExternalV2IntegrityError(
+            f"{context} differs from its exact execution Git blob"
+        )
+
+
+def _require_git_ignored_and_untracked(
+    project_root: Path,
+    relative_path: str,
+    *,
+    context: str,
+) -> None:
+    ignored = _run_git(
+        project_root,
+        "check-ignore",
+        "--no-index",
+        "-q",
+        "--",
+        relative_path,
+        allow_empty=True,
+    )
+    tracked = _run_git(
+        project_root,
+        "ls-files",
+        "--",
+        relative_path,
+        allow_empty=True,
+    )
+    if ignored.returncode != 0 or tracked.stdout.strip() != "":
+        raise OODExternalV2IntegrityError(
+            f"{context} must be explicitly Git-ignored and untracked"
+        )
+
+
+def _load_routing_components(
+    parent: OODExternalV2ParentConfig,
+    child: OODExternalV2ChildContract,
+    *,
+    project_root: Path,
+) -> FrozenRoutingComponents:
+    source_binding = child.decision_bindings["source_calibration_result"]
+    demo_binding = child.decision_bindings["demo_policy"]
+    if (
+        source_binding.file_sha256 != EXPECTED_SOURCE_CALIBRATION_FILE_SHA256
+        or demo_binding.file_sha256 != EXPECTED_DEMO_POLICY_FILE_SHA256
+        or source_binding.artifact_sha256
+        != EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256
+        or demo_binding.artifact_sha256 != EXPECTED_DEMO_POLICY_ARTIFACT_SHA256
+    ):
+        raise OODExternalV2IntegrityError("child decision bindings differ from frozen components")
+    source_path = _resolve_project_relative(
+        project_root,
+        source_binding.relative_path,
+        require_file=True,
+    )
+    demo_path = _resolve_project_relative(
+        project_root,
+        demo_binding.relative_path,
+        require_file=True,
+    )
+    if sha256_file(source_path) != source_binding.file_sha256:
+        raise OODExternalV2IntegrityError("source-calibration result hash differs")
+    if sha256_file(demo_path) != demo_binding.file_sha256:
+        raise OODExternalV2IntegrityError("historical demo policy hash differs")
+    try:
+        source = load_source_calibration_result_bytes(
+            _read_bounded(source_path, _V1_RESULT_MAX_BYTES, "source-calibration result")
+        )
+        demo = FrozenDecisionPolicy.load(demo_path)
+    except Exception as error:
+        raise OODExternalV2IntegrityError("frozen decision components cannot be loaded") from error
+    if (
+        source.status != "PREPARED_NOT_RELEASE_READY"
+        or source.open_world.status != "PENDING"
+        or source.open_world.release_ready
+        or source.provenance.historical_policy_file_sha256 != demo_binding.file_sha256
+        or source.provenance.checkpoint_sha256 != parent.checkpoint.file_sha256
+        or demo.provenance.checkpoint_sha256 != parent.checkpoint.file_sha256.removeprefix(
+            "sha256:"
+        )
+        or demo.provenance.resolved_config_sha256
+        != parent.resolved_config.file_sha256.removeprefix("sha256:")
+        or demo.provenance.normalization_sha256
+        != parent.normalization.file_sha256.removeprefix("sha256:")
+    ):
+        raise OODExternalV2IntegrityError("frozen decision lineage differs")
+    components = source.frozen_components
+    temperature = components.temperature.temperature
+    maximum_entropy = components.entropy_gate.maximum_entropy
+    conformal_summary = components.conformal
+    if (
+        temperature != EXPECTED_TEMPERATURE
+        or maximum_entropy != EXPECTED_ENTROPY_MAXIMUM
+        or conformal_summary.alpha != 0.1
+        or conformal_summary.n_samples != 834
+        or conformal_summary.quantile_rank != 752
+        or conformal_summary.quantile_level != 0.9016786570743405
+        or tuple(item.label for item in conformal_summary.per_label)
+        != tuple(SUPERCLASSES)
+        or tuple(item.threshold for item in conformal_summary.per_label)
+        != EXPECTED_CONFORMAL_THRESHOLDS
+    ):
+        raise OODExternalV2IntegrityError("frozen uncertainty components differ")
+    conformal = LabelwiseBinaryConformal(
+        label_names=tuple(item.label for item in conformal_summary.per_label),
+        alpha=conformal_summary.alpha,
+        thresholds=tuple(item.threshold for item in conformal_summary.per_label),
+        n_calibration_samples=conformal_summary.n_samples,
+        quantile_rank=conformal_summary.quantile_rank,
+        quantile_level=conformal_summary.quantile_level,
+    )
+    if conformal.label_names != tuple(SUPERCLASSES):
+        raise OODExternalV2IntegrityError("conformal label order differs")
+    return FrozenRoutingComponents(
+        source_calibration_result=source,
+        historical_demo_policy=demo,
+        conformal=conformal,
+        temperature=temperature,
+        maximum_entropy=maximum_entropy,
+        source_calibration_file_sha256=source_binding.file_sha256,
+        demo_policy_file_sha256=demo_binding.file_sha256,
+    )
+
+
+def _load_model_and_runtime(
+    inputs: VerifiedExternalV2Inputs,
+) -> tuple[ResNet1D, NormalizationStats, DeterministicCUDARuntime, str]:
+    """Load the exact checkpoint without depending on an unrelated demo gate."""
+
+    try:
+        resolved_payload: object = json.loads(
+            _read_bounded(
+                inputs.resolved_config_path,
+                _CONFIG_MAX_BYTES,
+                "resolved refit config",
+            ).decode("utf-8")
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OODExternalV2IntegrityError("resolved refit config cannot be decoded") from error
+    resolved = _mapping(resolved_payload, "resolved refit config")
+    if set(resolved) != {"config", "config_hash"}:
+        raise OODExternalV2IntegrityError("resolved refit config fields differ")
+    inner = _mapping(resolved.get("config"), "resolved inner config")
+    config_hash = _digest(resolved.get("config_hash"), "resolved config hash")
+    if config_hash != inputs.parent.resolved_config_sha256:
+        raise OODExternalV2IntegrityError("resolved config logical hash differs from parent")
+    if canonical_sha256(inner) != config_hash:
+        raise OODExternalV2IntegrityError("resolved inner config hash differs from content")
+    inner_model = _mapping(inner.get("model"), "resolved model")
+    if (
+        inner.get("architecture") != "resnet1d"
+        or inner.get("confirmation_seed") != 2026
+        or inner_model.get("architecture") != "resnet1d"
+        or inner_model.get("preset") != "matched_capacity"
+        or inner_model.get("class") != "ecg_trust.models.resnet1d.ResNet1D"
+    ):
+        raise OODExternalV2IntegrityError("resolved model selection differs from v1")
+    try:
+        checkpoint_payload: object = torch.load(
+            inputs.checkpoint_path,
+            map_location="cpu",
+            weights_only=True,
+        )
+    except Exception as error:
+        raise OODExternalV2IntegrityError("frozen checkpoint cannot be decoded") from error
+    checkpoint = _mapping(checkpoint_payload, "checkpoint")
+    expected_checkpoint_fields = {
+        "config",
+        "config_hash",
+        "early_stopping_state_dict",
+        "epoch",
+        "manifest_hash",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "protocol_hash",
+        "scaler_state_dict",
+        "schema_version",
+    }
+    if set(checkpoint) != expected_checkpoint_fields or checkpoint.get("schema_version") != 1:
+        raise OODExternalV2IntegrityError("frozen checkpoint fields differ")
+    if checkpoint.get("config") != inner or checkpoint.get("config_hash") != config_hash:
+        raise OODExternalV2IntegrityError("checkpoint and resolved config differ")
+    provenance = inputs.v1.policy.provenance
+    if (
+        _normalize_unprefixed(checkpoint.get("manifest_hash"), "checkpoint manifest hash")
+        != provenance.dataset_manifest_file_sha256
+        or checkpoint.get("protocol_hash") != provenance.experiment_protocol_sha256
+        or provenance.checkpoint_file_sha256 != inputs.parent.checkpoint.file_sha256
+        or provenance.resolved_config_file_sha256
+        != inputs.parent.resolved_config.file_sha256
+        or provenance.resolved_config_sha256 != inputs.parent.resolved_config_sha256
+        or provenance.normalization_file_sha256 != inputs.parent.normalization.file_sha256
+    ):
+        raise OODExternalV2IntegrityError("checkpoint lineage differs from sealed v1 policy")
+    try:
+        model = build_experiment_model(
+            ModelConfig(architecture="resnet1d", preset="matched_capacity")
+        )
+        model.load_state_dict(cast(Any, checkpoint["model_state_dict"]), strict=True)
+    except Exception as error:
+        raise OODExternalV2IntegrityError("frozen checkpoint model is incompatible") from error
+    if type(model) is not ResNet1D:
+        raise OODExternalV2IntegrityError("frozen model is not exact ResNet1D")
+    model.requires_grad_(False)
+    model.cpu().eval()
+    state_hash = model_state_sha256(model)
+
+    try:
+        normalization = NormalizationStats.load(inputs.normalization_path)
+    except Exception as error:
+        raise OODExternalV2IntegrityError("frozen normalization cannot be loaded") from error
+    if (
+        normalization.provenance.training_folds != (1, 2, 3, 4, 5, 6, 7)
+        or normalization.provenance.samples_per_record != 1000
+        or normalization.provenance.sampling_frequency_hz != 100.0
+        or normalization.provenance.target_columns != TARGET_COLUMNS
+    ):
+        raise OODExternalV2IntegrityError("normalization scientific contract differs")
+
+    v1_runtime = inputs.v1.result.reference_and_threshold_execution.runtime
+    runtime = configure_deterministic_cuda(
+        expected_device_name=v1_runtime.device_name,
+        expected_compute_capability=(12, 0),
+        expected_python_version=v1_runtime.python_version,
+        expected_torch_version=v1_runtime.torch_version,
+        expected_cuda_runtime=v1_runtime.cuda_runtime_version,
+        expected_cudnn_version=v1_runtime.cudnn_version,
+        expected_nvidia_driver_version=v1_runtime.nvidia_driver_version,
+        nvidia_smi_executable=_nvidia_driver_tool_paths()[0],
+    )
+    return prepare_resnet_for_embedding(model, runtime=runtime), normalization, runtime, state_hash
+
+
+def _quality_report_dict(report: SignalQualityReport) -> dict[str, object]:
+    """Serialize every quality metric, issue, and decision boundary privately."""
+
+    def issue_dict(issue: Any) -> dict[str, object]:
+        return {
+            "boundary_value": issue.boundary_value,
+            "code": issue.code.value,
+            "lead_name": issue.lead_name,
+            "metric_name": issue.metric_name,
+            "observed_value": issue.observed_value,
+            "status": issue.status.value,
+        }
+
+    leads: list[dict[str, object]] = []
+    for finding in report.leads:
+        metrics = finding.metrics
+        leads.append(
+            {
+                "issues": [issue_dict(issue) for issue in finding.issues],
+                "lead_index": finding.lead_index,
+                "lead_name": finding.lead_name,
+                "metrics": {
+                    "baseline_wander_power_ratio": metrics.baseline_wander_power_ratio,
+                    "clipping_fraction": metrics.clipping_fraction,
+                    "flat_step_fraction": metrics.flat_step_fraction,
+                    "high_frequency_power_ratio": metrics.high_frequency_power_ratio,
+                    "longest_clipping_run_samples": (
+                        metrics.longest_clipping_run_samples
+                    ),
+                    "maximum_absolute_amplitude_mv": (
+                        metrics.maximum_absolute_amplitude_mv
+                    ),
+                    "maximum_step_mv": metrics.maximum_step_mv,
+                    "peak_to_peak_mv": metrics.peak_to_peak_mv,
+                    "powerline_50hz_power_ratio": metrics.powerline_50hz_power_ratio,
+                    "powerline_60hz_power_ratio": metrics.powerline_60hz_power_ratio,
+                    "spike_step_fraction": metrics.spike_step_fraction,
+                    "standard_deviation_mv": metrics.standard_deviation_mv,
+                },
+                "reason_codes": [reason.value for reason in finding.reason_codes],
+                "status": finding.status.value,
+            }
+        )
+    reversal: dict[str, object] | None = None
+    if report.reversal_evidence is not None:
+        value = report.reversal_evidence
+        reversal = {
+            "correlations": [list(item) for item in value.correlations],
+            "dominant_polarities": [list(item) for item in value.dominant_polarities],
+            "evidence_codes": list(value.evidence_codes),
+            "probable_kind": value.probable_kind.value,
+            "score": value.score,
+        }
+    return {
+        "config_version": report.config_version,
+        "global_issues": [issue_dict(issue) for issue in report.global_issues],
+        "leads": leads,
+        "reversal_evidence": reversal,
+        "status": report.status.value,
+    }
+
+
+def _quality_report_sha256(report: Mapping[str, object]) -> str:
+    payload = canonical_json_bytes(dict(report))[:-1]
+    return "sha256:" + hashlib.sha256(_QUALITY_REPORT_DOMAIN + payload).hexdigest()
+
+
+def _evaluate_external_records(
+    inputs: VerifiedExternalV2Inputs,
+    *,
+    model: ResNet1D,
+    normalization: NormalizationStats,
+    runtime: DeterministicCUDARuntime,
+    model_state_before: str,
+) -> _EvaluatedExternalRecords:
+    """Decode once after the claim, apply quality, then score the frozen path."""
+
+    evidence: list[_PrivateRecordEvidence] = []
+    adapter_success_signals: list[Float32Array] = []
+    adapter_success_indices: list[int] = []
+    quality_signals: list[Float32Array] = []
+    quality_indices: list[int] = []
+    metadata = SignalMetadata.canonical(DEFAULT_SIGNAL_QUALITY_CONFIG)
+    for index, record in enumerate(inputs.inventory.records):
+        root = inputs.dataset_roots[record.dataset]
+        base = resolve_inventory_record_base(root, record)
+        # Adapter/parser/provenance failures are integrity or implementation
+        # failures, not natural technical-quality observations.  Once the
+        # one-shot claim exists they must produce a failure receipt; only a
+        # successfully adapted signal may contribute an INVALID_INPUT route.
+        adapted = _adapter_for_record(record, base)
+        _verify_adapter_against_inventory(adapted, record)
+        adapter_success_indices.append(index)
+        adapter_success_signals.append(adapted.signal_mv)
+        report = assess_signal_quality(adapted.signal_mv, metadata)
+        quality_report = _quality_report_dict(report)
+        reason_codes = tuple(reason.value for reason in report.reason_codes)
+        if report.status is QualityStatus.INVALID:
+            route = "INVALID_INPUT"
+        elif report.status is QualityStatus.PASS:
+            route = "PENDING_DISTRIBUTION"
+            quality_indices.append(index)
+            quality_signals.append(adapted.signal_mv)
+        else:
+            route = "REACQUIRE"
+        evidence.append(
+            _PrivateRecordEvidence(
+                dataset=record.dataset,
+                record_ref=record.record_ref,
+                patient_key=record.patient_key,
+                challenge_quality_label=record.challenge_quality_label,
+                adapter_provenance_sha256=adapted.provenance_sha256,
+                adapter_source_sample_count=adapted.provenance.source_sample_count,
+                adapter_raw_physical_units=adapted.provenance.raw_physical_units,
+                canonical_signal_sha256=_tensor_sha256(adapted.signal_mv),
+                quality_report_sha256=_quality_report_sha256(quality_report),
+                quality_report=quality_report,
+                quality_status=report.status.value,
+                quality_reason_codes=reason_codes,
+                route=route,
+                distribution_score=None,
+                entropy=None,
+                entropy_accepted=None,
+                conformal_decisions=None,
+                all_conformal_decisions_singleton=None,
+            )
+        )
+    if len(evidence) != len(inputs.inventory.records):
+        raise OODExternalV2ExecutionError("selected-record evaluation skipped a record")
+    canonical_signals = (
+        np.ascontiguousarray(np.stack(adapter_success_signals, axis=0), dtype=np.float32)
+        if adapter_success_signals
+        else np.empty((0, len(LEADS), TARGET_SAMPLES), dtype=np.float32)
+    )
+    canonical_indices = np.asarray(adapter_success_indices, dtype=np.int64)
+    if not quality_signals:
+        empty_embeddings = np.empty((0, 512), dtype=np.float32)
+        empty_scores = np.empty((0,), dtype=np.float64)
+        empty_logits = np.empty((0, len(SUPERCLASSES)), dtype=np.float64)
+        empty_probabilities = np.empty((0, len(SUPERCLASSES)), dtype=np.float64)
+        empty_hash = _tensor_sha256(empty_embeddings)
+        empty_logits_hash = _tensor_sha256(empty_logits)
+        empty_probabilities_hash = _tensor_sha256(empty_probabilities)
+        model_state_after = model_state_sha256(model)
+        unchanged = model_state_after == model_state_before
+        if not unchanged:
+            raise OODExternalV2IntegrityError("frozen model state changed during evaluation")
+        return _EvaluatedExternalRecords(
+            records=tuple(evidence),
+            adapter_success_inventory_indices=canonical_indices,
+            canonical_signals=canonical_signals,
+            quality_pass_inventory_indices=np.empty((0,), dtype=np.int64),
+            embeddings=empty_embeddings,
+            repeated_embeddings=empty_embeddings.copy(),
+            repeated_embedding_sha256=empty_hash,
+            embedding_sha256=empty_hash,
+            scores=empty_scores,
+            logits=empty_logits,
+            repeated_logits=empty_logits.copy(),
+            probabilities=empty_probabilities,
+            first_logits_sha256=empty_logits_hash,
+            repeated_logits_sha256=empty_logits_hash,
+            probabilities_sha256=empty_probabilities_hash,
+            model_state_before_sha256=model_state_before,
+            model_state_after_sha256=model_state_after,
+            model_state_unchanged=unchanged,
+        )
+
+    signals = np.ascontiguousarray(np.stack(quality_signals, axis=0), dtype=np.float32)
+    dataset = _NormalizedSignalDataset(signals, normalization)
+    passes = extract_embeddings_twice(model, dataset, runtime=runtime)
+    first_hash = _tensor_sha256(passes.first)
+    repeated_hash = _tensor_sha256(passes.repeated)
+    if first_hash != repeated_hash:
+        raise OODExternalV2IntegrityError("repeated external embedding hashes differ")
+    detector = inputs.v1.policy.to_detector()
+    first_scores = np.ascontiguousarray(detector.score(passes.first), dtype=np.float64)
+    repeated_scores = np.ascontiguousarray(detector.score(passes.repeated), dtype=np.float64)
+    if not np.array_equal(first_scores, repeated_scores):
+        raise OODExternalV2IntegrityError("repeated external distribution scores differ")
+
+    first_logits = _classify_embeddings(model, passes.first, runtime=runtime)
+    repeated_logits = _classify_embeddings(model, passes.repeated, runtime=runtime)
+    if not np.array_equal(first_logits, repeated_logits):
+        raise OODExternalV2IntegrityError("repeated external logits differ")
+    probabilities = _sigmoid(first_logits / inputs.routing.temperature)
+    entropy = normalized_bernoulli_entropy(probabilities)
+    prediction_sets = inputs.routing.conformal.predict(probabilities)
+    singleton = np.asarray(
+        [
+            all(decision is not BinaryDecision.UNCERTAIN for decision in row)
+            for row in prediction_sets.decisions
+        ],
+        dtype=np.bool_,
+    )
+    entropy_accepted = entropy <= inputs.routing.maximum_entropy
+    if not (
+        first_scores.shape == entropy.shape == singleton.shape == (len(quality_indices),)
+    ):
+        raise OODExternalV2ExecutionError("external routing arrays are misaligned")
+
+    threshold = inputs.parent.threshold
+    for local_index, inventory_index in enumerate(quality_indices):
+        score = float(first_scores[local_index])
+        accepted_entropy = bool(entropy_accepted[local_index])
+        all_singleton = bool(singleton[local_index])
+        decisions = tuple(
+            decision.value for decision in prediction_sets.decisions[local_index]
+        )
+        if score > threshold:
+            route = "UNSUPPORTED_INPUT"
+        elif not accepted_entropy or not all_singleton:
+            route = "ABSTAIN"
+        else:
+            route = "PREDICTION_ALLOWED"
+        prior = evidence[inventory_index]
+        evidence[inventory_index] = _PrivateRecordEvidence(
+            dataset=prior.dataset,
+            record_ref=prior.record_ref,
+            patient_key=prior.patient_key,
+            challenge_quality_label=prior.challenge_quality_label,
+            adapter_provenance_sha256=prior.adapter_provenance_sha256,
+            adapter_source_sample_count=prior.adapter_source_sample_count,
+            adapter_raw_physical_units=prior.adapter_raw_physical_units,
+            canonical_signal_sha256=prior.canonical_signal_sha256,
+            quality_report_sha256=prior.quality_report_sha256,
+            quality_report=prior.quality_report,
+            quality_status=prior.quality_status,
+            quality_reason_codes=prior.quality_reason_codes,
+            route=route,
+            distribution_score=score,
+            entropy=float(entropy[local_index]),
+            entropy_accepted=accepted_entropy,
+            conformal_decisions=decisions,
+            all_conformal_decisions_singleton=all_singleton,
+        )
+    if any(record.route == "PENDING_DISTRIBUTION" for record in evidence):
+        raise OODExternalV2ExecutionError("quality-pass record did not receive a final route")
+    first_logits_hash = _tensor_sha256(first_logits)
+    repeated_logits_hash = _tensor_sha256(repeated_logits)
+    probabilities_hash = _tensor_sha256(probabilities)
+    model_state_after = model_state_sha256(model)
+    unchanged = model_state_after == model_state_before
+    if not unchanged:
+        raise OODExternalV2IntegrityError("frozen model state changed during evaluation")
+    return _EvaluatedExternalRecords(
+        records=tuple(evidence),
+        adapter_success_inventory_indices=canonical_indices,
+        canonical_signals=canonical_signals,
+        quality_pass_inventory_indices=np.asarray(quality_indices, dtype=np.int64),
+        embeddings=passes.first,
+        repeated_embeddings=passes.repeated,
+        repeated_embedding_sha256=repeated_hash,
+        embedding_sha256=first_hash,
+        scores=first_scores,
+        logits=first_logits,
+        repeated_logits=repeated_logits,
+        probabilities=probabilities,
+        first_logits_sha256=first_logits_hash,
+        repeated_logits_sha256=repeated_logits_hash,
+        probabilities_sha256=probabilities_hash,
+        model_state_before_sha256=model_state_before,
+        model_state_after_sha256=model_state_after,
+        model_state_unchanged=unchanged,
+    )
+
+
+def _adapter_for_record(
+    record: ExternalInventoryRecord,
+    record_base: Path,
+) -> CanonicalExternalSignal:
+    if record.dataset == CHALLENGE_2011_DATASET:
+        return load_challenge_2011_signal(record_base)
+    if record.dataset == ZZU_PEDIATRIC_DATASET:
+        return load_zzu_pediatric_signal(record_base)
+    raise OODExternalV2IntegrityError("inventory selected a forbidden dataset")
+
+
+def _verify_adapter_against_inventory(
+    adapted: CanonicalExternalSignal,
+    record: ExternalInventoryRecord,
+) -> None:
+    provenance = adapted.provenance
+    expected_source_sample_count = _expected_source_sample_count(record)
+    if (
+        provenance.raw_header_sha256 != record.raw_header_sha256
+        or provenance.raw_header_size_bytes != record.raw_header_size_bytes
+        or provenance.raw_data_sha256 != record.raw_data_sha256
+        or provenance.raw_data_size_bytes != record.raw_data_size_bytes
+        or provenance.source_frequency_hz != record.sampling_frequency_hz
+        or provenance.source_sample_count != expected_source_sample_count
+        or provenance.source_duration_seconds != record.duration_seconds
+        or provenance.source_lead_names != record.raw_ordered_leads
+        or provenance.canonical_leads != record.canonical_ordered_leads
+        or provenance.output_leads != LEADS
+        or provenance.source_data_file_names != record.raw_data_file_names
+        or provenance.raw_physical_units != record.raw_physical_units
+        or provenance.physical_units != PHYSICAL_UNITS
+    ):
+        raise ExternalECGAdapterError("adapter provenance differs from frozen inventory")
+
+
+def _expected_source_sample_count(record: ExternalInventoryRecord) -> int:
+    exact = Fraction(str(record.sampling_frequency_hz)) * Fraction(
+        str(record.duration_seconds)
+    )
+    if (
+        exact.denominator != 1
+        or exact.numerator <= 0
+        or exact.numerator != record.source_sample_count
+    ):
+        raise OODExternalV2IntegrityError(
+            "inventory frequency and duration do not define an exact source sample count"
+        )
+    return exact.numerator
+
+
+def _classify_embeddings(
+    model: ResNet1D,
+    embeddings: Float32Array,
+    *,
+    runtime: DeterministicCUDARuntime,
+) -> Float64Array:
+    batches: list[Float64Array] = []
+    with torch.inference_mode(), torch.autocast(device_type="cuda", enabled=False):
+        for start in range(0, embeddings.shape[0], 128):
+            stop = min(embeddings.shape[0], start + 128)
+            batch = torch.from_numpy(embeddings[start:stop]).to(
+                runtime.device,
+                dtype=torch.float32,
+            )
+            logits = model.classifier(model.classifier_dropout(batch))
+            if (
+                logits.shape != (stop - start, len(SUPERCLASSES))
+                or logits.dtype is not torch.float32
+                or not torch.isfinite(logits).all().item()
+            ):
+                raise OODExternalV2ExecutionError("frozen classifier logits are invalid")
+            batches.append(
+                np.ascontiguousarray(
+                    logits.detach().cpu().numpy(),
+                    dtype=np.float64,
+                )
+            )
+    if not batches:
+        raise OODExternalV2ExecutionError("frozen classifier produced no logits")
+    return np.ascontiguousarray(np.concatenate(batches, axis=0), dtype=np.float64)
+
+
+def _sigmoid(values: Float64Array) -> Float64Array:
+    result = np.empty_like(values, dtype=np.float64)
+    nonnegative = values >= 0.0
+    result[nonnegative] = 1.0 / (1.0 + np.exp(-values[nonnegative]))
+    exponent = np.exp(values[~nonnegative])
+    result[~nonnegative] = exponent / (1.0 + exponent)
+    if not np.isfinite(result).all() or np.any((result < 0.0) | (result > 1.0)):
+        raise OODExternalV2ExecutionError("calibrated probabilities are invalid")
+    return result
+
+
+def _build_endpoint_evidence(
+    evaluated: _EvaluatedExternalRecords,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+) -> _EndpointEvidence:
+    records = evaluated.records
+    challenge_indices = [
+        index for index, record in enumerate(records) if record.dataset == CHALLENGE_2011_DATASET
+    ]
+    group3_indices = [
+        index
+        for index in challenge_indices
+        if records[index].challenge_quality_label == "unacceptable"
+    ]
+    group1_indices = [
+        index
+        for index in challenge_indices
+        if records[index].challenge_quality_label == "acceptable"
+    ]
+    challenge_pass = [
+        index
+        for index in challenge_indices
+        if records[index].quality_status == QualityStatus.PASS.value
+    ]
+    zzu_pass = [
+        index
+        for index, record in enumerate(records)
+        if record.dataset == ZZU_PEDIATRIC_DATASET
+        and record.quality_status == QualityStatus.PASS.value
+    ]
+    group3_blocked = np.asarray(
+        [
+            records[index].quality_status == QualityStatus.REACQUIRE.value
+            for index in group3_indices
+        ],
+        dtype=np.bool_,
+    )
+    group1_passed = np.asarray(
+        [
+            records[index].quality_status == QualityStatus.PASS.value
+            for index in group1_indices
+        ],
+        dtype=np.bool_,
+    )
+    challenge_detected = np.asarray(
+        [
+            cast(float, records[index].distribution_score) > inputs.parent.threshold
+            for index in challenge_pass
+        ],
+        dtype=np.bool_,
+    )
+    zzu_detected = np.asarray(
+        [
+            cast(float, records[index].distribution_score) > inputs.parent.threshold
+            for index in zzu_pass
+        ],
+        dtype=np.bool_,
+    )
+    zzu_patient_keys = [cast(str, records[index].patient_key) for index in zzu_pass]
+    patient_index = {
+        key: value + 1 for value, key in enumerate(sorted(set(zzu_patient_keys)))
+    }
+    zzu_clusters = np.asarray(
+        [patient_index[key] for key in zzu_patient_keys],
+        dtype=np.int64,
+    )
+    challenge_subset = build_external_inventory(
+        tuple(
+            record
+            for record in inputs.inventory.records
+            if record.dataset == CHALLENGE_2011_DATASET
+        )
+    )
+    zzu_subset = build_external_inventory(
+        tuple(
+            record for record in inputs.inventory.records if record.dataset == ZZU_PEDIATRIC_DATASET
+        )
+    )
+    parent = inputs.parent
+    technical_values: list[object] = []
+    external_values: list[object] = []
+    replicate_values: dict[str, Float64Array] = {}
+    if group3_blocked.size:
+        technical_values.append(
+            evaluate_technical_quality_gate(
+                group3_blocked,
+                endpoint_key="challenge_group3_technical_block_sensitivity",
+                cohort_key="physionet-challenge-2011-set-a",
+                event_definition="block_unacceptable",
+                resampling_unit=ResamplingUnit.RECORD,
+                minimum_rate=parent.challenge_group3_minimum,
+                seed=parent.challenge_bootstrap_seed,
+                replicates=parent.bootstrap_resamples,
+                confidence_level=parent.confidence_level,
+            )
+        )
+        replicate_values["challenge_group3_technical_block_sensitivity"] = (
+            _bootstrap_rates(
+                group3_blocked,
+                resampling_unit=ResamplingUnit.RECORD,
+                seed=parent.challenge_bootstrap_seed,
+                replicates=parent.bootstrap_resamples,
+            )
+        )
+    if group1_passed.size:
+        technical_values.append(
+            evaluate_technical_quality_gate(
+                group1_passed,
+                endpoint_key="challenge_group1_quality_pass_rate",
+                cohort_key="physionet-challenge-2011-set-a",
+                event_definition="pass_acceptable",
+                resampling_unit=ResamplingUnit.RECORD,
+                minimum_rate=parent.challenge_group1_minimum,
+                seed=parent.challenge_bootstrap_seed,
+                replicates=parent.bootstrap_resamples,
+                confidence_level=parent.confidence_level,
+            )
+        )
+        replicate_values["challenge_group1_quality_pass_rate"] = _bootstrap_rates(
+            group1_passed,
+            resampling_unit=ResamplingUnit.RECORD,
+            seed=parent.challenge_bootstrap_seed,
+            replicates=parent.bootstrap_resamples,
+        )
+    if challenge_detected.size:
+        external_values.append(
+            evaluate_external_ood_gate(
+                challenge_detected,
+                endpoint_key="challenge_external_distribution_recall",
+                cohort_key="physionet-challenge-2011-set-a",
+                dataset_name="PhysioNet Challenge 2011 Set A",
+                dataset_version=CHALLENGE_2011_VERSION,
+                license_identifier="ODC-By-1.0",
+                cohort_manifest_sha256=challenge_subset.inventory_sha256,
+                role_assignment_sha256=inputs.child.artifact_sha256,
+                evaluation_role=ExternalCohortRole.PHYSIONET_CHALLENGE_2011_SET_A,
+                ood_axis=OODAxis.EXTERNAL_ACQUISITION_AND_POPULATION,
+                resampling_unit=ResamplingUnit.RECORD,
+                minimum_ood_recall=parent.challenge_distribution_minimum,
+                seed=parent.challenge_bootstrap_seed,
+                replicates=parent.bootstrap_resamples,
+                confidence_level=parent.confidence_level,
+            )
+        )
+        replicate_values["challenge_external_distribution_recall"] = _bootstrap_rates(
+            challenge_detected,
+            resampling_unit=ResamplingUnit.RECORD,
+            seed=parent.challenge_bootstrap_seed,
+            replicates=parent.bootstrap_resamples,
+        )
+    if zzu_detected.size:
+        external_values.append(
+            evaluate_external_ood_gate(
+                zzu_detected,
+                endpoint_key="zzu_external_distribution_recall",
+                cohort_key="zzu-pecg-v1",
+                dataset_name="ZZU pediatric ECG",
+                dataset_version=ZZU_PEDIATRIC_VERSION,
+                license_identifier="CC-BY-4.0",
+                cohort_manifest_sha256=zzu_subset.inventory_sha256,
+                role_assignment_sha256=inputs.child.artifact_sha256,
+                evaluation_role=ExternalCohortRole.ZZU_PECG_V1,
+                ood_axis=OODAxis.PEDIATRIC_POPULATION_AND_ACQUISITION,
+                resampling_unit=ResamplingUnit.PATIENT_CLUSTER,
+                cluster_labels=zzu_clusters,
+                subjects=len(patient_index),
+                minimum_ood_recall=parent.zzu_distribution_minimum,
+                seed=parent.zzu_bootstrap_seed,
+                replicates=parent.bootstrap_resamples,
+                confidence_level=parent.confidence_level,
+            )
+        )
+        replicate_values["zzu_external_distribution_recall"] = _bootstrap_rates(
+            zzu_detected,
+            resampling_unit=ResamplingUnit.PATIENT_CLUSTER,
+            cluster_labels=zzu_clusters,
+            seed=parent.zzu_bootstrap_seed,
+            replicates=parent.bootstrap_resamples,
+        )
+    technical = tuple(technical_values)
+    external = tuple(external_values)
+    replicate_arrays = MappingProxyType(dict(sorted(replicate_values.items())))
+    _verify_replicate_quantiles(
+        technical,
+        external,
+        replicate_arrays,
+        parent=parent,
+    )
+    observed_routes = Counter(record.route for record in records)
+    if set(observed_routes) - set(FROZEN_ROUTE_ORDER):
+        raise OODExternalV2IntegrityError("record evidence contains an unknown route")
+    route_counts = MappingProxyType(
+        {route: observed_routes.get(route, 0) for route in FROZEN_ROUTE_ORDER}
+    )
+    group3_prediction_allowed = sum(
+        records[index].route == "PREDICTION_ALLOWED" for index in group3_indices
+    )
+    return _EndpointEvidence(
+        external_cohorts=external,
+        technical_quality_endpoints=technical,
+        bootstrap_replicates=replicate_arrays,
+        challenge_group3_prediction_allowed_count=group3_prediction_allowed,
+        route_counts=route_counts,
+    )
+
+
+def _bootstrap_rates(
+    events: BoolArray,
+    *,
+    resampling_unit: ResamplingUnit,
+    seed: int,
+    replicates: int,
+    cluster_labels: Int64Array | None = None,
+) -> Float64Array:
+    generator = np.random.Generator(np.random.PCG64(seed))
+    records = int(events.shape[0])
+    if resampling_unit is ResamplingUnit.RECORD:
+        chunk_size = max(1, min(replicates, 1_000_000 // records))
+        rates = np.empty(replicates, dtype=np.float64)
+        for start in range(0, replicates, chunk_size):
+            stop = min(replicates, start + chunk_size)
+            sampled = generator.integers(
+                0,
+                records,
+                size=(stop - start, records),
+                endpoint=False,
+            )
+            rates[start:stop] = events[sampled].mean(axis=1, dtype=np.float64)
+        return rates
+    if cluster_labels is None or cluster_labels.shape != events.shape:
+        raise OODExternalV2ExecutionError("patient-cluster bootstrap labels are invalid")
+    unique, inverse = np.unique(cluster_labels, return_inverse=True)
+    clusters = len(unique)
+    record_counts = np.bincount(inverse, minlength=clusters).astype(np.int64, copy=False)
+    event_counts = np.bincount(
+        inverse,
+        weights=events.astype(np.int64),
+        minlength=clusters,
+    ).astype(np.int64, copy=False)
+    chunk_size = max(1, min(replicates, 1_000_000 // clusters))
+    rates = np.empty(replicates, dtype=np.float64)
+    for start in range(0, replicates, chunk_size):
+        stop = min(replicates, start + chunk_size)
+        sampled = generator.integers(0, clusters, size=(stop - start, clusters), endpoint=False)
+        denominator = record_counts[sampled].sum(axis=1, dtype=np.int64)
+        numerator = event_counts[sampled].sum(axis=1, dtype=np.int64)
+        if np.any(denominator <= 0):
+            raise OODExternalV2ExecutionError("bootstrap produced an empty replicate")
+        rates[start:stop] = numerator.astype(np.float64) / denominator.astype(np.float64)
+    return rates
+
+
+def _verify_replicate_quantiles(
+    technical: tuple[object, ...],
+    external: tuple[object, ...],
+    arrays: Mapping[str, Float64Array],
+    *,
+    parent: OODExternalV2ParentConfig,
+) -> None:
+    summaries = {
+        cast(Any, summary).endpoint_key: cast(Any, summary)
+        for summary in (*technical, *external)
+    }
+    if parent.confidence_level != 0.9875:
+        raise OODExternalV2IntegrityError(
+            "bootstrap confidence differs from the frozen multiplicity contract"
+        )
+    for endpoint_key, values in arrays.items():
+        quantiles = np.quantile(
+            values,
+            np.asarray([0.00625, 0.99375, 0.0125, 0.9875], dtype=np.float64),
+            method="linear",
+        )
+        interval = summaries[endpoint_key].interval
+        observed = np.asarray(
+            [
+                interval.two_sided_lower,
+                interval.two_sided_upper,
+                interval.one_sided_lower,
+                interval.one_sided_upper,
+            ],
+            dtype=np.float64,
+        )
+        if not np.array_equal(quantiles, observed):
+            raise OODExternalV2IntegrityError("stored bootstrap replicates differ from endpoint")
+
+
+def _raw_adapter_evidence_complete(
+    records: tuple[_PrivateRecordEvidence, ...],
+    *,
+    skipped: int,
+) -> bool:
+    """Keep adapter integrity separate from natural signal-quality invalidity."""
+
+    return skipped == 0 and all(
+        record.adapter_provenance_sha256 is not None
+        and record.adapter_source_sample_count is not None
+        and record.adapter_raw_physical_units == (PHYSICAL_UNITS,) * len(LEADS)
+        and record.canonical_signal_sha256 is not None
+        and record.quality_report_sha256 is not None
+        for record in records
+    )
+
+
+def _build_result(
+    evaluated: _EvaluatedExternalRecords,
+    endpoints: _EndpointEvidence,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    code_revision: str,
+    v1_unchanged: bool,
+    inventory_unchanged: bool,
+    raw_source_to_canonical_replay_verified: bool,
+    full_backbone_embedding_replay_verified: bool,
+) -> OODV2Result:
+    challenge_records = tuple(
+        record
+        for record in evaluated.records
+        if record.dataset == CHALLENGE_2011_DATASET
+    )
+    challenge_labels_complete = (
+        len(challenge_records) == inputs.parent.challenge_expected_records
+        and all(
+            record.challenge_quality_label
+            in {"acceptable", "unacceptable", "indeterminate"}
+            for record in challenge_records
+        )
+    )
+    challenge_invalid = sum(record.route == "INVALID_INPUT" for record in challenge_records)
+    challenge_quality_pass_count = sum(
+        record.quality_status == QualityStatus.PASS.value
+        for record in challenge_records
+    )
+    zzu_records = tuple(
+        record
+        for record in evaluated.records
+        if record.dataset == ZZU_PEDIATRIC_DATASET
+    )
+    zzu_selected = tuple(
+        record
+        for record in inputs.inventory.records
+        if record.dataset == ZZU_PEDIATRIC_DATASET
+    )
+    zzu_invalid = sum(record.route == "INVALID_INPUT" for record in zzu_records)
+    zzu_quality_pass = tuple(
+        record
+        for record in zzu_records
+        if record.quality_status == QualityStatus.PASS.value
+    )
+    zzu_selected_patients = {
+        record.patient_key
+        for record in zzu_selected
+        if record.patient_key is not None
+    }
+    zzu_quality_pass_patients = {
+        record.patient_key
+        for record in zzu_quality_pass
+        if record.patient_key is not None
+    }
+    zzu_selected_count = len(zzu_selected)
+    zzu_selected_patient_count = len(zzu_selected_patients)
+    zzu_pass_count = len(zzu_quality_pass)
+    zzu_pass_patient_count = len(zzu_quality_pass_patients)
+    if zzu_selected_count == 0 or zzu_selected_patient_count == 0:
+        raise OODExternalV2IntegrityError("ZZU selected denominator is empty")
+    zzu_record_coverage = zzu_pass_count / zzu_selected_count
+    zzu_patient_coverage = zzu_pass_patient_count / zzu_selected_patient_count
+    skipped = len(inputs.inventory.records) - len(evaluated.records)
+    raw_adapter_bindings_verified = _raw_adapter_evidence_complete(
+        evaluated.records,
+        skipped=skipped,
+    )
+    deterministic_embeddings_match = (
+        evaluated.embedding_sha256 == evaluated.repeated_embedding_sha256
+        and evaluated.model_state_unchanged
+    )
+    all_hard_passed = all(
+        (
+            challenge_labels_complete,
+            challenge_invalid == 0,
+            challenge_quality_pass_count >= 1,
+            zzu_invalid == 0,
+            zzu_record_coverage >= 0.80,
+            zzu_patient_coverage >= 0.80,
+            endpoints.challenge_group3_prediction_allowed_count == 0,
+            skipped == 0,
+            v1_unchanged,
+            inventory_unchanged,
+            raw_adapter_bindings_verified,
+            deterministic_embeddings_match,
+            raw_source_to_canonical_replay_verified,
+            full_backbone_embedding_replay_verified,
+        )
+    )
+    hard_gates = ExternalOODHardGates(
+        challenge_reference_label_alignment_complete=challenge_labels_complete,
+        challenge_invalid_input_count=challenge_invalid,
+        challenge_quality_pass_records=challenge_quality_pass_count,
+        zzu_invalid_input_count=zzu_invalid,
+        zzu_selected_records=zzu_selected_count,
+        zzu_quality_pass_records=zzu_pass_count,
+        zzu_quality_pass_record_coverage=zzu_record_coverage,
+        zzu_selected_patients=zzu_selected_patient_count,
+        zzu_quality_pass_patients=zzu_pass_patient_count,
+        zzu_quality_pass_patient_coverage=zzu_patient_coverage,
+        challenge_group3_prediction_allowed_count=(
+            endpoints.challenge_group3_prediction_allowed_count
+        ),
+        skipped_selected_records=skipped,
+        target_site_fitting_performed=False,
+        v1_policy_bytes_unchanged_before_and_after=v1_unchanged,
+        exact_v1_whole_bundle_verifier_passes=True,
+        external_raw_sources_verified_before_and_after=inventory_unchanged,
+        exact_dataset_roots_verified=True,
+        exact_selected_input_inventory_verified_before_and_after=inventory_unchanged,
+        semantic_roles_rederived_before_and_after=inventory_unchanged,
+        raw_canonical_lead_and_data_file_bindings_verified=(
+            raw_adapter_bindings_verified
+        ),
+        active_scientific_package_versions_match_child=True,
+        deterministic_repeated_embeddings_match=deterministic_embeddings_match,
+        raw_source_to_canonical_signal_replay_matches=(
+            raw_source_to_canonical_replay_verified
+        ),
+        canonical_signal_to_full_backbone_embedding_replay_matches=(
+            full_backbone_embedding_replay_verified
+        ),
+        aggregate_only_publication_verified=True,
+        # These two fields describe the terminal transaction produced by
+        # prepare_ood_external_v2.  Publication happens only after semantic
+        # preverification; a returned result implies terminal verification.
+        immutable_success_bundle_verifies=True,
+        failure_receipt_exists=False,
+        all_passed=all_hard_passed,
+    )
+    endpoints_complete = (
+        len(endpoints.external_cohorts) == 2
+        and len(endpoints.technical_quality_endpoints) == 2
+    )
+    endpoint_pass = all(
+        cast(Any, endpoint).gate_passed
+        for endpoint in (*endpoints.external_cohorts, *endpoints.technical_quality_endpoints)
+    )
+    eligible = endpoints_complete and endpoint_pass and hard_gates.all_passed
+    if not endpoints_complete:
+        status = OODV2Status.EXTERNAL_OOD_INSUFFICIENT_EVIDENCE
+    elif eligible:
+        status = OODV2Status.EXTERNAL_OOD_EVIDENCE_COMPLETE
+    else:
+        status = OODV2Status.EXTERNAL_OOD_TARGET_MISSED
+    requirements = EvidenceRequirements(
+        family_wise_alpha=0.05,
+        multiplicity_method="bonferroni",
+        co_primary_endpoint_count=4,
+        one_sided_alpha_per_endpoint=0.0125,
+        co_primary_confidence_level=inputs.parent.confidence_level,
+        bootstrap_replicates=inputs.parent.bootstrap_resamples,
+        challenge_bootstrap_seed=inputs.parent.challenge_bootstrap_seed,
+        zzu_bootstrap_seed=inputs.parent.zzu_bootstrap_seed,
+    )
+    integrity = OODV2IntegritySummary(
+        preregistration_frozen_before_evaluation=True,
+        cohort_roles_frozen_before_model_outputs=True,
+        dataset_hashes_verified=inventory_unchanged,
+        overlap_exclusions_verified=True,
+        frozen_detector_verified=v1_unchanged,
+        evaluation_alignment_verified=(
+            len(evaluated.records) == len(inputs.inventory.records)
+            and len(evaluated.quality_pass_inventory_indices) == len(evaluated.scores)
+        ),
+        aggregate_only_result_verified=True,
+        sealed_v1_unchanged_verified=v1_unchanged,
+        sealed_v1_source_validation_used_for_tuning=False,
+        target_site_fitting_performed=False,
+        complete=True,
+    )
+    return seal_ood_v2_result(
+        OODV2ResultBody(
+            schema_version=1,
+            artifact_type=OOD_V2_ARTIFACT_TYPE,
+            protocol_id=PROTOCOL_ID,
+            frozen_at_utc=inputs.child.frozen_at_utc,
+            status=status,
+            preregistration_sha256=inputs.parent.file_sha256,
+            cohort_role_manifest_sha256=inputs.child.artifact_sha256,
+            detector_policy_sha256=inputs.parent.v1_distribution_policy.file_sha256,
+            sealed_v1_result_sha256=inputs.parent.v1_result.file_sha256,
+            sealed_v1_claim_sha256=inputs.v1.claim_file_sha256,
+            code_revision=code_revision,
+            evidence_requirements=requirements,
+            source_gate=_historical_source_gate(inputs.v1.result),
+            external_cohorts=cast(Any, endpoints.external_cohorts),
+            technical_quality_endpoints=cast(
+                Any,
+                endpoints.technical_quality_endpoints,
+            ),
+            final_route_counts=AggregateRouteCounts.model_validate(
+                {
+                    **dict(endpoints.route_counts),
+                    "total_records": len(evaluated.records),
+                }
+            ),
+            hard_gates=hard_gates,
+            integrity=integrity,
+            external_evidence_eligible=eligible,
+            integration_permitted=False,
+            aggregate_only=True,
+            research_only=True,
+            clinical_validation=False,
+        )
+    )
+
+
+def _historical_source_gate(result: OODCompletionResult) -> SourceGateSummary:
+    source = result.source_validation
+    interval = source.cluster_bootstrap
+    historical = HistoricalSourceBootstrapInterval(
+        method="historical_patient_cluster_percentile_bootstrap",
+        estimator="record_weighted_event_rate",
+        resampling_unit=ResamplingUnit.PATIENT_CLUSTER,
+        sampling_with_replacement=True,
+        random_generator="numpy.random.Generator_PCG64",
+        seed=interval.seed,
+        replicates=interval.replicates,
+        percentile_function="numpy.quantile",
+        quantile_method="linear",
+        confidence_level=0.95,
+        records=source.records,
+        resampling_units=source.patients,
+        event_count=source.rejected_records,
+        point_estimate=source.record_false_rejection_rate,
+        two_sided_lower=interval.two_sided_lower,
+        two_sided_upper=interval.two_sided_upper,
+        one_sided_upper=interval.one_sided_upper,
+        one_sided_lower_published=False,
+    )
+    return SourceGateSummary(
+        cohort_key="sealed-v1-source-validation",
+        cohort_manifest_sha256=source.source_assignment_sha256,
+        evaluation_role="source_retention",
+        records=source.records,
+        subjects=source.patients,
+        rejected_records=source.rejected_records,
+        retained_records=source.accepted_records,
+        false_rejection_rate=source.record_false_rejection_rate,
+        support_coverage=source.source_record_support_coverage,
+        maximum_false_rejection_rate=source.maximum_allowed_record_false_rejection_rate,
+        interval=historical,
+        gate_passed=False,
+        sealed_v1_source_validation_used_for_tuning=False,
+        public_contains_record_level_outputs=False,
+    )
+
+
+def _write_private_artifacts(
+    staging_root: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    evaluated: _EvaluatedExternalRecords,
+    endpoints: _EndpointEvidence,
+) -> None:
+    private = staging_root / "private"
+    private.mkdir(parents=False, exist_ok=False)
+    _atomic_write_new(
+        private / "external-inventory.json",
+        inputs.inventory.to_canonical_json_bytes(),
+    )
+    _copy_frozen_lineage_inputs(private, inputs=inputs)
+    _write_private_routing_contract(private, inputs=inputs, evaluated=evaluated)
+    _write_canonical_signal_bundle(private, inputs=inputs, evaluated=evaluated)
+    _write_quality_audit_shards(private, inputs=inputs, evaluated=evaluated)
+    evidence_body: dict[str, object] = {
+        "artifact_type": PRIVATE_EVIDENCE_ARTIFACT_TYPE,
+        "child_contract_file_sha256": inputs.child.file_sha256,
+        "decision_bindings": {
+            "demo_policy_file_sha256": inputs.routing.demo_policy_file_sha256,
+            "source_calibration_file_sha256": (
+                inputs.routing.source_calibration_file_sha256
+            ),
+        },
+        "inventory_sha256": inputs.inventory.inventory_sha256,
+        "parent_config_file_sha256": inputs.parent.file_sha256,
+        "protocol_id": PROTOCOL_ID,
+        "record_count": len(evaluated.records),
+        "records": [_private_record_index_dict(record) for record in evaluated.records],
+        "route_counts": dict(endpoints.route_counts),
+        "schema_version": 1,
+        "threshold": inputs.parent.threshold,
+    }
+    evidence_body["artifact_sha256"] = canonical_sha256(evidence_body)
+    _atomic_write_new(
+        private / "record-evidence.json",
+        canonical_json_bytes(evidence_body),
+    )
+    _write_embedding_bundle(private, inputs=inputs, evaluated=evaluated)
+    _write_bootstrap_bundle(private, inputs=inputs, endpoints=endpoints)
+
+
+def _private_record_index_dict(record: _PrivateRecordEvidence) -> dict[str, object]:
+    """Serialize only the bounded row index; full quality bodies live in shards."""
+
+    payload = record.to_dict()
+    payload["quality_report"] = None
+    return payload
+
+
+def _copy_frozen_lineage_inputs(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+) -> None:
+    """Copy exact lineage/decision bytes into the manifest-covered private root."""
+
+    bindings = (
+        (
+            inputs.parent.path,
+            inputs.parent.file_sha256,
+            _CONFIG_MAX_BYTES,
+            "frozen parent protocol",
+            "frozen-parent-config.yaml",
+        ),
+        (
+            _resolve_project_relative(
+                inputs.project_root,
+                inputs.parent.v1_result.relative_path,
+                require_file=True,
+            ),
+            inputs.parent.v1_result.file_sha256,
+            _V1_RESULT_MAX_BYTES,
+            "sealed v1 aggregate result",
+            "frozen-v1-ood-completion-result.json",
+        ),
+        (
+            inputs.child.path,
+            inputs.child.file_sha256,
+            _CHILD_MAX_BYTES,
+            "frozen child contract",
+            "frozen-child-contract.json",
+        ),
+        (
+            _resolve_project_relative(
+                inputs.project_root,
+                inputs.child.decision_bindings[
+                    "source_calibration_result"
+                ].relative_path,
+                require_file=True,
+            ),
+            inputs.routing.source_calibration_file_sha256,
+            _V1_RESULT_MAX_BYTES,
+            "frozen source-calibration result",
+            "frozen-source-calibration-result.json",
+        ),
+        (
+            _resolve_project_relative(
+                inputs.project_root,
+                inputs.child.decision_bindings["demo_policy"].relative_path,
+                require_file=True,
+            ),
+            inputs.routing.demo_policy_file_sha256,
+            _V1_RESULT_MAX_BYTES,
+            "frozen demo policy",
+            "frozen-demo-policy.json",
+        ),
+    )
+    for source, expected_hash, maximum, context, destination_name in bindings:
+        payload = _read_bounded(source, maximum, context)
+        if sha256_bytes(payload) != expected_hash:
+            raise OODExternalV2IntegrityError(f"{context} changed before private copy")
+        _atomic_write_new(private / destination_name, payload)
+
+
+def _write_private_routing_contract(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    evaluated: _EvaluatedExternalRecords,
+) -> None:
+    source_policy_path = _resolve_project_relative(
+        inputs.project_root,
+        inputs.parent.v1_distribution_policy.relative_path,
+        require_file=True,
+    )
+    policy_bytes = _read_bounded(
+        source_policy_path,
+        _V1_POLICY_MAX_BYTES,
+        "frozen distribution policy",
+    )
+    if sha256_bytes(policy_bytes) != inputs.parent.v1_distribution_policy.file_sha256:
+        raise OODExternalV2IntegrityError("frozen distribution policy changed")
+    copied_policy_path = private / "frozen-distribution-policy.json"
+    _atomic_write_new(copied_policy_path, policy_bytes)
+    checkpoint_bytes = _read_bounded(
+        inputs.checkpoint_path,
+        _BOUND_MAX_BYTES,
+        "frozen checkpoint",
+    )
+    resolved_config_bytes = _read_bounded(
+        inputs.resolved_config_path,
+        _CONFIG_MAX_BYTES,
+        "frozen resolved config",
+    )
+    normalization_bytes = _read_bounded(
+        inputs.normalization_path,
+        _CONFIG_MAX_BYTES,
+        "frozen normalization",
+    )
+    copied_checkpoint_path = private / "frozen-model.ckpt"
+    copied_resolved_path = private / "frozen-resolved-config.json"
+    copied_normalization_path = private / "frozen-normalization.json"
+    _atomic_write_new(copied_checkpoint_path, checkpoint_bytes)
+    _atomic_write_new(copied_resolved_path, resolved_config_bytes)
+    _atomic_write_new(copied_normalization_path, normalization_bytes)
+    body: dict[str, object] = {
+        "artifact_type": PRIVATE_ROUTING_CONTRACT_ARTIFACT_TYPE,
+        "bootstrap": {
+            "challenge_seed": inputs.parent.challenge_bootstrap_seed,
+            "confidence_level": inputs.parent.confidence_level,
+            "replicates": inputs.parent.bootstrap_resamples,
+            "zzu_seed": inputs.parent.zzu_bootstrap_seed,
+        },
+        "conformal": inputs.routing.conformal.to_dict(),
+        "checkpoint_file_sha256": sha256_file(copied_checkpoint_path),
+        "distribution_policy_artifact_sha256": inputs.v1.policy.artifact_sha256,
+        "distribution_policy_file_sha256": sha256_file(copied_policy_path),
+        "distribution_threshold": inputs.parent.threshold,
+        "demo_policy_file_sha256": inputs.routing.demo_policy_file_sha256,
+        "entropy_maximum": inputs.routing.maximum_entropy,
+        "inventory_sha256": inputs.inventory.inventory_sha256,
+        "label_order": list(SUPERCLASSES),
+        "model_state_sha256": evaluated.model_state_before_sha256,
+        "normalization_file_sha256": sha256_file(copied_normalization_path),
+        "protocol_id": PROTOCOL_ID,
+        "quality_config_version": DEFAULT_SIGNAL_QUALITY_CONFIG.version,
+        "resolved_config_file_sha256": sha256_file(copied_resolved_path),
+        "resolved_config_sha256": inputs.parent.resolved_config_sha256,
+        "schema_version": 1,
+        "source_calibration_artifact_sha256": (
+            inputs.routing.source_calibration_result.artifact_sha256
+        ),
+        "source_calibration_file_sha256": (
+            inputs.routing.source_calibration_file_sha256
+        ),
+        "temperature": inputs.routing.temperature,
+        "threshold_comparison": "score_strictly_greater_than_threshold",
+    }
+    body["artifact_sha256"] = canonical_sha256(body)
+    _atomic_write_new(
+        private / "routing-contract.json",
+        canonical_json_bytes(body),
+    )
+
+
+def _canonical_signal_array_name(kind: str, shard_index: int) -> str:
+    if kind not in {
+        "canonical_signal_sha256",
+        "dataset",
+        "inventory_index",
+        "record_ref",
+        "signal",
+    }:
+        raise OODExternalV2IntegrityError("canonical signal array kind is invalid")
+    if not 0 <= shard_index < CANONICAL_SIGNAL_SHARD_COUNT:
+        raise OODExternalV2IntegrityError("canonical signal shard index is invalid")
+    return f"{kind}_{shard_index:05d}"
+
+
+def _write_canonical_signal_bundle(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    evaluated: _EvaluatedExternalRecords,
+) -> None:
+    """Persist every adapter-success signal in bounded inventory-aligned chunks."""
+
+    indices = np.asarray(evaluated.adapter_success_inventory_indices)
+    signals = np.asarray(evaluated.canonical_signals)
+    if (
+        indices.ndim != 1
+        or indices.dtype != np.dtype(np.int64)
+        or signals.shape != (len(indices), len(LEADS), TARGET_SAMPLES)
+        or signals.dtype != np.dtype(np.float32)
+        or not np.isfinite(signals).all()
+        or (len(indices) > 1 and np.any(indices[1:] <= indices[:-1]))
+        or np.any(indices < 0)
+        or np.any(indices >= len(evaluated.records))
+    ):
+        raise OODExternalV2IntegrityError("canonical signal matrix is invalid")
+    expected_success = np.asarray(
+        [
+            index
+            for index, row in enumerate(evaluated.records)
+            if row.adapter_provenance_sha256 is not None
+        ],
+        dtype=np.int64,
+    )
+    if not np.array_equal(indices, expected_success):
+        raise OODExternalV2IntegrityError(
+            "canonical signals do not cover exactly adapter-success rows"
+        )
+
+    arrays: dict[str, NDArray[np.generic]] = {}
+    descriptors: list[dict[str, object]] = []
+    for shard_index in range(CANONICAL_SIGNAL_SHARD_COUNT):
+        start = shard_index * CANONICAL_SIGNAL_SHARD_RECORDS
+        stop = min(start + CANONICAL_SIGNAL_SHARD_RECORDS, len(evaluated.records))
+        selected_positions = np.flatnonzero((indices >= start) & (indices < stop))
+        shard_indices = np.ascontiguousarray(indices[selected_positions], dtype=np.int64)
+        shard_signals = np.ascontiguousarray(signals[selected_positions], dtype=np.float32)
+        shard_records = [inputs.inventory.records[int(index)] for index in shard_indices]
+        shard_hashes = np.asarray(
+            [
+                cast(str, evaluated.records[int(index)].canonical_signal_sha256)
+                for index in shard_indices
+            ],
+            dtype=np.str_,
+        )
+        shard_datasets = np.asarray(
+            [record.dataset for record in shard_records],
+            dtype=np.str_,
+        )
+        shard_refs = np.asarray(
+            [record.record_ref for record in shard_records],
+            dtype=np.str_,
+        )
+        chunk_arrays: dict[str, NDArray[np.generic]] = {
+            _canonical_signal_array_name("canonical_signal_sha256", shard_index): (
+                shard_hashes
+            ),
+            _canonical_signal_array_name("dataset", shard_index): shard_datasets,
+            _canonical_signal_array_name("inventory_index", shard_index): shard_indices,
+            _canonical_signal_array_name("record_ref", shard_index): shard_refs,
+            _canonical_signal_array_name("signal", shard_index): shard_signals,
+        }
+        arrays.update(chunk_arrays)
+        descriptors.append(
+            {
+                "adapter_success_count": len(shard_indices),
+                "canonical_signal_sha256_tensor_sha256": _tensor_sha256(shard_hashes),
+                "dataset_tensor_sha256": _tensor_sha256(shard_datasets),
+                "inventory_index_tensor_sha256": _tensor_sha256(shard_indices),
+                "record_ref_tensor_sha256": _tensor_sha256(shard_refs),
+                "shard_index": shard_index,
+                "signal_tensor_sha256": _tensor_sha256(shard_signals),
+                "start_inventory_index": start,
+                "stop_inventory_index_exclusive": stop,
+            }
+        )
+
+    npz_path = private.parent / PurePosixPath(CANONICAL_SIGNAL_NPZ_PATH)
+    _atomic_npz_new(npz_path, arrays)
+    _safe_npz_members(npz_path)
+    body: dict[str, object] = {
+        "artifact_type": PRIVATE_CANONICAL_SIGNAL_ARTIFACT_TYPE,
+        "canonical_dtype": "float32",
+        "canonical_shape_per_record": [len(LEADS), TARGET_SAMPLES],
+        "inventory_record_count": len(evaluated.records),
+        "inventory_sha256": inputs.inventory.inventory_sha256,
+        "npz_file_sha256": sha256_file(npz_path),
+        "protocol_id": PROTOCOL_ID,
+        "schema_version": 1,
+        "shard_count": CANONICAL_SIGNAL_SHARD_COUNT,
+        "shard_inventory_records": CANONICAL_SIGNAL_SHARD_RECORDS,
+        "shards": descriptors,
+        "successful_adapter_records": len(indices),
+    }
+    body["artifact_sha256"] = canonical_sha256(body)
+    _atomic_write_new(
+        private.parent / PurePosixPath(CANONICAL_SIGNAL_SIDECAR_PATH),
+        canonical_json_bytes(body),
+    )
+
+
+def _write_quality_audit_shards(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    evaluated: _EvaluatedExternalRecords,
+) -> None:
+    if len(evaluated.records) != QUALITY_AUDIT_EXPECTED_RECORDS:
+        raise OODExternalV2IntegrityError(
+            "quality audit record count differs from the frozen shard layout"
+        )
+    audit_root = private / "quality-audit"
+    audit_root.mkdir(parents=False, exist_ok=False)
+    descriptors: list[dict[str, object]] = []
+    for shard_index, relative_path in enumerate(QUALITY_AUDIT_SHARD_PATHS):
+        start = shard_index * QUALITY_AUDIT_SHARD_RECORDS
+        stop = min(start + QUALITY_AUDIT_SHARD_RECORDS, len(evaluated.records))
+        selected = evaluated.records[start:stop]
+        rows: list[dict[str, object]] = []
+        for offset, evidence in enumerate(selected):
+            report = evidence.quality_report
+            if (report is None) is not (evidence.quality_report_sha256 is None):
+                raise OODExternalV2IntegrityError(
+                    "quality report body/hash presence differs"
+                )
+            if report is not None and (
+                _quality_report_sha256(report) != evidence.quality_report_sha256
+            ):
+                raise OODExternalV2IntegrityError(
+                    "quality report hash differs before sharding"
+                )
+            rows.append(
+                {
+                    "canonical_signal_sha256": evidence.canonical_signal_sha256,
+                    "dataset": evidence.dataset,
+                    "inventory_index": start + offset,
+                    "quality_report": report,
+                    "quality_report_sha256": evidence.quality_report_sha256,
+                    "record_ref": evidence.record_ref,
+                }
+            )
+        body: dict[str, object] = {
+            "artifact_type": PRIVATE_QUALITY_AUDIT_ARTIFACT_TYPE,
+            "inventory_sha256": inputs.inventory.inventory_sha256,
+            "protocol_id": PROTOCOL_ID,
+            "record_count": len(rows),
+            "records": rows,
+            "schema_version": 1,
+            "shard_index": shard_index,
+            "start_inventory_index": start,
+            "stop_inventory_index_exclusive": stop,
+        }
+        body["artifact_sha256"] = canonical_sha256(body)
+        payload = canonical_json_bytes(body)
+        if len(payload) > QUALITY_AUDIT_SHARD_MAX_BYTES:
+            raise OODExternalV2IntegrityError(
+                "quality audit shard exceeds its frozen byte limit"
+            )
+        path = private.parent / PurePosixPath(relative_path)
+        _atomic_write_new(path, payload)
+        descriptors.append(
+            {
+                "artifact_sha256": body["artifact_sha256"],
+                "file_sha256": sha256_bytes(payload),
+                "record_count": len(rows),
+                "relative_path": relative_path,
+                "size_bytes": len(payload),
+                "start_inventory_index": start,
+                "stop_inventory_index_exclusive": stop,
+            }
+        )
+    index_body: dict[str, object] = {
+        "artifact_type": PRIVATE_QUALITY_AUDIT_INDEX_ARTIFACT_TYPE,
+        "inventory_sha256": inputs.inventory.inventory_sha256,
+        "protocol_id": PROTOCOL_ID,
+        "record_count": len(evaluated.records),
+        "schema_version": 1,
+        "shard_count": len(descriptors),
+        "shard_max_bytes": QUALITY_AUDIT_SHARD_MAX_BYTES,
+        "shard_records": QUALITY_AUDIT_SHARD_RECORDS,
+        "shards": descriptors,
+    }
+    index_body["artifact_sha256"] = canonical_sha256(index_body)
+    index_path = private.parent / PurePosixPath(QUALITY_AUDIT_INDEX_PATH)
+    _atomic_write_new(index_path, canonical_json_bytes(index_body))
+
+
+def _write_embedding_bundle(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    evaluated: _EvaluatedExternalRecords,
+) -> None:
+    selected = [
+        inputs.inventory.records[int(index)]
+        for index in evaluated.quality_pass_inventory_indices.tolist()
+    ]
+    arrays: dict[str, NDArray[np.generic]] = {
+        "dataset": np.asarray([record.dataset for record in selected], dtype=np.str_),
+        "embedding_first": evaluated.embeddings,
+        "embedding_repeated": evaluated.repeated_embeddings,
+        "logits_first": evaluated.logits,
+        "logits_repeated": evaluated.repeated_logits,
+        "patient_key": np.asarray(
+            ["" if record.patient_key is None else record.patient_key for record in selected],
+            dtype=np.str_,
+        ),
+        "record_ref": np.asarray([record.record_ref for record in selected], dtype=np.str_),
+        "probabilities": evaluated.probabilities,
+        "score": evaluated.scores,
+    }
+    npz_path = private / "quality-pass-embeddings.npz"
+    _atomic_npz_new(npz_path, arrays)
+    _verify_embedding_npz(npz_path, expected_records=len(selected))
+    body: dict[str, object] = {
+        "artifact_type": PRIVATE_EMBEDDING_ARTIFACT_TYPE,
+        "embedding_dimension": 512,
+        "embedding_dtype": "float32",
+        "embedding_tensor_sha256": evaluated.embedding_sha256,
+        "first_logits_tensor_sha256": evaluated.first_logits_sha256,
+        "inventory_sha256": inputs.inventory.inventory_sha256,
+        "logits_dtype": "float64",
+        "model_state_after_sha256": evaluated.model_state_after_sha256,
+        "model_state_before_sha256": evaluated.model_state_before_sha256,
+        "model_state_unchanged": evaluated.model_state_unchanged,
+        "npz_file_sha256": sha256_file(npz_path),
+        "probabilities_dtype": "float64",
+        "probabilities_tensor_sha256": evaluated.probabilities_sha256,
+        "protocol_id": PROTOCOL_ID,
+        "quality_pass_records": len(selected),
+        "repeated_embedding_tensor_sha256": evaluated.repeated_embedding_sha256,
+        "repeated_logits_tensor_sha256": evaluated.repeated_logits_sha256,
+        "repeat_verified": (
+            evaluated.embedding_sha256 == evaluated.repeated_embedding_sha256
+        ),
+        "schema_version": 1,
+        "score_dtype": "float64",
+        "score_tensor_sha256": _tensor_sha256(evaluated.scores),
+    }
+    body["artifact_sha256"] = canonical_sha256(body)
+    _atomic_write_new(
+        private / "quality-pass-embeddings.json",
+        canonical_json_bytes(body),
+    )
+
+
+def _write_bootstrap_bundle(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    endpoints: _EndpointEvidence,
+) -> None:
+    arrays = {
+        name: np.asarray(values, dtype=np.float64)
+        for name, values in sorted(endpoints.bootstrap_replicates.items())
+    }
+    npz_path = private / "bootstrap-replicates.npz"
+    _atomic_npz_new(npz_path, arrays)
+    _verify_bootstrap_npz(
+        npz_path,
+        expected_names=tuple(arrays),
+        expected_replicates=inputs.parent.bootstrap_resamples,
+    )
+    body: dict[str, object] = {
+        "artifact_type": PRIVATE_BOOTSTRAP_ARTIFACT_TYPE,
+        "endpoint_names": list(arrays),
+        "npz_file_sha256": sha256_file(npz_path),
+        "protocol_id": PROTOCOL_ID,
+        "quantile_method": "linear",
+        "replicates_per_endpoint": inputs.parent.bootstrap_resamples,
+        "schema_version": 1,
+    }
+    body["artifact_sha256"] = canonical_sha256(body)
+    _atomic_write_new(
+        private / "bootstrap-replicates.json",
+        canonical_json_bytes(body),
+    )
+
+
+def assert_external_v2_parent_executable(
+    parent: OODExternalV2ParentConfig,
+) -> None:
+    """Refuse the preserved v2 parent before output or claim creation."""
+
+    if parent.file_sha256 == EXPECTED_PARENT_CONFIG_SHA256:
+        raise OODExternalV2ExecutionError(
+            "PRE_INFERENCE_PROTOCOL_INFEASIBLE: "
+            f"{FROZEN_V2_PREINFERENCE_INFEASIBILITY}"
+        )
+
+
+def verify_external_v2_metadata(
+    *,
+    parent_path: str | Path,
+    child_path: str | Path | None,
+    project_root: str | Path,
+    code_revision: str | None = None,
+    seven_zip_executable: str | Path = "7z",
+) -> VerifiedExternalV2Inputs | OODExternalV2ParentConfig | SuccessorParentPreflight:
+    """Inspect frozen metadata without creating an output, marker, or claim."""
+
+    requested = Path(os.path.abspath(os.fspath(parent_path)))
+    root = _strict_project_root(project_root)
+    successor_path = root.joinpath(*PurePosixPath(SUCCESSOR_PARENT_CONFIG_PATH).parts)
+    if requested == successor_path and child_path is None:
+        successor = verify_successor_parent_preflight(
+            requested,
+            project_root=root,
+        )
+        return successor
+    parent = _load_parent_for_operation(parent_path, project_root=root)
+    if child_path is None:
+        return parent
+    if code_revision is None:
+        raise OODExternalV2ConfigError(
+            "code_revision is required when verifying a child contract"
+        )
+    child = load_child_contract(child_path)
+    return verify_external_v2_inputs(
+        parent,
+        child,
+        project_root=project_root,
+        code_revision=code_revision,
+        seven_zip_executable=seven_zip_executable,
+    )
+
+
+def verify_inventory_builder_preflight(
+    parent_path: str | Path,
+    project_root: str | Path,
+    implementation_revision: str,
+) -> InventoryBuilderPreflight:
+    """Prove the frozen metadata-only builder boundary before raw-byte access."""
+
+    root = _strict_project_root(project_root)
+    revision = _revision(implementation_revision, "inventory implementation revision")
+    expected_parent = root.joinpath(
+        *PurePosixPath(SUCCESSOR_PARENT_CONFIG_PATH).parts
+    )
+    parent = _load_parent_for_operation(parent_path, project_root=root)
+    assert_external_v2_parent_executable(parent)
+    if (
+        parent.path != expected_parent
+        or parent.status != "frozen_parent_preregistration_pre_waveform"
+        or parent.file_sha256 != EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256
+    ):
+        raise OODExternalV2IntegrityError(
+            "inventory builder requires the exact frozen successor parent"
+        )
+
+    # Runtime verification includes the full CPython/site/Git/NVIDIA trees,
+    # exact isolated launcher state, __main__, and all loaded module images.
+    runtime = _current_runtime_environment()
+    source_tree = _build_project_source_tree(root)
+    if _verify_clean_git_revision(root) != revision:
+        raise OODExternalV2IntegrityError(
+            "inventory builder HEAD differs from the implementation revision"
+        )
+    _verify_git_remote_state(root, expected_revision=revision)
+    _verify_private_history_absent(root)
+    _verify_tracked_head_blob(
+        root,
+        revision=revision,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=parent.file_sha256,
+    )
+    _verify_project_source_tree_at_revisions(
+        root,
+        source_tree,
+        implementation_revision=revision,
+        execution_revision=None,
+    )
+    _verify_imported_project_module_origins(root, source_tree)
+
+    output_root = _resolve_project_relative(
+        root,
+        parent.output_root,
+        require_file=False,
+    )
+    claim_path = _resolve_project_relative(
+        root,
+        parent.claim_path,
+        require_file=False,
+    )
+    for candidate, context in (
+        (output_root, "successor output root"),
+        (claim_path, "successor one-shot claim"),
+    ):
+        if candidate.exists() or _is_indirect(candidate):
+            raise OODExternalV2IntegrityError(
+                f"{context} must be absent before inventory construction"
+            )
+        _assert_direct_ancestry(
+            candidate.parent,
+            context=f"{context} parent",
+        )
+    _assert_no_marked_staging_retry(output_root)
+
+    # Close the long runtime/Git probe against a late source or index change.
+    if (
+        _verify_clean_git_revision(root) != revision
+        or _build_project_source_tree(root) != source_tree
+    ):
+        raise OODExternalV2IntegrityError(
+            "inventory builder controls changed during preflight"
+        )
+    return InventoryBuilderPreflight(
+        status="INVENTORY_BUILDER_PREFLIGHT_VERIFIED",
+        parent_config_file_sha256=parent.file_sha256,
+        implementation_revision=revision,
+        project_source_tree_sha256=source_tree.tree_sha256,
+        python_environment_sha256=runtime.python_environment_sha256,
+        git_runtime_tree_sha256=runtime.git_tool.runtime_tree.tree_sha256,
+    )
+
+
+def verify_inventory_builder_postflight(
+    preflight: InventoryBuilderPreflight,
+    *,
+    parent_path: str | Path,
+    project_root: str | Path,
+    implementation_revision: str,
+    inventory_path: str | Path,
+    public_projection_path: str | Path,
+    expected_inventory_file_sha256: str,
+    expected_inventory_sha256: str,
+    expected_public_projection_file_sha256: str,
+    expected_public_projection_artifact_sha256: str,
+) -> InventoryBuilderPostflight:
+    """Recheck builder controls and exact output bytes before reporting success."""
+
+    if not isinstance(preflight, InventoryBuilderPreflight):
+        raise TypeError("preflight must be InventoryBuilderPreflight")
+    repeated = verify_inventory_builder_preflight(
+        parent_path,
+        project_root,
+        implementation_revision,
+    )
+    if repeated != preflight:
+        raise OODExternalV2IntegrityError(
+            "inventory builder control boundary changed after output creation"
+        )
+    root = _strict_project_root(project_root)
+    private = _require_project_file(
+        root,
+        Path(os.path.abspath(os.fspath(inventory_path))),
+        context="private external inventory",
+    )
+    public = _require_project_file(
+        root,
+        Path(os.path.abspath(os.fspath(public_projection_path))),
+        context="public inventory projection",
+    )
+    if (
+        private.relative_to(root).as_posix() != SUCCESSOR_PRIVATE_INVENTORY_PATH
+        or public.relative_to(root).as_posix() != SUCCESSOR_PUBLIC_PROJECTION_PATH
+    ):
+        raise OODExternalV2IntegrityError(
+            "inventory builder outputs differ from the frozen successor paths"
+        )
+    inventory_file_sha256 = sha256_file(private)
+    projection_file_sha256 = sha256_file(public)
+    for value, context in (
+        (expected_inventory_file_sha256, "expected private inventory file"),
+        (expected_inventory_sha256, "expected private inventory artifact"),
+        (expected_public_projection_file_sha256, "expected public projection file"),
+        (
+            expected_public_projection_artifact_sha256,
+            "expected public projection artifact",
+        ),
+    ):
+        _digest(value, context)
+    try:
+        inventory = load_external_inventory(private)
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "private external inventory cannot be reloaded after construction"
+        ) from error
+    challenge_records = sum(
+        record.dataset == CHALLENGE_2011_DATASET for record in inventory.records
+    )
+    zzu_records = sum(
+        record.dataset == ZZU_PEDIATRIC_DATASET for record in inventory.records
+    )
+    projection_artifact_sha256 = _verify_public_projection_file(
+        public,
+        inventory=inventory,
+        challenge_records=challenge_records,
+        zzu_records=zzu_records,
+    )
+    if (
+        inventory_file_sha256 != expected_inventory_file_sha256
+        or inventory.inventory_sha256 != expected_inventory_sha256
+        or projection_file_sha256 != expected_public_projection_file_sha256
+        or projection_artifact_sha256
+        != expected_public_projection_artifact_sha256
+    ):
+        raise OODExternalV2IntegrityError(
+            "inventory builder output hashes differ from the in-memory build"
+        )
+    return InventoryBuilderPostflight(
+        status="INVENTORY_BUILDER_POSTFLIGHT_VERIFIED",
+        preflight=preflight,
+        inventory_file_sha256=inventory_file_sha256,
+        inventory_sha256=inventory.inventory_sha256,
+        public_projection_file_sha256=projection_file_sha256,
+        public_projection_artifact_sha256=projection_artifact_sha256,
+    )
+
+
+def freeze_external_v2_child_contract(
+    *,
+    parent_path: str | Path,
+    project_root: str | Path,
+    inventory_path: str | Path,
+    public_projection_path: str | Path,
+    implementation_revision: str,
+    frozen_at_utc: str,
+    challenge_root: str | Path,
+    zzu_root: str | Path,
+    challenge_records: int,
+    zzu_records: int,
+    zzu_patients: int,
+    selected_records_total: int,
+    output_path: str | Path,
+    seven_zip_executable: str | Path = "7z",
+) -> OODExternalV2ChildContract:
+    """Freeze metadata-only child bytes, or refuse the infeasible v2 parent.
+
+    This function never imports a model, opens a WFDB signal, invokes quality
+    logic, or computes an endpoint.  The original frozen v2 parent is rejected
+    before source archives are hashed or an output is created.  The remaining
+    implementation is retained for the explicitly versioned successor.
+    """
+
+    root = _strict_project_root(project_root)
+    parent = _load_parent_for_operation(parent_path, project_root=root)
+    assert_external_v2_parent_executable(parent)
+    revision = _revision(implementation_revision, "implementation revision")
+    try:
+        head = _verify_clean_git_revision(root)
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "child freeze requires a clean implementation worktree"
+        ) from error
+    if head != revision:
+        raise OODExternalV2IntegrityError(
+            "child freeze must run at the implementation revision"
+        )
+    _verify_git_remote_state(root, expected_revision=revision)
+    _verify_private_history_absent(root)
+    _verify_tracked_head_blob(
+        root,
+        revision=revision,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=parent.file_sha256,
+    )
+    project_source_tree = _build_project_source_tree(root)
+    _verify_project_source_tree_at_revisions(
+        root,
+        project_source_tree,
+        implementation_revision=revision,
+        execution_revision=None,
+    )
+    _verify_imported_project_module_origins(root, project_source_tree)
+    _verify_tracked_head_blob(
+        root,
+        revision=revision,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=parent.file_sha256,
+    )
+    commit_check = _run_git(
+        root,
+        "cat-file",
+        "-e",
+        f"{revision}^{{commit}}",
+        allow_empty=True,
+    )
+    if commit_check.returncode != 0:
+        raise OODExternalV2IntegrityError("implementation revision is not a Git commit")
+
+    inventory_file = _require_project_file(
+        root,
+        Path(os.path.abspath(os.fspath(inventory_path))),
+        context="private external inventory",
+    )
+    if inventory_file.relative_to(root).as_posix() != SUCCESSOR_PRIVATE_INVENTORY_PATH:
+        raise OODExternalV2IntegrityError(
+            "private inventory path differs from the frozen successor namespace"
+        )
+    _require_git_ignored_and_untracked(
+        root,
+        inventory_file.relative_to(root).as_posix(),
+        context="private external inventory",
+    )
+    _require_git_ignored_and_untracked(
+        root,
+        f"{parent.output_root}/private",
+        context="private evidence output",
+    )
+    try:
+        inventory = load_external_inventory(inventory_file)
+    except Exception as error:
+        raise OODExternalV2IntegrityError("private inventory is invalid") from error
+    archive_summaries = _assert_production_archive_closures(
+        inventory.archive_closures,
+        expected_seven_zip_tool=parent.seven_zip_tool_binding,
+    )
+    observed_challenge = sum(
+        record.dataset == CHALLENGE_2011_DATASET for record in inventory.records
+    )
+    observed_zzu = sum(record.dataset == ZZU_PEDIATRIC_DATASET for record in inventory.records)
+    observed_patients = len(
+        {
+            record.patient_key
+            for record in inventory.records
+            if record.dataset == ZZU_PEDIATRIC_DATASET and record.patient_key is not None
+        }
+    )
+    expected_counts = (
+        _positive_integer(challenge_records, "Challenge records"),
+        _positive_integer(zzu_records, "ZZU records"),
+        _positive_integer(zzu_patients, "ZZU patients"),
+        _positive_integer(selected_records_total, "selected records"),
+    )
+    if expected_counts != (
+        observed_challenge,
+        observed_zzu,
+        observed_patients,
+        len(inventory.records),
+    ):
+        raise OODExternalV2IntegrityError(
+            "declared child counts differ from the private inventory"
+        )
+    if observed_challenge != parent.challenge_expected_records:
+        raise OODExternalV2IntegrityError("private inventory is not complete Challenge Set A")
+
+    requested_roots = {
+        CHALLENGE_2011_DATASET: _project_relative_existing_directory(
+            root,
+            challenge_root,
+            context="Challenge extraction root",
+        ),
+        ZZU_PEDIATRIC_DATASET: _project_relative_existing_directory(
+            root,
+            zzu_root,
+            context="ZZU extraction root",
+        ),
+    }
+    if requested_roots != dict(EXPECTED_DATASET_ROOTS):
+        raise OODExternalV2IntegrityError(
+            "child roots must equal the two exact frozen extraction directories"
+        )
+
+    projection_file = _require_project_file(
+        root,
+        Path(os.path.abspath(os.fspath(public_projection_path))),
+        context="public inventory projection",
+    )
+    if projection_file.relative_to(root).as_posix() != SUCCESSOR_PUBLIC_PROJECTION_PATH:
+        raise OODExternalV2IntegrityError(
+            "public projection path differs from the frozen successor namespace"
+        )
+    projection_tracked = _run_git(
+        root,
+        "ls-files",
+        "--",
+        SUCCESSOR_PUBLIC_PROJECTION_PATH,
+        allow_empty=True,
+    )
+    if projection_tracked.stdout.strip() != "":
+        raise OODExternalV2IntegrityError(
+            "public projection must be added only in the child-freeze commit"
+        )
+    projection_sha256 = _verify_public_projection_file(
+        projection_file,
+        inventory=inventory,
+        challenge_records=observed_challenge,
+        zzu_records=observed_zzu,
+    )
+    runtime_environment = _current_runtime_environment()
+    runtime_bindings = {
+        relative_path: sha256_file(
+            _resolve_project_relative(root, relative_path, require_file=True)
+        )
+        for relative_path in REQUIRED_RUNTIME_BINDING_PATHS
+    }
+    if parent.raw_source_bindings is None:
+        raise OODExternalV2ConfigError(
+            "executable successor parent has no frozen raw-source provenance table"
+        )
+    raw_bindings = {
+        name: _raw_source_binding_for_path(
+            root,
+            expected_path,
+            context=f"raw source {name}",
+            official_md5=parent.raw_source_bindings[name].official_md5,
+        )
+        for name, expected_path in EXPECTED_RAW_SOURCE_PATHS.items()
+    }
+    if raw_bindings != dict(parent.raw_source_bindings):
+        raise OODExternalV2IntegrityError(
+            "installed raw source bytes differ from successor-parent provenance"
+        )
+    _verify_archive_closure_rebuilds(
+        inventory,
+        dataset_roots=MappingProxyType(
+            {
+                dataset: _resolve_project_relative(
+                    root,
+                    relative_path,
+                    require_directory=True,
+                )
+                for dataset, relative_path in requested_roots.items()
+            }
+        ),
+        raw_source_paths=MappingProxyType(
+            {
+                name: _resolve_project_relative(
+                    root,
+                    binding.relative_path,
+                    require_file=True,
+                )
+                for name, binding in raw_bindings.items()
+            }
+        ),
+        seven_zip_executable=seven_zip_executable,
+        expected_seven_zip_tool=parent.seven_zip_tool_binding,
+    )
+    decisions = {
+        "demo_policy": _freeze_decision_binding(
+            root,
+            "artifacts/demo/ptbxl_matched_equal_budget_v1/"
+            "resnet1d-seed2026.coverage80.demo-policy.json",
+            expected_file_sha256=EXPECTED_DEMO_POLICY_FILE_SHA256,
+        ),
+        "source_calibration_result": _freeze_decision_binding(
+            root,
+            "artifacts/trust_sentinel/source_calibration_v1/"
+            "source-calibration-result.json",
+            expected_file_sha256=EXPECTED_SOURCE_CALIBRATION_FILE_SHA256,
+        ),
+    }
+    if (
+        decisions["source_calibration_result"].artifact_sha256
+        != EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256
+        or decisions["demo_policy"].artifact_sha256
+        != EXPECTED_DEMO_POLICY_ARTIFACT_SHA256
+    ):
+        raise OODExternalV2IntegrityError(
+            "frozen decision logical artifacts differ from preregistered identities"
+        )
+    child_body: dict[str, object] = {
+        "artifact_type": CHILD_CONTRACT_ARTIFACT_TYPE,
+        "dataset_roots": requested_roots,
+        "decision_bindings": {
+            name: _bound_file_dict(binding) for name, binding in decisions.items()
+        },
+        "frozen_at_utc": _utc_datetime(frozen_at_utc, "frozen_at_utc")
+        .astimezone(UTC)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "implementation_revision": revision,
+        "inventory": {
+            "archive_closures": [
+                _archive_closure_summary_dict(summary)
+                for summary in archive_summaries
+            ],
+            "challenge_records": observed_challenge,
+            "file_sha256": sha256_file(inventory_file),
+            "inventory_sha256": inventory.inventory_sha256,
+            "relative_path": inventory_file.relative_to(root).as_posix(),
+            "selected_records_total": len(inventory.records),
+            "zzu_patients": observed_patients,
+            "zzu_records": observed_zzu,
+        },
+        "output_root": parent.output_root,
+        "parent_config_file_sha256": parent.file_sha256,
+        "project_source_tree": _project_source_tree_dict(project_source_tree),
+        "protocol_id": PROTOCOL_ID,
+        "public_inventory_projection": {
+            "artifact_sha256": projection_sha256,
+            "file_sha256": sha256_file(projection_file),
+            "relative_path": projection_file.relative_to(root).as_posix(),
+        },
+        "raw_source_bindings": {
+            name: {
+                "file_sha256": binding.file_sha256,
+                "official_md5": binding.official_md5,
+                "relative_path": binding.relative_path,
+                "size_bytes": binding.size_bytes,
+            }
+            for name, binding in raw_bindings.items()
+        },
+        "runtime_bindings": runtime_bindings,
+        "runtime_environment": _runtime_environment_dict(runtime_environment),
+        "schema_version": 1,
+    }
+    destination = _resolve_project_relative(
+        root,
+        _relative_path(
+            Path(os.path.abspath(os.fspath(output_path))).relative_to(root).as_posix(),
+            "child output path",
+        ),
+        require_file=False,
+    )
+    expected_destination = root.joinpath(*PurePosixPath(SUCCESSOR_CHILD_CONFIG_PATH).parts)
+    if destination != expected_destination:
+        raise OODExternalV2ConfigError(
+            "child contract must use its exact frozen config destination"
+        )
+    _verify_project_source_tree_at_revisions(
+        root,
+        project_source_tree,
+        implementation_revision=revision,
+        execution_revision=None,
+    )
+    _verify_imported_project_module_origins(root, project_source_tree)
+    _verify_tracked_head_blob(
+        root,
+        revision=revision,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=parent.file_sha256,
+    )
+    if _current_runtime_environment() != runtime_environment:
+        raise OODExternalV2IntegrityError(
+            "runtime environment changed during child freeze"
+        )
+    _verify_git_remote_state(root, expected_revision=revision)
+    _verify_private_history_absent(root)
+    _atomic_write_new(destination, child_contract_bytes(child_body))
+    return load_child_contract(destination)
+
+
+class _OneShotClaimState:
+    def __init__(self, claim_bytes: bytes, owner_nonce: str) -> None:
+        if _OWNER_NONCE.fullmatch(owner_nonce) is None:
+            raise OODExternalV2IntegrityError("external claim owner nonce is invalid")
+        self.claim_bytes = claim_bytes
+        self.owner_nonce = owner_nonce
+        self.published = False
+
+    def mark_published(self) -> None:
+        self.published = True
+
+
+@dataclass(frozen=True, slots=True)
+class _OwnedDirectoryIdentity:
+    device: int
+    inode: int
+
+
+def _owned_directory_identity(path: Path) -> _OwnedDirectoryIdentity:
+    direct = _assert_direct_ancestry(path, context="owned evidence directory")
+    if not direct.is_dir():
+        raise OODExternalV2ExecutionError("owned evidence directory is unavailable")
+    try:
+        before = direct.stat()
+        tuple(direct.iterdir())
+        after = direct.stat()
+    except OSError as error:
+        raise OODExternalV2ExecutionError(
+            "owned evidence directory cannot be identified"
+        ) from error
+    result = _OwnedDirectoryIdentity(before.st_dev, before.st_ino)
+    if (
+        _OwnedDirectoryIdentity(after.st_dev, after.st_ino) != result
+        or _assert_direct_ancestry(
+            direct,
+            context="owned evidence directory",
+        )
+        != direct
+    ):
+        raise OODExternalV2ExecutionError(
+            "owned evidence directory changed during identification"
+        )
+    return result
+
+
+def _verify_owned_namespace_parent(
+    path: Path,
+    *,
+    expected_identity: _OwnedDirectoryIdentity,
+) -> None:
+    direct = _assert_direct_ancestry(path, context="external protocol namespace parent")
+    if _owned_directory_identity(direct) != expected_identity:
+        raise OODExternalV2ExecutionError(
+            "external protocol namespace parent identity changed"
+        )
+
+
+def _verify_owned_evidence_directory(
+    path: Path,
+    *,
+    expected_identity: _OwnedDirectoryIdentity,
+    expected_marker_bytes: bytes,
+) -> None:
+    if _owned_directory_identity(path) != expected_identity:
+        raise OODExternalV2ExecutionError(
+            "evidence directory identity differs from this execution"
+        )
+    marker_path = path / ACCESS_MARKER_FILENAME
+    if _read_bounded(
+        marker_path,
+        _ACCESS_RECORD_MAX_BYTES,
+        "owned external marker",
+    ) != expected_marker_bytes:
+        raise OODExternalV2ExecutionError(
+            "evidence directory owner marker differs from this execution"
+        )
+
+
+class _OutputRootOwnershipState:
+    """Track this process's output rename; never infer ownership from existence."""
+
+    def __init__(self, identity: _OwnedDirectoryIdentity) -> None:
+        self.identity = identity
+        self.visible = False
+
+    def mark_visible(self) -> None:
+        self.visible = True
+
+
+class _TerminalManifestState:
+    """Track manifest link visibility separately from directory durability."""
+
+    def __init__(self) -> None:
+        self.visible = False
+
+    def mark_visible(self) -> None:
+        self.visible = True
+
+
+def _verify_immediate_execution_controls(
+    inputs: VerifiedExternalV2Inputs,
+    *,
+    execution_revision: str,
+) -> None:
+    root = inputs.project_root
+    _verify_revision_boundary(
+        root,
+        child=inputs.child,
+        execution_revision=execution_revision,
+    )
+    _verify_private_history_absent(root)
+    _verify_tracked_head_blob(
+        root,
+        revision=execution_revision,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=inputs.parent.file_sha256,
+    )
+    _verify_project_source_tree_at_revisions(
+        root,
+        inputs.child.project_source_tree,
+        implementation_revision=inputs.child.implementation_revision,
+        execution_revision=execution_revision,
+    )
+    _verify_imported_project_module_origins(root, inputs.child.project_source_tree)
+    if _current_runtime_environment() != inputs.child.runtime_environment:
+        raise OODExternalV2IntegrityError(
+            "active runtime changed before the one-shot claim"
+        )
+    for relative_path, expected_hash in inputs.child.runtime_bindings.items():
+        if sha256_file(
+            _resolve_project_relative(root, relative_path, require_file=True)
+        ) != expected_hash:
+            raise OODExternalV2IntegrityError(
+                "runtime-critical source changed before the one-shot claim"
+            )
+    successor = verify_successor_parent_preflight(
+        inputs.parent.path,
+        project_root=root,
+    )
+    if successor.file_sha256 != inputs.parent.file_sha256:
+        raise OODExternalV2IntegrityError(
+            "successor/predecessor boundary changed before the one-shot claim"
+        )
+
+
+def prepare_ood_external_v2(
+    *,
+    parent_path: str | Path,
+    child_path: str | Path,
+    project_root: str | Path,
+    code_revision: str,
+    seven_zip_executable: str | Path = "7z",
+) -> OODV2Result:
+    """Execute a future feasible successor once into an immutable evidence root.
+
+    The preserved original v2 parent is rejected before the child contract,
+    output root, staging directory, access marker, or adjacent claim is read or
+    created.  The remaining path is retained as the version-neutral execution
+    engine to wire only after a successor parent is separately frozen.
+    """
+
+    root = _strict_project_root(project_root)
+    parent = _load_parent_for_operation(parent_path, project_root=root)
+    assert_external_v2_parent_executable(parent)
+    child = load_child_contract(child_path)
+    revision = _revision(code_revision, "execution code revision")
+    inputs = verify_external_v2_inputs(
+        parent,
+        child,
+        project_root=root,
+        code_revision=revision,
+        seven_zip_executable=seven_zip_executable,
+    )
+    output_root = _resolve_project_relative(
+        inputs.project_root,
+        parent.output_root,
+        require_file=False,
+    )
+    claim_path = _resolve_project_relative(
+        inputs.project_root,
+        parent.claim_path,
+        require_file=False,
+    )
+    if output_root.parent != claim_path.parent:
+        raise OODExternalV2IntegrityError(
+            "output and claim do not share the frozen protocol namespace parent"
+        )
+    namespace_parent = _assert_direct_ancestry(
+        output_root.parent,
+        context="external protocol namespace parent",
+    )
+    if not namespace_parent.is_dir():
+        raise OODExternalV2IntegrityError(
+            "external protocol namespace parent is unavailable"
+        )
+    namespace_parent_identity = _owned_directory_identity(namespace_parent)
+    if output_root.exists() or _is_indirect(output_root):
+        raise OODExternalV2ExecutionError("immutable external v2 output root exists")
+    if claim_path.exists() or _is_indirect(claim_path):
+        raise OODExternalV2ExecutionError(
+            "external one-shot claim already exists; retry is forbidden"
+        )
+    _assert_no_marked_staging_retry(output_root)
+
+    model, normalization, runtime, model_state_before = _load_model_and_runtime(inputs)
+    staging = _create_durable_staging_directory(
+        output_root,
+        expected_parent_identity=namespace_parent_identity,
+    )
+    owned_directory_identity = _owned_directory_identity(staging)
+    owner_nonce = secrets.token_hex(32)
+    claim_bytes = _external_claim_bytes(inputs, owner_nonce=owner_nonce)
+    claim_state = _OneShotClaimState(claim_bytes, owner_nonce)
+    output_ownership = _OutputRootOwnershipState(owned_directory_identity)
+    terminal_manifest = _TerminalManifestState()
+    try:
+        claim_hash = sha256_bytes(claim_bytes)
+        marker_bytes = _external_marker_bytes(
+            inputs,
+            owner_nonce=owner_nonce,
+            claim_file_sha256=claim_hash,
+        )
+        _verify_immediate_execution_controls(
+            inputs,
+            execution_revision=revision,
+        )
+        # The durable armed marker is intentionally committed before the
+        # adjacent claim.  No adapter is called before both bytes reverify.
+        _atomic_write_new(
+            staging / ACCESS_MARKER_FILENAME,
+            marker_bytes,
+            expected_parent_identity=owned_directory_identity,
+            ownership_verifier=lambda: _verify_owned_namespace_parent(
+                namespace_parent,
+                expected_identity=namespace_parent_identity,
+            ),
+        )
+        _atomic_write_new(
+            claim_path,
+            claim_bytes,
+            visibility_witness=claim_state.mark_published,
+            expected_parent_identity=namespace_parent_identity,
+            ownership_verifier=lambda: _verify_owned_namespace_parent(
+                namespace_parent,
+                expected_identity=namespace_parent_identity,
+            ),
+        )
+        if _read_bounded(claim_path, _ACCESS_RECORD_MAX_BYTES, "external claim") != (
+            claim_bytes
+        ):
+            raise OODExternalV2IntegrityError("published external claim bytes changed")
+        if _read_bounded(
+            staging / ACCESS_MARKER_FILENAME,
+            _ACCESS_RECORD_MAX_BYTES,
+            "external marker",
+        ) != marker_bytes:
+            raise OODExternalV2IntegrityError("external marker bytes changed")
+
+        evaluated = _evaluate_external_records(
+            inputs,
+            model=model,
+            normalization=normalization,
+            runtime=runtime,
+            model_state_before=model_state_before,
+        )
+        endpoints = _build_endpoint_evidence(evaluated, inputs=inputs)
+        post = verify_external_v2_inputs(
+            parent,
+            child,
+            project_root=inputs.project_root,
+            code_revision=revision,
+            seven_zip_executable=seven_zip_executable,
+        )
+        v1_unchanged = post.v1.snapshots == inputs.v1.snapshots
+        inventory_unchanged = (
+            post.inventory == inputs.inventory
+            and sha256_file(post.inventory_path) == child.inventory.file_sha256
+            and all(
+                sha256_file(post.raw_source_paths[name])
+                == child.raw_source_bindings[name].file_sha256
+                for name in REQUIRED_RAW_SOURCE_BINDING_KEYS
+            )
+        )
+        if not v1_unchanged or not inventory_unchanged:
+            raise OODExternalV2IntegrityError(
+                "frozen v1 or external source bytes changed during execution"
+            )
+        _write_private_artifacts(
+            staging,
+            inputs=inputs,
+            evaluated=evaluated,
+            endpoints=endpoints,
+        )
+        _verify_raw_to_canonical_replay(
+            staging / "private",
+            inputs=inputs,
+            expected_records=evaluated.records,
+        )
+        replayed_embeddings = _replay_quality_pass_embeddings(
+            staging / "private",
+            inputs=inputs,
+            expected_records=evaluated.records,
+            model=model,
+            normalization=normalization,
+            runtime=runtime,
+        )
+        _verify_embedding_bundle_semantics(
+            staging / "private",
+            inputs=inputs,
+            quality_pass_rows=tuple(
+                row
+                for row in evaluated.records
+                if row.quality_status == QualityStatus.PASS.value
+            ),
+            frozen_model=model,
+            frozen_runtime=runtime,
+            replayed_embeddings=replayed_embeddings,
+        )
+        result = _build_result(
+            evaluated,
+            endpoints,
+            inputs=inputs,
+            code_revision=revision,
+            v1_unchanged=v1_unchanged,
+            inventory_unchanged=inventory_unchanged,
+            raw_source_to_canonical_replay_verified=True,
+            full_backbone_embedding_replay_verified=True,
+        )
+        result_path = staging / OOD_V2_RESULT_FILENAME
+        _atomic_write_new(result_path, ood_v2_result_json_bytes(result))
+        _verify_staged_members_before_manifest(
+            staging,
+            inputs=inputs,
+            expected_result=result,
+            expected_claim_bytes=claim_bytes,
+            model=model,
+            normalization=normalization,
+            runtime=runtime,
+        )
+        _commit_staged_directory(
+            staging,
+            output_root,
+            visibility_witness=output_ownership.mark_visible,
+            expected_directory_identity=output_ownership.identity,
+            expected_marker_bytes=marker_bytes,
+            expected_parent_identity=namespace_parent_identity,
+        )
+        manifest = build_success_manifest(
+            output_root,
+            parent_config_file_sha256=parent.file_sha256,
+            child_contract_file_sha256=child.file_sha256,
+            child_contract_artifact_sha256=child.artifact_sha256,
+            inventory_sha256=inputs.inventory.inventory_sha256,
+            result_artifact_sha256=result.artifact_sha256,
+            external_claim_file_sha256=claim_hash,
+            code_revision=revision,
+        )
+        # Parse and self-verify the exact bytes before the terminal link.
+        type(manifest).from_bytes(manifest.to_bytes())
+        preverified = preverify_external_v2_bundle(
+            output_root,
+            manifest,
+            claim_path=claim_path,
+            project_root=inputs.project_root,
+            seven_zip_executable=seven_zip_executable,
+        )
+        if (
+            preverified.result != result
+            or preverified.success_manifest != manifest
+            or preverified.claim_file_sha256 != claim_hash
+        ):
+            raise OODExternalV2IntegrityError(
+                "terminal bundle preverification returned inconsistent evidence"
+            )
+
+        def verify_terminal_ownership() -> None:
+            _verify_owned_namespace_parent(
+                namespace_parent,
+                expected_identity=namespace_parent_identity,
+            )
+            _verify_owned_evidence_directory(
+                output_root,
+                expected_identity=output_ownership.identity,
+                expected_marker_bytes=marker_bytes,
+            )
+            _verify_runtime_scratch_empty(inputs.project_root)
+
+        # Terminal successful write: no output-root member may change after it.
+        _atomic_write_terminal_success(
+            output_root,
+            manifest.to_bytes(),
+            visibility_witness=terminal_manifest.mark_visible,
+            ownership_verifier=verify_terminal_ownership,
+        )
+        reloaded = verify_external_v2_bundle(
+            output_root,
+            claim_path=claim_path,
+            project_root=inputs.project_root,
+            seven_zip_executable=seven_zip_executable,
+        )
+        if (
+            reloaded.result != result
+            or reloaded.success_manifest != manifest
+            or reloaded.claim_file_sha256 != claim_hash
+        ):
+            raise OODExternalV2IntegrityError(
+                "independent post-publication bundle reread differs"
+            )
+        # The terminal verifier itself must not have populated any launcher
+        # scratch location. A visible manifest followed by a failure here is
+        # retained as an ambiguous terminal commit, never returned as success.
+        verify_terminal_ownership()
+        return reloaded.result
+    except BaseException as error:
+        if claim_state.published:
+            _retain_postclaim_failure(
+                staging=staging,
+                output_root=output_root,
+                inputs=inputs,
+                code_revision=revision,
+                error=error,
+                output_root_owned=output_ownership.visible,
+                terminal_manifest_visible=terminal_manifest.visible,
+                external_claim_file_sha256=sha256_bytes(claim_state.claim_bytes),
+                owner_nonce=claim_state.owner_nonce,
+                expected_directory_identity=output_ownership.identity,
+                expected_marker_bytes=marker_bytes,
+                expected_parent_identity=namespace_parent_identity,
+            )
+        elif not (staging / ACCESS_MARKER_FILENAME).exists():
+            _remove_staging_root(staging, expected_parent=output_root.parent)
+        # An armed marker without an owned claim is retained for forensic
+        # review and blocks any retry under this output root.
+        raise
+
+
+def _mapping(value: object, context: str) -> dict[str, object]:
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
+        raise OODExternalV2ConfigError(f"{context} must be a string-keyed mapping")
+    return {str(key): item for key, item in value.items()}
+
+
+def _digest(value: object, context: str) -> str:
+    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+        raise OODExternalV2ConfigError(f"{context} must be a prefixed SHA-256 digest")
+    return value
+
+
+def _revision(value: object, context: str) -> str:
+    if not isinstance(value, str) or _GIT_REVISION.fullmatch(value.casefold()) is None:
+        raise OODExternalV2ConfigError(f"{context} must be a full Git revision")
+    return value.casefold()
+
+
+def _positive_integer(value: object, context: str) -> int:
+    if type(value) is not int or value <= 0:
+        raise OODExternalV2ConfigError(f"{context} must be a positive integer")
+    return value
+
+
+def _nonnegative_integer(value: object, context: str) -> int:
+    if type(value) is not int or value < 0:
+        raise OODExternalV2ConfigError(f"{context} must be a non-negative integer")
+    return value
+
+
+def _exact_integer(value: object, expected: int, context: str) -> int:
+    observed = _positive_integer(value, context)
+    if observed != expected:
+        raise OODExternalV2ConfigError(f"{context} differs from the frozen value")
+    return observed
+
+
+def _exact_float(value: object, context: str) -> float:
+    if type(value) is not float or not math.isfinite(value):
+        raise OODExternalV2ConfigError(f"{context} must be a finite JSON float")
+    return value
+
+
+def _exact_string(value: object, expected: str, context: str) -> str:
+    if value != expected:
+        raise OODExternalV2ConfigError(f"{context} differs from the frozen value")
+    return expected
+
+
+def _relative_path(value: object, context: str) -> str:
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise OODExternalV2ConfigError(f"{context} must be canonical POSIX text")
+    posix = PurePosixPath(value)
+    windows = PureWindowsPath(value)
+    if posix.is_absolute() or windows.is_absolute() or windows.drive:
+        raise OODExternalV2ConfigError(f"{context} must be project-relative")
+    if posix.as_posix() != value or any(part in {"", ".", ".."} for part in posix.parts):
+        raise OODExternalV2ConfigError(f"{context} contains unsafe path segments")
+    return value
+
+
+def _bound_file(
+    value: object,
+    context: str,
+    *,
+    require_artifact: bool = False,
+) -> BoundFile:
+    mapping = _mapping(value, context)
+    path_key = "path" if "path" in mapping else "relative_path"
+    if path_key not in mapping or "file_sha256" not in mapping:
+        raise OODExternalV2ConfigError(f"{context} is missing its file binding")
+    artifact_value = mapping.get("artifact_sha256")
+    if require_artifact and artifact_value is None:
+        raise OODExternalV2ConfigError(f"{context} must bind an artifact identity")
+    return BoundFile(
+        relative_path=_relative_path(mapping[path_key], f"{context} path"),
+        file_sha256=_digest(mapping["file_sha256"], f"{context} file"),
+        artifact_sha256=(
+            None
+            if artifact_value is None
+            else _digest(artifact_value, f"{context} artifact")
+        ),
+    )
+
+
+def _raw_source_binding(value: object, context: str) -> RawSourceBinding:
+    mapping = _mapping(value, context)
+    if set(mapping) != {
+        "file_sha256",
+        "official_md5",
+        "relative_path",
+        "size_bytes",
+    }:
+        raise OODExternalV2ConfigError(f"{context} fields differ from protocol")
+    raw_md5 = mapping["official_md5"]
+    if raw_md5 is not None and (
+        not isinstance(raw_md5, str) or _MD5.fullmatch(raw_md5) is None
+    ):
+        raise OODExternalV2ConfigError(f"{context} official MD5 is invalid")
+    return RawSourceBinding(
+        relative_path=_relative_path(mapping["relative_path"], f"{context} path"),
+        file_sha256=_digest(mapping["file_sha256"], f"{context} file"),
+        size_bytes=_positive_integer(mapping["size_bytes"], f"{context} size"),
+        official_md5=raw_md5,
+    )
+
+
+def _runtime_package_tree_binding(
+    value: object,
+    *,
+    context: str,
+) -> RuntimePackageTreeBinding:
+    payload = _mapping(value, context)
+    if set(payload) != {
+        "distribution",
+        "file_count",
+        "import_roots",
+        "total_bytes",
+        "tree_sha256",
+        "version",
+    }:
+        raise OODExternalV2ConfigError(f"{context} fields differ from protocol")
+    distribution = payload["distribution"]
+    version = payload["version"]
+    if (
+        not isinstance(distribution, str)
+        or distribution not in EXPECTED_SCIENTIFIC_PACKAGE_VERSIONS
+        or not isinstance(version, str)
+        or version != EXPECTED_SCIENTIFIC_PACKAGE_VERSIONS[distribution]
+    ):
+        raise OODExternalV2ConfigError(f"{context} identity differs")
+    raw_roots = payload["import_roots"]
+    expected_roots = EXPECTED_SCIENTIFIC_PACKAGE_IMPORT_ROOTS[distribution]
+    if (
+        not isinstance(raw_roots, list)
+        or tuple(raw_roots) != expected_roots
+        or any(not isinstance(root, str) for root in raw_roots)
+    ):
+        raise OODExternalV2ConfigError(f"{context} import roots differ")
+    return RuntimePackageTreeBinding(
+        distribution=distribution,
+        version=version,
+        import_roots=expected_roots,
+        file_count=_positive_integer(payload["file_count"], f"{context} file count"),
+        total_bytes=_positive_integer(payload["total_bytes"], f"{context} total bytes"),
+        tree_sha256=_digest(payload["tree_sha256"], f"{context} tree"),
+    )
+
+
+def _runtime_filesystem_tree_binding(
+    value: object,
+    *,
+    context: str,
+    expected_kind: str,
+) -> RuntimeFilesystemTreeBinding:
+    payload = _mapping(value, context)
+    if set(payload) != {
+        "directory_count",
+        "file_count",
+        "total_bytes",
+        "tree_kind",
+        "tree_sha256",
+    }:
+        raise OODExternalV2ConfigError(f"{context} fields differ from protocol")
+    if payload["tree_kind"] != expected_kind:
+        raise OODExternalV2ConfigError(f"{context} kind differs from protocol")
+    return RuntimeFilesystemTreeBinding(
+        tree_kind=expected_kind,
+        file_count=_positive_integer(payload["file_count"], f"{context} file count"),
+        directory_count=_positive_integer(
+            payload["directory_count"],
+            f"{context} directory count",
+        ),
+        total_bytes=_positive_integer(payload["total_bytes"], f"{context} bytes"),
+        tree_sha256=_digest(payload["tree_sha256"], f"{context} tree"),
+    )
+
+
+def _runtime_filesystem_tree_dict(
+    value: RuntimeFilesystemTreeBinding,
+) -> dict[str, object]:
+    return {
+        "directory_count": value.directory_count,
+        "file_count": value.file_count,
+        "total_bytes": value.total_bytes,
+        "tree_kind": value.tree_kind,
+        "tree_sha256": value.tree_sha256,
+    }
+
+
+def _git_tool_binding(value: object, *, context: str) -> GitToolBinding:
+    payload = _mapping(value, context)
+    if set(payload) != {
+        "executable_name",
+        "executable_sha256",
+        "executable_size_bytes",
+        "launcher_name",
+        "launcher_sha256",
+        "launcher_size_bytes",
+        "runtime_tree",
+        "version",
+    }:
+        raise OODExternalV2ConfigError(f"{context} fields differ from protocol")
+    result = GitToolBinding(
+        version=_exact_string(payload["version"], EXPECTED_GIT_VERSION, context),
+        launcher_name=_exact_string(
+            payload["launcher_name"],
+            EXPECTED_GIT_LAUNCHER_NAME,
+            context,
+        ),
+        launcher_size_bytes=_exact_integer(
+            payload["launcher_size_bytes"],
+            EXPECTED_GIT_LAUNCHER_SIZE_BYTES,
+            context,
+        ),
+        launcher_sha256=_digest(payload["launcher_sha256"], context),
+        executable_name=_exact_string(
+            payload["executable_name"],
+            EXPECTED_GIT_EXECUTABLE_NAME,
+            context,
+        ),
+        executable_size_bytes=_exact_integer(
+            payload["executable_size_bytes"],
+            EXPECTED_GIT_EXECUTABLE_SIZE_BYTES,
+            context,
+        ),
+        executable_sha256=_digest(payload["executable_sha256"], context),
+        runtime_tree=_runtime_filesystem_tree_binding(
+            payload["runtime_tree"],
+            context=f"{context} runtime tree",
+            expected_kind=RUNTIME_FILESYSTEM_TREE_KINDS[2],
+        ),
+    )
+    if (
+        result.launcher_sha256 != EXPECTED_GIT_LAUNCHER_SHA256
+        or result.executable_sha256 != EXPECTED_GIT_EXECUTABLE_SHA256
+        or result.runtime_tree.file_count != EXPECTED_GIT_RUNTIME_FILE_COUNT
+        or result.runtime_tree.directory_count
+        != EXPECTED_GIT_RUNTIME_DIRECTORY_COUNT
+        or result.runtime_tree.total_bytes != EXPECTED_GIT_RUNTIME_TOTAL_BYTES
+        or result.runtime_tree.tree_sha256 != EXPECTED_GIT_RUNTIME_TREE_SHA256
+    ):
+        raise OODExternalV2ConfigError(f"{context} executable identity differs")
+    return result
+
+
+def _git_tool_dict(value: GitToolBinding) -> dict[str, object]:
+    return {
+        "executable_name": value.executable_name,
+        "executable_sha256": value.executable_sha256,
+        "executable_size_bytes": value.executable_size_bytes,
+        "launcher_name": value.launcher_name,
+        "launcher_sha256": value.launcher_sha256,
+        "launcher_size_bytes": value.launcher_size_bytes,
+        "runtime_tree": _runtime_filesystem_tree_dict(value.runtime_tree),
+        "version": value.version,
+    }
+
+
+def _nvidia_driver_tool_binding(
+    value: object,
+    *,
+    context: str,
+) -> NvidiaDriverToolBinding:
+    payload = _mapping(value, context)
+    expected_fields = {
+        "driver_version",
+        "nvcuda_name",
+        "nvcuda_sha256",
+        "nvcuda_size_bytes",
+        "nvidia_smi_name",
+        "nvidia_smi_sha256",
+        "nvidia_smi_size_bytes",
+        "nvml_name",
+        "nvml_sha256",
+        "nvml_size_bytes",
+    }
+    if set(payload) != expected_fields:
+        raise OODExternalV2ConfigError(f"{context} fields differ from protocol")
+    result = NvidiaDriverToolBinding(
+        driver_version=_exact_string(
+            payload["driver_version"],
+            EXPECTED_NVIDIA_DRIVER_VERSION,
+            context,
+        ),
+        nvidia_smi_name=_exact_string(
+            payload["nvidia_smi_name"], "nvidia-smi.exe", context
+        ),
+        nvidia_smi_size_bytes=_exact_integer(
+            payload["nvidia_smi_size_bytes"],
+            EXPECTED_NVIDIA_DRIVER_FILES["nvidia-smi.exe"][0],
+            context,
+        ),
+        nvidia_smi_sha256=_digest(payload["nvidia_smi_sha256"], context),
+        nvml_name=_exact_string(payload["nvml_name"], "nvml.dll", context),
+        nvml_size_bytes=_exact_integer(
+            payload["nvml_size_bytes"],
+            EXPECTED_NVIDIA_DRIVER_FILES["nvml.dll"][0],
+            context,
+        ),
+        nvml_sha256=_digest(payload["nvml_sha256"], context),
+        nvcuda_name=_exact_string(payload["nvcuda_name"], "nvcuda.dll", context),
+        nvcuda_size_bytes=_exact_integer(
+            payload["nvcuda_size_bytes"],
+            EXPECTED_NVIDIA_DRIVER_FILES["nvcuda.dll"][0],
+            context,
+        ),
+        nvcuda_sha256=_digest(payload["nvcuda_sha256"], context),
+    )
+    if (
+        result.nvidia_smi_sha256
+        != EXPECTED_NVIDIA_DRIVER_FILES["nvidia-smi.exe"][1]
+        or result.nvml_sha256 != EXPECTED_NVIDIA_DRIVER_FILES["nvml.dll"][1]
+        or result.nvcuda_sha256 != EXPECTED_NVIDIA_DRIVER_FILES["nvcuda.dll"][1]
+    ):
+        raise OODExternalV2ConfigError(f"{context} bytes differ from protocol")
+    return result
+
+
+def _nvidia_driver_tool_dict(
+    value: NvidiaDriverToolBinding,
+) -> dict[str, object]:
+    return {
+        "driver_version": value.driver_version,
+        "nvcuda_name": value.nvcuda_name,
+        "nvcuda_sha256": value.nvcuda_sha256,
+        "nvcuda_size_bytes": value.nvcuda_size_bytes,
+        "nvidia_smi_name": value.nvidia_smi_name,
+        "nvidia_smi_sha256": value.nvidia_smi_sha256,
+        "nvidia_smi_size_bytes": value.nvidia_smi_size_bytes,
+        "nvml_name": value.nvml_name,
+        "nvml_sha256": value.nvml_sha256,
+        "nvml_size_bytes": value.nvml_size_bytes,
+    }
+
+
+def _project_source_file_dict(value: ProjectSourceFileBinding) -> dict[str, object]:
+    return {
+        "file_sha256": value.file_sha256,
+        "relative_path": value.relative_path,
+        "size_bytes": value.size_bytes,
+    }
+
+
+def _project_source_tree_sha256(
+    files: tuple[ProjectSourceFileBinding, ...],
+) -> str:
+    body = {
+        "files": [_project_source_file_dict(value) for value in files],
+        "schema_version": 1,
+    }
+    return "sha256:" + hashlib.sha256(
+        b"ecg_trust.ood_external_v2_1.project_source_tree.v1\x00"
+        + canonical_json_bytes(body)[:-1]
+    ).hexdigest()
+
+
+def _project_source_tree_dict(value: ProjectSourceTreeBinding) -> dict[str, object]:
+    return {
+        "file_count": value.file_count,
+        "files": [_project_source_file_dict(item) for item in value.files],
+        "total_bytes": value.total_bytes,
+        "tree_sha256": value.tree_sha256,
+    }
+
+
+def _project_source_tree_binding(
+    value: object,
+    *,
+    context: str,
+) -> ProjectSourceTreeBinding:
+    payload = _mapping(value, context)
+    if set(payload) != {"file_count", "files", "total_bytes", "tree_sha256"}:
+        raise OODExternalV2ConfigError(f"{context} fields differ from protocol")
+    raw_files = payload["files"]
+    if not isinstance(raw_files, list) or not raw_files:
+        raise OODExternalV2ConfigError(f"{context} files must be non-empty")
+    files: list[ProjectSourceFileBinding] = []
+    for index, raw_file in enumerate(raw_files):
+        item = _mapping(raw_file, f"{context} file {index}")
+        if set(item) != {"file_sha256", "relative_path", "size_bytes"}:
+            raise OODExternalV2ConfigError(
+                f"{context} file {index} fields differ from protocol"
+            )
+        files.append(
+            ProjectSourceFileBinding(
+                relative_path=_relative_path(
+                    item["relative_path"],
+                    f"{context} file path",
+                ),
+                size_bytes=_positive_integer(
+                    item["size_bytes"],
+                    f"{context} file size",
+                ),
+                file_sha256=_digest(
+                    item["file_sha256"],
+                    f"{context} file hash",
+                ),
+            )
+        )
+    frozen_files = tuple(files)
+    paths = tuple(item.relative_path for item in frozen_files)
+    if (
+        paths != tuple(sorted(paths))
+        or len(paths) != len(set(paths))
+        or len({path.casefold() for path in paths}) != len(paths)
+        or not set(PROJECT_OPERATIONAL_ENTRYPOINTS).issubset(paths)
+        or any(
+            path not in PROJECT_OPERATIONAL_ENTRYPOINTS
+            and not (
+                path.startswith(f"{PROJECT_SOURCE_ROOT}/") and path.endswith(".py")
+            )
+            for path in paths
+        )
+    ):
+        raise OODExternalV2ConfigError(f"{context} paths differ from protocol")
+    result = ProjectSourceTreeBinding(
+        files=frozen_files,
+        file_count=_positive_integer(payload["file_count"], f"{context} file count"),
+        total_bytes=_positive_integer(payload["total_bytes"], f"{context} bytes"),
+        tree_sha256=_digest(payload["tree_sha256"], f"{context} tree"),
+    )
+    if (
+        result.file_count != len(result.files)
+        or result.total_bytes != sum(item.size_bytes for item in result.files)
+        or result.tree_sha256 != _project_source_tree_sha256(result.files)
+    ):
+        raise OODExternalV2ConfigError(f"{context} aggregate differs")
+    return result
+
+
+def _runtime_environment_binding(
+    value: object,
+    *,
+    context: str,
+) -> RuntimeEnvironmentBinding:
+    mapping = _mapping(value, context)
+    expected = {
+        "dont_write_bytecode",
+        "git_tool",
+        "isolated_mode",
+        "no_site",
+        "nvidia_driver_tool",
+        "numpy_version",
+        "package_trees",
+        "pycache_prefix_verified_empty",
+        "python_base_tree",
+        "python_base_alias_name",
+        "python_base_target_name",
+        "python_environment_sha256",
+        "python_executable_file_sha256",
+        "python_executable_size_bytes",
+        "python_implementation",
+        "python_version",
+        "pyvenv_config_file_sha256",
+        "pyvenv_config_size_bytes",
+        "scipy_version",
+        "site_packages_tree",
+        "sys_path_layout",
+        "user_site_disabled",
+        "wfdb_version",
+    }
+    if set(mapping) != expected:
+        raise OODExternalV2ConfigError(f"{context} fields differ from protocol")
+    raw_package_trees = mapping["package_trees"]
+    if not isinstance(raw_package_trees, list):
+        raise OODExternalV2ConfigError(f"{context} package trees must be an array")
+    package_trees = tuple(
+        _runtime_package_tree_binding(
+            value,
+            context=f"{context} package tree {index}",
+        )
+        for index, value in enumerate(raw_package_trees)
+    )
+    if tuple(item.distribution for item in package_trees) != tuple(
+        sorted(EXPECTED_SCIENTIFIC_PACKAGE_VERSIONS)
+    ):
+        raise OODExternalV2ConfigError(
+            f"{context} package trees differ from the exact frozen set"
+        )
+    raw_sys_path_layout = mapping["sys_path_layout"]
+    if (
+        not isinstance(raw_sys_path_layout, list)
+        or tuple(raw_sys_path_layout) != EXPECTED_RUNTIME_SYS_PATH_LAYOUT
+        or any(not isinstance(item, str) for item in raw_sys_path_layout)
+    ):
+        raise OODExternalV2ConfigError(f"{context} sys.path layout differs")
+    boolean_values: dict[str, bool] = {}
+    for key in (
+        "dont_write_bytecode",
+        "isolated_mode",
+        "no_site",
+        "pycache_prefix_verified_empty",
+        "user_site_disabled",
+    ):
+        raw_boolean = mapping[key]
+        if type(raw_boolean) is not bool:
+            raise OODExternalV2ConfigError(f"{context} {key} must be bool")
+        boolean_values[key] = raw_boolean
+    text_values: dict[str, str] = {}
+    for key in (
+        "numpy_version",
+        "python_implementation",
+        "python_base_alias_name",
+        "python_base_target_name",
+        "python_version",
+        "scipy_version",
+        "wfdb_version",
+    ):
+        raw = mapping[key]
+        if not isinstance(raw, str) or not raw or raw != raw.strip():
+            raise OODExternalV2ConfigError(f"{context} {key} must be canonical text")
+        text_values[key] = raw
+    result = RuntimeEnvironmentBinding(
+        python_implementation=text_values["python_implementation"],
+        python_version=text_values["python_version"],
+        python_executable_file_sha256=_digest(
+            mapping["python_executable_file_sha256"],
+            f"{context} Python executable",
+        ),
+        python_executable_size_bytes=_positive_integer(
+            mapping["python_executable_size_bytes"],
+            f"{context} Python executable size",
+        ),
+        python_base_alias_name=_exact_string(
+            mapping["python_base_alias_name"],
+            EXPECTED_PYTHON_BASE_ALIAS_NAME,
+            context,
+        ),
+        python_base_target_name=_exact_string(
+            mapping["python_base_target_name"],
+            EXPECTED_PYTHON_BASE_TARGET_NAME,
+            context,
+        ),
+        python_environment_sha256=_digest(
+            mapping["python_environment_sha256"],
+            f"{context} Python environment",
+        ),
+        numpy_version=text_values["numpy_version"],
+        scipy_version=text_values["scipy_version"],
+        wfdb_version=text_values["wfdb_version"],
+        package_trees=package_trees,
+        python_base_tree=_runtime_filesystem_tree_binding(
+            mapping["python_base_tree"],
+            context=f"{context} CPython base tree",
+            expected_kind=RUNTIME_FILESYSTEM_TREE_KINDS[0],
+        ),
+        site_packages_tree=_runtime_filesystem_tree_binding(
+            mapping["site_packages_tree"],
+            context=f"{context} site-packages tree",
+            expected_kind=RUNTIME_FILESYSTEM_TREE_KINDS[1],
+        ),
+        pyvenv_config_file_sha256=_digest(
+            mapping["pyvenv_config_file_sha256"],
+            f"{context} pyvenv.cfg",
+        ),
+        pyvenv_config_size_bytes=_positive_integer(
+            mapping["pyvenv_config_size_bytes"],
+            f"{context} pyvenv.cfg size",
+        ),
+        isolated_mode=boolean_values["isolated_mode"],
+        no_site=boolean_values["no_site"],
+        dont_write_bytecode=boolean_values["dont_write_bytecode"],
+        user_site_disabled=boolean_values["user_site_disabled"],
+        pycache_prefix_verified_empty=boolean_values[
+            "pycache_prefix_verified_empty"
+        ],
+        sys_path_layout=tuple(cast(list[str], raw_sys_path_layout)),
+        git_tool=_git_tool_binding(
+            mapping["git_tool"],
+            context=f"{context} Git tool",
+        ),
+        nvidia_driver_tool=_nvidia_driver_tool_binding(
+            mapping["nvidia_driver_tool"],
+            context=f"{context} NVIDIA driver tool",
+        ),
+    )
+    if (
+        result.python_implementation != "CPython"
+        or not result.python_version.startswith("3.12.")
+        or result.numpy_version != EXPECTED_SCIENTIFIC_PACKAGE_VERSIONS["numpy"]
+        or result.scipy_version != EXPECTED_SCIENTIFIC_PACKAGE_VERSIONS["scipy"]
+        or result.wfdb_version != EXPECTED_SCIENTIFIC_PACKAGE_VERSIONS["wfdb"]
+        or not result.isolated_mode
+        or not result.no_site
+        or not result.dont_write_bytecode
+        or not result.user_site_disabled
+        or not result.pycache_prefix_verified_empty
+    ):
+        raise OODExternalV2ConfigError(
+            f"{context} differs from the frozen scientific runtime"
+        )
+    return result
+
+
+def _runtime_environment_dict(value: RuntimeEnvironmentBinding) -> dict[str, object]:
+    return {
+        "dont_write_bytecode": value.dont_write_bytecode,
+        "git_tool": _git_tool_dict(value.git_tool),
+        "isolated_mode": value.isolated_mode,
+        "no_site": value.no_site,
+        "nvidia_driver_tool": _nvidia_driver_tool_dict(value.nvidia_driver_tool),
+        "numpy_version": value.numpy_version,
+        "package_trees": [
+            {
+                "distribution": item.distribution,
+                "file_count": item.file_count,
+                "import_roots": list(item.import_roots),
+                "total_bytes": item.total_bytes,
+                "tree_sha256": item.tree_sha256,
+                "version": item.version,
+            }
+            for item in value.package_trees
+        ],
+        "pycache_prefix_verified_empty": value.pycache_prefix_verified_empty,
+        "python_base_tree": _runtime_filesystem_tree_dict(value.python_base_tree),
+        "python_base_alias_name": value.python_base_alias_name,
+        "python_base_target_name": value.python_base_target_name,
+        "python_environment_sha256": value.python_environment_sha256,
+        "python_executable_file_sha256": value.python_executable_file_sha256,
+        "python_executable_size_bytes": value.python_executable_size_bytes,
+        "python_implementation": value.python_implementation,
+        "python_version": value.python_version,
+        "pyvenv_config_file_sha256": value.pyvenv_config_file_sha256,
+        "pyvenv_config_size_bytes": value.pyvenv_config_size_bytes,
+        "scipy_version": value.scipy_version,
+        "site_packages_tree": _runtime_filesystem_tree_dict(
+            value.site_packages_tree
+        ),
+        "sys_path_layout": list(value.sys_path_layout),
+        "user_site_disabled": value.user_site_disabled,
+        "wfdb_version": value.wfdb_version,
+    }
+
+
+def _distribution_version(
+    distribution_name: str,
+    distribution: importlib.metadata.Distribution,
+) -> str:
+    try:
+        observed = distribution.version
+    except Exception:
+        observed = None
+    if isinstance(observed, str) and observed:
+        return observed
+    module_names = {
+        "PyYAML": "yaml",
+        "pydantic": "pydantic",
+        "pydantic-core": "pydantic_core",
+    }
+    module_name = module_names.get(distribution_name)
+    if module_name is None:
+        raise OODExternalV2IntegrityError(
+            "installed distribution version metadata is unavailable"
+        )
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "installed distribution module cannot be imported"
+        ) from error
+    fallback = getattr(module, "__version__", None)
+    if not isinstance(fallback, str) or not fallback:
+        raise OODExternalV2IntegrityError(
+            "installed distribution fallback version is unavailable"
+        )
+    return fallback
+
+
+def _installed_distribution_tree_binding(
+    distribution_name: str,
+) -> RuntimePackageTreeBinding:
+    try:
+        distribution = importlib.metadata.distribution(distribution_name)
+    except importlib.metadata.PackageNotFoundError as error:
+        raise OODExternalV2IntegrityError(
+            "required installed distribution is unavailable"
+        ) from error
+    version = _distribution_version(distribution_name, distribution)
+    if version != EXPECTED_SCIENTIFIC_PACKAGE_VERSIONS[distribution_name]:
+        raise OODExternalV2IntegrityError(
+            "installed distribution version differs from the frozen runtime"
+        )
+    raw_files = distribution.files
+    if raw_files is None:
+        raise OODExternalV2IntegrityError(
+            "installed distribution has no auditable file inventory"
+        )
+    expected_roots = EXPECTED_SCIENTIFIC_PACKAGE_IMPORT_ROOTS[distribution_name]
+    observed_roots: set[str] = set()
+    entries: list[dict[str, object]] = []
+    seen: set[str] = set()
+    seen_casefolded: set[str] = set()
+    for package_path in sorted(raw_files, key=lambda value: str(value).replace("\\", "/")):
+        relative = str(package_path).replace("\\", "/")
+        posix = PurePosixPath(relative)
+        matching_root = next(
+            (
+                root
+                for root in expected_roots
+                if posix.parts
+                and (
+                    posix.parts[0] == root
+                    or (
+                        len(posix.parts) == 1
+                        and posix.parts[0].startswith(f"{root}.")
+                    )
+                )
+            ),
+            None,
+        )
+        # Bind only runtime import roots. Distribution metadata, licenses,
+        # entry-point scripts, bytecode caches, and pyc files are excluded.
+        if (
+            matching_root is None
+            or
+            posix.is_absolute()
+            or any(part in {"", ".", ".."} for part in posix.parts)
+            or posix.as_posix() != relative
+            or "__pycache__" in posix.parts
+            or posix.suffix.casefold() in {".pyc", ".pyo"}
+        ):
+            continue
+        observed_roots.add(matching_root)
+        if relative in seen or relative.casefold() in seen_casefolded:
+            raise OODExternalV2IntegrityError(
+                "installed distribution file inventory contains duplicates"
+            )
+        seen.add(relative)
+        seen_casefolded.add(relative.casefold())
+        path = Path(os.fspath(cast(Any, distribution.locate_file(package_path))))
+        if _is_indirect(path) or not path.is_file():
+            raise OODExternalV2IntegrityError(
+                "installed distribution tree contains a missing or indirect file"
+            )
+        try:
+            before = path.stat()
+            digest = sha256_file(path)
+            after = path.stat()
+        except OSError as error:
+            raise OODExternalV2IntegrityError(
+                "installed distribution file cannot be inspected"
+            ) from error
+        if (
+            before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+        ):
+            raise OODExternalV2IntegrityError(
+                "installed distribution file changed while hashing"
+            )
+        entries.append(
+            {
+                "relative_path": relative,
+                "sha256": digest,
+                "size_bytes": before.st_size,
+            }
+        )
+    if not entries or observed_roots != set(expected_roots):
+        raise OODExternalV2IntegrityError(
+            "installed distribution runtime import roots are incomplete"
+        )
+    body = {
+        "distribution": distribution_name,
+        "files": entries,
+        "import_roots": list(expected_roots),
+        "schema_version": 1,
+        "version": version,
+    }
+    tree_sha256 = "sha256:" + hashlib.sha256(
+        b"ecg_trust.runtime_distribution_tree.v1\x00"
+        + canonical_json_bytes(body)[:-1]
+    ).hexdigest()
+    return RuntimePackageTreeBinding(
+        distribution=distribution_name,
+        version=version,
+        import_roots=expected_roots,
+        file_count=len(entries),
+        total_bytes=sum(cast(int, item["size_bytes"]) for item in entries),
+        tree_sha256=tree_sha256,
+    )
+
+
+def _assert_direct_ancestry(path: Path, *, context: str) -> Path:
+    """Resolve a path only after rejecting symlink and junction components."""
+
+    lexical = Path(os.path.abspath(os.fspath(path)))
+    try:
+        for component in (lexical, *lexical.parents):
+            if _is_indirect(component):
+                raise OODExternalV2IntegrityError(
+                    f"{context} contains an indirect filesystem component"
+                )
+        resolved = lexical.resolve(strict=True)
+    except OODExternalV2IntegrityError:
+        raise
+    except OSError as error:
+        raise OODExternalV2IntegrityError(f"{context} is unavailable") from error
+    if resolved != lexical:
+        raise OODExternalV2IntegrityError(
+            f"{context} does not resolve to its exact lexical path"
+        )
+    return resolved
+
+
+def _stable_runtime_file_entry(path: Path, *, context: str) -> dict[str, object]:
+    direct = _assert_direct_ancestry(path, context=context)
+    if not direct.is_file():
+        raise OODExternalV2IntegrityError(f"{context} is not a regular file")
+    try:
+        before = direct.stat()
+        digest = hashlib.sha256()
+        size = 0
+        with direct.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+                size += len(chunk)
+        after = direct.stat()
+    except OSError as error:
+        raise OODExternalV2IntegrityError(f"{context} cannot be hashed") from error
+    if (
+        _is_indirect(direct)
+        or size != before.st_size
+        or before.st_size != after.st_size
+        or before.st_mtime_ns != after.st_mtime_ns
+        or getattr(before, "st_ino", None) != getattr(after, "st_ino", None)
+    ):
+        raise OODExternalV2IntegrityError(f"{context} changed while being hashed")
+    return {
+        "sha256": "sha256:" + digest.hexdigest(),
+        "size_bytes": size,
+    }
+
+
+def _runtime_tree_members(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    directories: list[str] = ["."]
+    files: list[str] = []
+    seen_casefolded = {"."}
+    for current_text, directory_names, file_names in os.walk(root, followlinks=False):
+        current = Path(current_text)
+        _assert_direct_ancestry(current, context="runtime tree directory")
+        directory_names.sort()
+        file_names.sort()
+        for name in directory_names:
+            directory = current / name
+            _assert_direct_ancestry(directory, context="runtime tree directory")
+            if not directory.is_dir():
+                raise OODExternalV2IntegrityError(
+                    "runtime tree contains a non-directory entry"
+                )
+            relative = directory.relative_to(root).as_posix()
+            if relative.casefold() in seen_casefolded:
+                raise OODExternalV2IntegrityError(
+                    "runtime tree contains a case-insensitive path collision"
+                )
+            seen_casefolded.add(relative.casefold())
+            directories.append(relative)
+        for name in file_names:
+            path = current / name
+            _assert_direct_ancestry(path, context="runtime tree file")
+            if not path.is_file():
+                raise OODExternalV2IntegrityError(
+                    "runtime tree contains a non-regular file"
+                )
+            relative = path.relative_to(root).as_posix()
+            if relative.casefold() in seen_casefolded:
+                raise OODExternalV2IntegrityError(
+                    "runtime tree contains a case-insensitive path collision"
+                )
+            seen_casefolded.add(relative.casefold())
+            files.append(relative)
+    return tuple(directories), tuple(files)
+
+
+def _runtime_filesystem_tree(
+    root_path: Path,
+    *,
+    tree_kind: str,
+) -> RuntimeFilesystemTreeBinding:
+    if tree_kind not in RUNTIME_FILESYSTEM_TREE_KINDS:
+        raise OODExternalV2IntegrityError("runtime tree kind is unsupported")
+    root = _assert_direct_ancestry(root_path, context=f"{tree_kind} root")
+    if not root.is_dir():
+        raise OODExternalV2IntegrityError(f"{tree_kind} root is not a directory")
+    directories, file_names = _runtime_tree_members(root)
+    if not file_names:
+        raise OODExternalV2IntegrityError(f"{tree_kind} contains no files")
+    file_entries: list[dict[str, object]] = []
+    for relative in file_names:
+        entry = _stable_runtime_file_entry(
+            root.joinpath(*PurePosixPath(relative).parts),
+            context=f"{tree_kind} file",
+        )
+        file_entries.append({"relative_path": relative, **entry})
+    directories_after, files_after = _runtime_tree_members(root)
+    if directories_after != directories or files_after != file_names:
+        raise OODExternalV2IntegrityError(f"{tree_kind} changed while being bound")
+    body = {
+        "directories": list(directories),
+        "files": file_entries,
+        "schema_version": 1,
+        "tree_kind": tree_kind,
+    }
+    return RuntimeFilesystemTreeBinding(
+        tree_kind=tree_kind,
+        file_count=len(file_entries),
+        directory_count=len(directories),
+        total_bytes=sum(cast(int, item["size_bytes"]) for item in file_entries),
+        tree_sha256="sha256:"
+        + hashlib.sha256(
+            b"ecg_trust.ood_external_v2_1.runtime_filesystem_tree.v1\x00"
+            + canonical_json_bytes(body)[:-1]
+        ).hexdigest(),
+    )
+
+
+def _runtime_path_layout(
+    *,
+    python_base: Path,
+    site_packages: Path,
+    project_src: Path,
+) -> tuple[str, ...]:
+    version = f"python{sys.version_info.major}{sys.version_info.minor}.zip"
+    roles_by_path = {
+        Path(os.path.abspath(os.fspath(python_base / version))): "cpython_zip",
+        Path(os.path.abspath(os.fspath(python_base / "DLLs"))): "cpython_dlls",
+        Path(os.path.abspath(os.fspath(python_base / "Lib"))): "cpython_stdlib",
+        python_base: "cpython_base",
+        site_packages: "venv_site_packages",
+        project_src: "project_src",
+    }
+    observed: list[str] = []
+    for raw_path in sys.path:
+        if not raw_path:
+            raise OODExternalV2IntegrityError(
+                "isolated runtime sys.path contains the current directory"
+            )
+        lexical = Path(os.path.abspath(raw_path))
+        role = roles_by_path.get(lexical)
+        if role is None:
+            raise OODExternalV2IntegrityError(
+                "isolated runtime sys.path contains an unbound location"
+            )
+        if not role.startswith("cpython_"):
+            _assert_direct_ancestry(lexical, context=f"runtime sys.path {role}")
+        observed.append(role)
+    result = tuple(observed)
+    if result != EXPECTED_RUNTIME_SYS_PATH_LAYOUT:
+        raise OODExternalV2IntegrityError(
+            "isolated runtime sys.path order differs from the frozen layout"
+        )
+    return result
+
+
+def _current_git_tool_binding() -> GitToolBinding:
+    launcher, executable, install_root = _git_executable_paths()
+    try:
+        completed = subprocess.run(
+            [os.fspath(executable), "--version"],
+            check=False,
+            capture_output=True,
+            env=_sanitized_git_environment(executable),
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise OODExternalV2IntegrityError("frozen Git version probe failed") from error
+    try:
+        version = completed.stdout.decode("ascii", errors="strict").strip()
+    except UnicodeError as error:
+        raise OODExternalV2IntegrityError("Git version output is not ASCII") from error
+    if completed.returncode != 0 or completed.stderr or version != EXPECTED_GIT_VERSION:
+        raise OODExternalV2IntegrityError("frozen Git version differs")
+    launcher_entry = _stable_runtime_file_entry(launcher, context="Git launcher")
+    executable_entry = _stable_runtime_file_entry(executable, context="Git executable")
+    return GitToolBinding(
+        version=version,
+        launcher_name=launcher.name,
+        launcher_size_bytes=cast(int, launcher_entry["size_bytes"]),
+        launcher_sha256=cast(str, launcher_entry["sha256"]),
+        executable_name=executable.name,
+        executable_size_bytes=cast(int, executable_entry["size_bytes"]),
+        executable_sha256=cast(str, executable_entry["sha256"]),
+        runtime_tree=_runtime_filesystem_tree(
+            install_root / "mingw64",
+            tree_kind=RUNTIME_FILESYSTEM_TREE_KINDS[2],
+        ),
+    )
+
+
+def _nvidia_driver_tool_paths() -> tuple[Path, Path, Path]:
+    system_root = _assert_direct_ancestry(
+        Path(os.environ.get("SYSTEMROOT", r"C:\Windows")),
+        context="Windows system root",
+    )
+    system32 = _assert_direct_ancestry(
+        system_root / "System32",
+        context="Windows System32",
+    )
+    paths = tuple(
+        _assert_direct_ancestry(system32 / name, context=f"NVIDIA driver file {name}")
+        for name in ("nvidia-smi.exe", "nvml.dll", "nvcuda.dll")
+    )
+    for path in paths:
+        expected_size, expected_hash = EXPECTED_NVIDIA_DRIVER_FILES[path.name]
+        entry = _stable_runtime_file_entry(path, context=f"NVIDIA driver file {path.name}")
+        if entry["size_bytes"] != expected_size or entry["sha256"] != expected_hash:
+            raise OODExternalV2IntegrityError(
+                "NVIDIA driver file differs from the frozen runtime"
+            )
+    return cast(tuple[Path, Path, Path], paths)
+
+
+def _current_nvidia_driver_tool_binding() -> NvidiaDriverToolBinding:
+    nvidia_smi, nvml, nvcuda = _nvidia_driver_tool_paths()
+    for name in ("ProgramFiles", "ProgramW6432"):
+        if os.environ.get(name) != r"C:\Program Files":
+            raise OODExternalV2IntegrityError(
+                "NVIDIA driver environment differs from the frozen Windows layout"
+            )
+    environment = {
+        name: value
+        for name in (
+            "COMSPEC",
+            "ProgramFiles",
+            "ProgramW6432",
+            "SYSTEMROOT",
+            "TEMP",
+            "TMP",
+            "WINDIR",
+        )
+        if (value := os.environ.get(name))
+    }
+    environment["PATH"] = os.fspath(nvidia_smi.parent)
+    try:
+        completed = subprocess.run(
+            [
+                os.fspath(nvidia_smi),
+                "--id=0",
+                "--query-gpu=driver_version",
+                "--format=csv,noheader,nounits",
+            ],
+            check=False,
+            capture_output=True,
+            cwd=nvidia_smi.parent,
+            env=environment,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise OODExternalV2IntegrityError("bound NVIDIA driver query failed") from error
+    try:
+        values = tuple(
+            line.strip()
+            for line in completed.stdout.decode("ascii", errors="strict").splitlines()
+            if line.strip()
+        )
+    except UnicodeError as error:
+        raise OODExternalV2IntegrityError("NVIDIA driver query is not ASCII") from error
+    if (
+        completed.returncode != 0
+        or completed.stderr
+        or values != (EXPECTED_NVIDIA_DRIVER_VERSION,)
+    ):
+        raise OODExternalV2IntegrityError("bound NVIDIA driver version differs")
+    entries = {
+        path.name: _stable_runtime_file_entry(path, context="NVIDIA driver file")
+        for path in (nvidia_smi, nvml, nvcuda)
+    }
+    return NvidiaDriverToolBinding(
+        driver_version=values[0],
+        nvidia_smi_name=nvidia_smi.name,
+        nvidia_smi_size_bytes=cast(int, entries[nvidia_smi.name]["size_bytes"]),
+        nvidia_smi_sha256=cast(str, entries[nvidia_smi.name]["sha256"]),
+        nvml_name=nvml.name,
+        nvml_size_bytes=cast(int, entries[nvml.name]["size_bytes"]),
+        nvml_sha256=cast(str, entries[nvml.name]["sha256"]),
+        nvcuda_name=nvcuda.name,
+        nvcuda_size_bytes=cast(int, entries[nvcuda.name]["size_bytes"]),
+        nvcuda_sha256=cast(str, entries[nvcuda.name]["sha256"]),
+    )
+
+
+def _resolve_python_base_runtime() -> tuple[Path, Path]:
+    alias = Path(os.path.abspath(sys.base_prefix))
+    alias_parent = _assert_direct_ancestry(
+        alias.parent,
+        context="CPython alias parent",
+    )
+    junction = getattr(alias, "is_junction", None)
+    try:
+        is_expected_junction = bool(junction is not None and junction())
+        target = alias.resolve(strict=True)
+    except OSError as error:
+        raise OODExternalV2IntegrityError("CPython base alias is unavailable") from error
+    if (
+        alias.name != EXPECTED_PYTHON_BASE_ALIAS_NAME
+        or alias_parent.name != ".python"
+        or not is_expected_junction
+        or alias.is_symlink()
+        or target.parent != alias_parent
+        or target.name != EXPECTED_PYTHON_BASE_TARGET_NAME
+    ):
+        raise OODExternalV2IntegrityError(
+            "CPython base alias does not match the frozen in-project junction"
+        )
+    direct_target = _assert_direct_ancestry(
+        target,
+        context="resolved CPython base runtime",
+    )
+    if not direct_target.is_dir():
+        raise OODExternalV2IntegrityError("resolved CPython base runtime is unavailable")
+    return alias, direct_target
+
+
+def _frozen_runtime_environment_material(
+    runtime_root: Path,
+    *,
+    project_root: Path,
+) -> tuple[tuple[str, str], ...]:
+    """Return the exact launcher-sanitized environment without publishing it."""
+
+    direct_runtime_root = _assert_direct_ancestry(
+        runtime_root,
+        context="isolated launcher runtime root",
+    )
+    expected_parent = _assert_direct_ancestry(
+        project_root / "artifacts" / "trust_sentinel",
+        context="isolated launcher runtime parent",
+    )
+    if (
+        direct_runtime_root.parent != expected_parent
+        or re.fullmatch(r"\.ood_external_v2_1\.runtime-[0-9a-f]{64}", direct_runtime_root.name)
+        is None
+    ):
+        raise OODExternalV2IntegrityError(
+            "isolated launcher runtime root is outside its frozen namespace"
+        )
+    runtime_roles = {
+        "APPDATA": (direct_runtime_root / "home" / "AppData" / "Roaming", "runtime_roaming"),
+        "LOCALAPPDATA": (
+            direct_runtime_root / "home" / "AppData" / "Local",
+            "runtime_local",
+        ),
+        "TEMP": (direct_runtime_root / "temp", "runtime_temp"),
+        "TMP": (direct_runtime_root / "temp", "runtime_temp"),
+        "TORCHINDUCTOR_CACHE_DIR": (
+            direct_runtime_root / "temp",
+            "runtime_temp",
+        ),
+        "USERPROFILE": (direct_runtime_root / "home", "runtime_home"),
+    }
+    expected_runtime_entries = {"home", "pycache", "temp"}
+    try:
+        if {entry.name for entry in direct_runtime_root.iterdir()} != (
+            expected_runtime_entries
+        ):
+            raise OODExternalV2IntegrityError(
+                "isolated launcher runtime root layout differs"
+            )
+        home = direct_runtime_root / "home"
+        app_data = home / "AppData"
+        if (
+            {entry.name for entry in home.iterdir()} != {"AppData"}
+            or {entry.name for entry in app_data.iterdir()} != {"Local", "Roaming"}
+        ):
+            raise OODExternalV2IntegrityError(
+                "isolated launcher profile layout differs"
+            )
+        for path, _ in runtime_roles.values():
+            direct = _assert_direct_ancestry(path, context="isolated runtime role")
+            if not direct.is_dir() or (
+                direct.name not in {"home", "AppData"} and any(direct.iterdir())
+            ):
+                raise OODExternalV2IntegrityError(
+                    "isolated runtime role is unavailable or non-empty"
+                )
+    except OSError as error:
+        raise OODExternalV2IntegrityError(
+            "isolated launcher runtime layout cannot be inspected"
+        ) from error
+    normalized: dict[str, str] = {}
+    for name, value in os.environ.items():
+        canonical_name = name.upper()
+        if canonical_name in normalized:
+            raise OODExternalV2IntegrityError(
+                "runtime environment contains a case-colliding variable"
+            )
+        if canonical_name not in ALLOWED_RUNTIME_ENVIRONMENT_VARIABLES:
+            raise OODExternalV2IntegrityError(
+                "runtime environment contains an unbound variable"
+            )
+        normalized[canonical_name] = value
+    system_root = Path(normalized.get("SYSTEMROOT", r"C:\Windows"))
+    expected_path = os.fspath(system_root / "System32")
+    if (
+        normalized.get("PATH") != expected_path
+        or normalized.get("CUBLAS_WORKSPACE_CONFIG") != ":4096:8"
+        or normalized.get("CUDA_CACHE_DISABLE") != "1"
+        or normalized.get("TORCHINDUCTOR_CACHE_DIR")
+        != os.fspath(direct_runtime_root / "temp")
+        or normalized.get("PROGRAMFILES") != r"C:\Program Files"
+        or normalized.get("PROGRAMW6432") != r"C:\Program Files"
+    ):
+        raise OODExternalV2IntegrityError(
+            "runtime environment differs from the frozen launcher contract"
+        )
+    canonicalized: dict[str, str] = dict(normalized)
+    for name, (path, role) in runtime_roles.items():
+        if normalized.get(name) != os.fspath(path):
+            raise OODExternalV2IntegrityError(
+                "ephemeral runtime environment path differs from its frozen role"
+            )
+        canonicalized[name] = f"<{role}>"
+    return tuple(sorted(canonicalized.items()))
+
+
+def _verify_runtime_scratch_empty(project_root: Path) -> None:
+    raw_prefix = sys.pycache_prefix
+    if not isinstance(raw_prefix, str) or not raw_prefix:
+        raise OODExternalV2IntegrityError(
+            "isolated runtime scratch prefix is unavailable"
+        )
+    pycache = _assert_direct_ancestry(
+        Path(raw_prefix),
+        context="isolated runtime scratch pycache",
+    )
+    if not pycache.is_dir() or any(pycache.iterdir()):
+        raise OODExternalV2IntegrityError(
+            "isolated runtime scratch pycache is not empty"
+        )
+    _frozen_runtime_environment_material(
+        pycache.parent,
+        project_root=project_root,
+    )
+
+
+def _loaded_windows_native_module_paths() -> tuple[Path, ...]:
+    """Enumerate every image loaded in the active Windows process."""
+
+    if os.name != "nt":
+        raise OODExternalV2IntegrityError(
+            "native-module provenance requires the frozen Windows runtime"
+        )
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    get_current_process = kernel32.GetCurrentProcess
+    get_current_process.argtypes = []
+    get_current_process.restype = ctypes.c_void_p
+    enum_modules = psapi.EnumProcessModules
+    enum_modules.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_uint32,
+        ctypes.POINTER(ctypes.c_uint32),
+    ]
+    enum_modules.restype = ctypes.c_int
+    get_module_name = psapi.GetModuleFileNameExW
+    get_module_name.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+    ]
+    get_module_name.restype = ctypes.c_uint32
+    process = get_current_process()
+    capacity = 512
+    while True:
+        handles = (ctypes.c_void_p * capacity)()
+        needed = ctypes.c_uint32(0)
+        if enum_modules(
+            process,
+            handles,
+            ctypes.sizeof(handles),
+            ctypes.byref(needed),
+        ) == 0:
+            raise OODExternalV2IntegrityError(
+                "loaded native modules could not be enumerated"
+            )
+        count = needed.value // ctypes.sizeof(ctypes.c_void_p)
+        if count <= capacity:
+            break
+        capacity = count + 64
+        if capacity > 16_384:
+            raise OODExternalV2IntegrityError(
+                "loaded native module count exceeds its frozen bound"
+            )
+    result: set[Path] = set()
+    for index in range(count):
+        buffer = ctypes.create_unicode_buffer(32_768)
+        length = get_module_name(process, handles[index], buffer, len(buffer))
+        if length == 0 or length >= len(buffer) - 1:
+            raise OODExternalV2IntegrityError(
+                "loaded native module path could not be read exactly"
+            )
+        result.add(Path(os.path.abspath(buffer.value)))
+    if not result:
+        raise OODExternalV2IntegrityError("loaded native module set is empty")
+    return tuple(sorted(result, key=lambda path: os.fspath(path).casefold()))
+
+
+def _verify_loaded_native_module_origins(
+    *,
+    python_executable: Path,
+    python_base_target: Path,
+    site_packages: Path,
+) -> None:
+    """Require every loaded native image to come from a bound or OS tree."""
+
+    system_root = _assert_direct_ancestry(
+        Path(os.environ.get("SYSTEMROOT", r"C:\Windows")),
+        context="native-module Windows root",
+    )
+    system32 = _assert_direct_ancestry(
+        system_root / "System32",
+        context="native-module System32 root",
+    )
+    winsxs = _assert_direct_ancestry(
+        system_root / "WinSxS",
+        context="native-module WinSxS root",
+    )
+    exact_nvidia = {
+        path.name.casefold(): path for path in _nvidia_driver_tool_paths()[1:]
+    }
+    base_python = _assert_direct_ancestry(
+        python_base_target / "python.exe",
+        context="bound CPython base executable",
+    )
+    if not base_python.is_file():
+        raise OODExternalV2IntegrityError(
+            "bound CPython base executable is unavailable"
+        )
+    observed_base_python = False
+    for raw_path in _loaded_windows_native_module_paths():
+        source = _assert_direct_ancestry(raw_path, context="loaded native module")
+        if not source.is_file() or source.suffix.casefold() not in {
+            ".dll",
+            ".exe",
+            ".pyd",
+        }:
+            raise OODExternalV2IntegrityError(
+                "loaded native module is not a regular executable image"
+            )
+        if source == base_python:
+            observed_base_python = True
+            continue
+        # ``sys.executable`` is the separately bound uv virtual-environment
+        # redirector. Windows replaces that bootstrap image with the exact
+        # base CPython image above, so its absence from PSAPI is expected.
+        if source == python_executable:
+            continue
+        if _path_is_within(source, python_base_target) or _path_is_within(
+            source, site_packages
+        ):
+            continue
+        nvidia_path = exact_nvidia.get(source.name.casefold())
+        if nvidia_path is not None:
+            if source != nvidia_path:
+                raise OODExternalV2IntegrityError(
+                    "loaded NVIDIA module differs from the exact bound system file"
+                )
+            continue
+        if source.name.casefold().startswith("nv"):
+            raise OODExternalV2IntegrityError(
+                "loaded NVIDIA module is not among the exact frozen exceptions"
+            )
+        if _path_is_within(source, system32) or _path_is_within(source, winsxs):
+            continue
+        raise OODExternalV2IntegrityError(
+            "loaded native module originated outside every frozen runtime tree"
+        )
+    if not observed_base_python:
+        raise OODExternalV2IntegrityError(
+            "native-module audit did not observe the exact CPython base executable"
+        )
+
+
+def _current_runtime_environment() -> RuntimeEnvironmentBinding:
+    if (
+        sys.flags.isolated != 1
+        or sys.flags.no_site != 1
+        or not sys.dont_write_bytecode
+        or sys.flags.no_user_site != 1
+        or any(os.environ.get(name) for name in FORBIDDEN_CODE_ENVIRONMENT_VARIABLES)
+        or any(name in sys.modules for name in FORBIDDEN_BOOTSTRAP_MODULES)
+    ):
+        raise OODExternalV2IntegrityError(
+            "active Python process was not started by the frozen isolated launcher"
+        )
+    executable = _assert_direct_ancestry(
+        Path(sys.executable),
+        context="active Python executable",
+    )
+    if not executable.is_file():
+        raise OODExternalV2IntegrityError("active Python executable is missing")
+    venv_root = _assert_direct_ancestry(
+        executable.parent.parent,
+        context="virtual environment root",
+    )
+    python_base_alias, python_base = _resolve_python_base_runtime()
+    site_packages = _assert_direct_ancestry(
+        venv_root / "Lib" / "site-packages",
+        context="venv site-packages root",
+    )
+    project_src = _assert_direct_ancestry(
+        Path(__file__).parents[2],
+        context="project source root",
+    )
+    pyvenv_config = _assert_direct_ancestry(
+        venv_root / "pyvenv.cfg",
+        context="pyvenv.cfg",
+    )
+    raw_pycache_prefix = sys.pycache_prefix
+    if not isinstance(raw_pycache_prefix, str) or not raw_pycache_prefix:
+        raise OODExternalV2IntegrityError("isolated runtime pycache prefix is absent")
+    pycache_prefix = _assert_direct_ancestry(
+        Path(raw_pycache_prefix),
+        context="isolated runtime pycache prefix",
+    )
+    try:
+        if not pycache_prefix.is_dir() or any(pycache_prefix.iterdir()):
+            raise OODExternalV2IntegrityError(
+                "isolated runtime pycache prefix is not a verified-empty directory"
+            )
+    except OSError as error:
+        raise OODExternalV2IntegrityError(
+            "isolated runtime pycache prefix cannot be inspected"
+        ) from error
+    project_root = project_src.parent
+    sanitized_environment = _frozen_runtime_environment_material(
+        pycache_prefix.parent,
+        project_root=project_root,
+    )
+    sys_path_layout = _runtime_path_layout(
+        python_base=python_base_alias,
+        site_packages=site_packages,
+        project_src=project_src,
+    )
+    try:
+        executable_size = executable.stat().st_size
+        pyvenv_size = pyvenv_config.stat().st_size
+        python_base_tree = _runtime_filesystem_tree(
+            python_base,
+            tree_kind=RUNTIME_FILESYSTEM_TREE_KINDS[0],
+        )
+        site_packages_tree = _runtime_filesystem_tree(
+            site_packages,
+            tree_kind=RUNTIME_FILESYSTEM_TREE_KINDS[1],
+        )
+        git_tool = _current_git_tool_binding()
+        nvidia_driver_tool = _current_nvidia_driver_tool_binding()
+        package_trees = tuple(
+            _installed_distribution_tree_binding(package)
+            for package in sorted(EXPECTED_SCIENTIFIC_PACKAGE_VERSIONS)
+        )
+        versions = {item.distribution: item.version for item in package_trees}
+    except (OSError, importlib.metadata.PackageNotFoundError) as error:
+        raise OODExternalV2IntegrityError(
+            "active scientific runtime cannot be identified"
+        ) from error
+    project_sources = _build_project_source_tree(project_root)
+    _verify_all_file_backed_module_origins(
+        project_root=project_root,
+        project_sources=project_sources,
+        python_base_alias=python_base_alias,
+        python_base_target=python_base,
+        site_packages=site_packages,
+    )
+    _verify_loaded_native_module_origins(
+        python_executable=executable,
+        python_base_target=python_base,
+        site_packages=site_packages,
+    )
+    environment_material = canonical_json_bytes(
+        {
+            "executable_file_sha256": sha256_file(executable),
+            "isolated_mode": True,
+            "no_site": True,
+            "dont_write_bytecode": True,
+            "user_site_disabled": True,
+            "pycache_prefix_verified_empty": True,
+            "python_base_tree": _runtime_filesystem_tree_dict(python_base_tree),
+            "python_base_alias_name": python_base_alias.name,
+            "python_base_target_name": python_base.name,
+            "site_packages_tree": _runtime_filesystem_tree_dict(site_packages_tree),
+            "git_tool": _git_tool_dict(git_tool),
+            "nvidia_driver_tool": _nvidia_driver_tool_dict(nvidia_driver_tool),
+            "pyvenv_config_file_sha256": sha256_file(pyvenv_config),
+            "pyvenv_config_size_bytes": pyvenv_size,
+            "sys_path_layout": list(sys_path_layout),
+            "versions": versions,
+            "package_trees": [
+                {
+                    "distribution": item.distribution,
+                    "file_count": item.file_count,
+                    "import_roots": list(item.import_roots),
+                    "total_bytes": item.total_bytes,
+                    "tree_sha256": item.tree_sha256,
+                    "version": item.version,
+                }
+                for item in package_trees
+            ],
+            "sanitized_environment": [list(item) for item in sanitized_environment],
+        }
+    )[:-1]
+    return _runtime_environment_binding(
+        {
+            "numpy_version": versions["numpy"],
+            "dont_write_bytecode": True,
+            "git_tool": _git_tool_dict(git_tool),
+            "nvidia_driver_tool": _nvidia_driver_tool_dict(nvidia_driver_tool),
+            "isolated_mode": True,
+            "no_site": True,
+            "package_trees": [
+                {
+                    "distribution": item.distribution,
+                    "file_count": item.file_count,
+                    "import_roots": list(item.import_roots),
+                    "total_bytes": item.total_bytes,
+                    "tree_sha256": item.tree_sha256,
+                    "version": item.version,
+                }
+                for item in package_trees
+            ],
+            "pycache_prefix_verified_empty": True,
+            "python_base_tree": _runtime_filesystem_tree_dict(python_base_tree),
+            "python_base_alias_name": python_base_alias.name,
+            "python_base_target_name": python_base.name,
+            "python_environment_sha256": sha256_bytes(environment_material),
+            "python_executable_file_sha256": sha256_file(executable),
+            "python_executable_size_bytes": executable_size,
+            "python_implementation": platform.python_implementation(),
+            "python_version": platform.python_version(),
+            "pyvenv_config_file_sha256": sha256_file(pyvenv_config),
+            "pyvenv_config_size_bytes": pyvenv_size,
+            "scipy_version": versions["scipy"],
+            "site_packages_tree": _runtime_filesystem_tree_dict(site_packages_tree),
+            "sys_path_layout": list(sys_path_layout),
+            "user_site_disabled": True,
+            "wfdb_version": versions["wfdb"],
+        },
+        context="active runtime environment",
+    )
+
+
+def _endpoint_minimum(
+    primary: Mapping[str, object],
+    endpoint_key: str,
+    expected: float,
+) -> float:
+    endpoint = _mapping(primary.get(endpoint_key), f"primary endpoint {endpoint_key}")
+    observed = _exact_float(endpoint.get("minimum"), f"minimum {endpoint_key}")
+    if observed != expected:
+        raise OODExternalV2ConfigError(f"minimum for {endpoint_key} changed")
+    return observed
+
+
+def _utc_datetime(value: object, context: str) -> datetime:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise OODExternalV2ConfigError(f"{context} must be an ISO-8601 UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise OODExternalV2ConfigError(f"{context} is not a timestamp") from error
+    offset = parsed.utcoffset()
+    if offset is None or offset.total_seconds() != 0:
+        raise OODExternalV2ConfigError(f"{context} must use UTC")
+    return parsed
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise OODExternalV2ConfigError(f"JSON contains duplicate key {key!r}")
+        result[key] = value
+    return result
+
+
+def _reject_duplicate_yaml_keys(text: str) -> None:
+    try:
+        root = yaml.compose(text)
+    except yaml.YAMLError as error:
+        raise OODExternalV2ConfigError("parent YAML cannot be composed") from error
+    visited: set[int] = set()
+
+    def visit(node: yaml.Node) -> None:
+        identity = id(node)
+        if identity in visited:
+            raise OODExternalV2ConfigError("YAML aliases are forbidden")
+        visited.add(identity)
+        if isinstance(node, yaml.MappingNode):
+            seen: set[tuple[str, str]] = set()
+            for key_node, value_node in node.value:
+                if not isinstance(key_node, yaml.ScalarNode):
+                    raise OODExternalV2ConfigError("YAML keys must be scalar")
+                if str(key_node.tag).endswith(":merge") or str(key_node.value) == "<<":
+                    raise OODExternalV2ConfigError("YAML merge keys are forbidden")
+                key = (str(key_node.tag), str(key_node.value))
+                if key in seen:
+                    raise OODExternalV2ConfigError("YAML keys must be unique")
+                seen.add(key)
+                visit(value_node)
+        elif isinstance(node, yaml.SequenceNode):
+            for child in node.value:
+                visit(child)
+
+    if root is not None:
+        visit(root)
+
+
+def _is_indirect(path: Path) -> bool:
+    try:
+        junction = getattr(path, "is_junction", None)
+        return path.is_symlink() or bool(junction is not None and junction())
+    except OSError as error:
+        raise OODExternalV2IntegrityError("filesystem link state cannot be inspected") from error
+
+
+def _strict_project_root(value: str | Path) -> Path:
+    try:
+        root = _assert_direct_ancestry(
+            Path(os.path.abspath(os.fspath(value))),
+            context="project root",
+        )
+    except OSError as error:
+        raise OODExternalV2IntegrityError("project root is unavailable") from error
+    if _is_indirect(root) or not root.is_dir():
+        raise OODExternalV2IntegrityError("project root is not a direct directory")
+    completed = _run_git(root, "rev-parse", "--show-toplevel")
+    try:
+        git_root = Path(completed.stdout.strip()).resolve(strict=True)
+    except OSError as error:
+        raise OODExternalV2IntegrityError("Git worktree root is unavailable") from error
+    if git_root != root:
+        raise OODExternalV2IntegrityError("project root is not the Git worktree root")
+    return root
+
+
+def _require_project_file(root: Path, path: Path, *, context: str) -> Path:
+    try:
+        resolved = _assert_direct_ancestry(path, context=context)
+        resolved.relative_to(root)
+    except (OSError, ValueError) as error:
+        raise OODExternalV2IntegrityError(
+            f"{context} must be a regular file inside the project"
+        ) from error
+    if not resolved.is_file():
+        raise OODExternalV2IntegrityError(f"{context} is missing or indirect")
+    return resolved
+
+
+def _resolve_project_relative(
+    root: Path,
+    relative_path: str,
+    *,
+    require_file: bool = False,
+    require_directory: bool = False,
+) -> Path:
+    canonical = _relative_path(relative_path, "project path")
+    candidate = root.joinpath(*PurePosixPath(canonical).parts)
+    if require_file:
+        return _require_project_file(root, candidate, context=canonical)
+    if require_directory:
+        try:
+            resolved = _assert_direct_ancestry(
+                candidate,
+                context=f"project directory {canonical}",
+            )
+            resolved.relative_to(root)
+        except (OSError, ValueError) as error:
+            raise OODExternalV2IntegrityError(
+                f"project directory is unavailable: {canonical}"
+            ) from error
+        if not resolved.is_dir():
+            raise OODExternalV2IntegrityError(
+                f"project directory is missing or indirect: {canonical}"
+            )
+        return resolved
+    lexical = Path(os.path.abspath(os.fspath(candidate)))
+    try:
+        lexical.relative_to(root)
+        cursor = lexical
+        while not cursor.exists():
+            if _is_indirect(cursor) or cursor == cursor.parent:
+                raise OODExternalV2IntegrityError(
+                    "project destination has an indirect or missing ancestry"
+                )
+            cursor = cursor.parent
+        direct_ancestor = _assert_direct_ancestry(
+            cursor,
+            context=f"project destination ancestor {canonical}",
+        )
+        direct_ancestor.relative_to(root)
+    except (OSError, ValueError) as error:
+        raise OODExternalV2IntegrityError("project path escapes the worktree") from error
+    return lexical
+
+
+def _project_relative_existing_directory(
+    root: Path,
+    value: str | Path,
+    *,
+    context: str,
+) -> str:
+    try:
+        source = _assert_direct_ancestry(
+            Path(os.path.abspath(os.fspath(value))),
+            context=context,
+        )
+        relative = source.relative_to(root).as_posix()
+    except (OSError, ValueError) as error:
+        raise OODExternalV2IntegrityError(f"{context} is outside the project") from error
+    if not source.is_dir():
+        raise OODExternalV2IntegrityError(f"{context} is missing or indirect")
+    return _relative_path(relative, context)
+
+
+def _read_bounded(path: Path, maximum_bytes: int, context: str) -> bytes:
+    direct = _assert_direct_ancestry(path, context=context)
+    if not direct.is_file():
+        raise OODExternalV2IntegrityError(f"{context} is missing or indirect")
+    try:
+        before = direct.stat()
+        if not 0 < before.st_size <= maximum_bytes:
+            raise OODExternalV2IntegrityError(f"{context} has an invalid size")
+        payload = direct.read_bytes()
+        after = direct.stat()
+    except OODExternalV2IntegrityError:
+        raise
+    except OSError as error:
+        raise OODExternalV2IntegrityError(f"{context} cannot be read") from error
+    if (
+        len(payload) != before.st_size
+        or before.st_size != after.st_size
+        or before.st_mtime_ns != after.st_mtime_ns
+        or before.st_ctime_ns != after.st_ctime_ns
+        or before.st_dev != after.st_dev
+        or before.st_ino != after.st_ino
+        or _assert_direct_ancestry(direct, context=context) != direct
+    ):
+        raise OODExternalV2IntegrityError(f"{context} changed while being read")
+    return payload
+
+
+def _git_executable_paths() -> tuple[Path, Path, Path]:
+    located = shutil.which("git")
+    if located is None:
+        raise OODExternalV2IntegrityError("frozen Git launcher is unavailable")
+    launcher = _assert_direct_ancestry(Path(located), context="Git launcher")
+    install_root = _assert_direct_ancestry(
+        launcher.parent.parent,
+        context="Git installation root",
+    )
+    executable = _assert_direct_ancestry(
+        install_root / "mingw64" / "bin" / "git.exe",
+        context="Git executable",
+    )
+    if not launcher.is_file() or not executable.is_file():
+        raise OODExternalV2IntegrityError("frozen Git executables are unavailable")
+    launcher_entry = _stable_runtime_file_entry(launcher, context="Git launcher")
+    executable_entry = _stable_runtime_file_entry(executable, context="Git executable")
+    if (
+        launcher.name != EXPECTED_GIT_LAUNCHER_NAME
+        or launcher_entry["size_bytes"] != EXPECTED_GIT_LAUNCHER_SIZE_BYTES
+        or launcher_entry["sha256"] != EXPECTED_GIT_LAUNCHER_SHA256
+        or executable.name != EXPECTED_GIT_EXECUTABLE_NAME
+        or executable_entry["size_bytes"] != EXPECTED_GIT_EXECUTABLE_SIZE_BYTES
+        or executable_entry["sha256"] != EXPECTED_GIT_EXECUTABLE_SHA256
+    ):
+        raise OODExternalV2IntegrityError(
+            "resolved Git launcher or executable differs from frozen bytes"
+        )
+    return launcher, executable, install_root
+
+
+def _sanitized_git_environment(executable: Path) -> dict[str, str]:
+    environment: dict[str, str] = {
+        "GIT_CONFIG_COUNT": "0",
+        "GIT_CONFIG_GLOBAL": "NUL" if os.name == "nt" else "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "PATH": os.pathsep.join(
+            (
+                os.fspath(executable.parent),
+                os.fspath(executable.parent.parent / "libexec" / "git-core"),
+                os.fspath(Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32"),
+            )
+        ),
+    }
+    for name in ("COMSPEC", "SYSTEMROOT", "TEMP", "TMP", "WINDIR"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    return environment
+
+
+def _verify_git_runtime_tree_before_provenance() -> None:
+    global _GIT_RUNTIME_TREE_VERIFIED
+    if _GIT_RUNTIME_TREE_VERIFIED:
+        return
+    _, _, install_root = _git_executable_paths()
+    observed = _runtime_filesystem_tree(
+        install_root / "mingw64",
+        tree_kind=RUNTIME_FILESYSTEM_TREE_KINDS[2],
+    )
+    if (
+        observed.file_count != EXPECTED_GIT_RUNTIME_FILE_COUNT
+        or observed.directory_count != EXPECTED_GIT_RUNTIME_DIRECTORY_COUNT
+        or observed.total_bytes != EXPECTED_GIT_RUNTIME_TOTAL_BYTES
+        or observed.tree_sha256 != EXPECTED_GIT_RUNTIME_TREE_SHA256
+    ):
+        raise OODExternalV2IntegrityError(
+            "Git runtime tree differs before provenance verification"
+        )
+    _GIT_RUNTIME_TREE_VERIFIED = True
+
+
+def _verify_git_repository_controls(project_root: Path) -> None:
+    git_directory = _assert_direct_ancestry(
+        project_root / ".git",
+        context="Git metadata directory",
+    )
+    if not git_directory.is_dir():
+        raise OODExternalV2IntegrityError("Git metadata is not a direct directory")
+    forbidden = (
+        git_directory / "objects" / "info" / "alternates",
+        git_directory / "info" / "grafts",
+        git_directory / "info" / "sparse-checkout",
+        git_directory / "refs" / "replace",
+        git_directory / "config.worktree",
+        git_directory / "worktrees",
+    )
+    if any(path.exists() or _is_indirect(path) for path in forbidden):
+        raise OODExternalV2IntegrityError(
+            "Git object alternates, grafts, and replacement refs are forbidden"
+        )
+    config = _read_bounded(git_directory / "config", 1_000_000, "local Git config")
+    try:
+        config_text = config.decode("utf-8")
+    except UnicodeError as error:
+        raise OODExternalV2IntegrityError("local Git config is not UTF-8") from error
+    expected_sections: Mapping[str, Mapping[str, str | None]] = {
+        "core": {
+            "bare": "false",
+            "filemode": "false",
+            "ignorecase": "true",
+            "logallrefupdates": "true",
+            "repositoryformatversion": "0",
+        },
+        'remote "origin"': {
+            "fetch": "+refs/heads/*:refs/remotes/origin/*",
+            "url": EXPECTED_GIT_REMOTE_URL,
+        },
+        'branch "main"': {
+            "merge": "refs/heads/main",
+            "remote": "origin",
+        },
+        "user": {"email": None, "name": None},
+    }
+    parsed: dict[str, dict[str, str]] = {}
+    current_section: str | None = None
+    for raw_line in config_text.splitlines():
+        if not raw_line:
+            continue
+        header = re.fullmatch(r"\[([^\]\r\n]+)\]", raw_line)
+        if header is not None:
+            current_section = header.group(1)
+            if current_section not in expected_sections or current_section in parsed:
+                raise OODExternalV2IntegrityError(
+                    "local Git config contains an unapproved section"
+                )
+            parsed[current_section] = {}
+            continue
+        entry = re.fullmatch(r"\t([a-z]+) = ([^\x00\r\n]+)", raw_line)
+        if entry is None or current_section is None:
+            raise OODExternalV2IntegrityError(
+                "local Git config is not in the exact frozen syntax"
+            )
+        key, value = entry.groups()
+        if key in parsed[current_section]:
+            raise OODExternalV2IntegrityError(
+                "local Git config contains a duplicate key"
+            )
+        parsed[current_section][key] = value
+    if set(parsed) != set(expected_sections):
+        raise OODExternalV2IntegrityError(
+            "local Git config section set differs from the frozen repository"
+        )
+    for section, expected_values in expected_sections.items():
+        observed_values = parsed[section]
+        if set(observed_values) != set(expected_values):
+            raise OODExternalV2IntegrityError(
+                "local Git config key set differs from the frozen repository"
+            )
+        for key, expected_value in expected_values.items():
+            observed_value = observed_values[key]
+            if expected_value is None:
+                if not observed_value or observed_value != observed_value.strip():
+                    raise OODExternalV2IntegrityError(
+                        "local Git identity value is not canonical"
+                    )
+            elif observed_value != expected_value:
+                raise OODExternalV2IntegrityError(
+                    "local Git config value differs from the frozen repository"
+                )
+    if config_text.encode("utf-8") != config:
+        raise OODExternalV2IntegrityError(
+            "local Git config bytes changed while parsed"
+        )
+
+
+def _execute_bound_git(
+    project_root: Path,
+    *arguments: str,
+) -> subprocess.CompletedProcess[bytes]:
+    _verify_git_runtime_tree_before_provenance()
+    _, executable, _ = _git_executable_paths()
+    _verify_git_repository_controls(project_root)
+    git_directory = project_root / ".git"
+    command = [
+        os.fspath(executable),
+        "--no-pager",
+        "--no-replace-objects",
+        f"--git-dir={git_directory}",
+        f"--work-tree={project_root}",
+        "-c",
+        "core.hooksPath=NUL" if os.name == "nt" else "core.hooksPath=/dev/null",
+        "-c",
+        "protocol.file.allow=never",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.untrackedCache=false",
+        "-c",
+        "core.ignoreStat=false",
+        "-c",
+        "core.preloadIndex=false",
+        "-c",
+        "core.checkStat=default",
+        "-c",
+        "core.trustctime=true",
+        "-c",
+        "core.sparseCheckout=false",
+        "-c",
+        "core.sparseCheckoutCone=false",
+        "-c",
+        "extensions.worktreeConfig=false",
+        *arguments,
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=project_root,
+            check=False,
+            capture_output=True,
+            env=_sanitized_git_environment(executable),
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise OODExternalV2IntegrityError("Git preflight could not be executed") from error
+    if completed.stderr:
+        raise OODExternalV2IntegrityError("Git preflight emitted unexpected stderr")
+    if len(completed.stdout) > 8_000_000:
+        raise OODExternalV2IntegrityError("Git preflight output exceeds its bound")
+    return completed
+
+
+def _run_git(
+    project_root: Path,
+    *arguments: str,
+    allow_empty: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    completed = _execute_bound_git(project_root, *arguments)
+    if completed.returncode != 0 and not allow_empty:
+        raise OODExternalV2IntegrityError("Git preflight command failed")
+    try:
+        stdout = completed.stdout.decode("utf-8", errors="strict")
+    except UnicodeError as error:
+        raise OODExternalV2IntegrityError("Git preflight output is not UTF-8") from error
+    return subprocess.CompletedProcess(
+        args=completed.args,
+        returncode=completed.returncode,
+        stdout=stdout,
+        stderr="",
+    )
+
+
+def _normalize_unprefixed(value: object, context: str) -> str:
+    if not isinstance(value, str):
+        raise OODExternalV2IntegrityError(f"{context} must be text")
+    normalized = value.removeprefix("sha256:")
+    if re.fullmatch(r"[0-9a-f]{64}", normalized) is None:
+        raise OODExternalV2IntegrityError(f"{context} must be a SHA-256 digest")
+    return normalized
+
+
+def _raw_source_binding_for_path(
+    root: Path,
+    relative_path: str,
+    *,
+    context: str,
+    official_md5: str | None,
+) -> RawSourceBinding:
+    path = _resolve_project_relative(root, relative_path, require_file=True)
+    try:
+        size = path.stat().st_size
+    except OSError as error:
+        raise OODExternalV2IntegrityError(f"{context} cannot be inspected") from error
+    if official_md5 is not None and _md5_file(path) != official_md5:
+        raise OODExternalV2IntegrityError(f"{context} official MD5 differs")
+    return RawSourceBinding(
+        relative_path=relative_path,
+        file_sha256=sha256_file(path),
+        size_bytes=_positive_integer(size, f"{context} size"),
+        official_md5=official_md5,
+    )
+
+
+def _md5_file(path: Path) -> str:
+    digest = hashlib.md5(usedforsecurity=False)
+    try:
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+    except OSError as error:
+        raise OODExternalV2IntegrityError("official-MD5 source cannot be read") from error
+    return "md5:" + digest.hexdigest()
+
+
+def _freeze_decision_binding(
+    root: Path,
+    relative_path: str,
+    *,
+    expected_file_sha256: str,
+) -> BoundFile:
+    path = _resolve_project_relative(root, relative_path, require_file=True)
+    observed = sha256_file(path)
+    if observed != expected_file_sha256:
+        raise OODExternalV2IntegrityError("frozen decision file hash differs")
+    raw = _read_bounded(path, _V1_RESULT_MAX_BYTES, "frozen decision file")
+    try:
+        payload: object = json.loads(
+            raw[:-1].decode("ascii") if raw.endswith(b"\n") else raw.decode("ascii"),
+            object_pairs_hook=_unique_json_object,
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OODExternalV2IntegrityError("frozen decision file is not JSON") from error
+    artifact_sha256: str | None = None
+    if isinstance(payload, Mapping) and "artifact_sha256" in payload:
+        artifact_sha256 = _digest(payload["artifact_sha256"], "decision artifact")
+    return BoundFile(
+        relative_path=relative_path,
+        file_sha256=observed,
+        artifact_sha256=artifact_sha256,
+    )
+
+
+def _bound_file_dict(value: BoundFile) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "file_sha256": value.file_sha256,
+        "relative_path": value.relative_path,
+    }
+    if value.artifact_sha256 is not None:
+        payload["artifact_sha256"] = value.artifact_sha256
+    return payload
+
+
+def _verify_public_projection_file(
+    path: Path,
+    *,
+    inventory: ExternalWaveformInventory,
+    challenge_records: int,
+    zzu_records: int,
+) -> str:
+    raw = _read_bounded(path, _CHILD_MAX_BYTES, "public inventory projection")
+    try:
+        decoded: object = json.loads(
+            raw[:-1].decode("ascii") if raw.endswith(b"\n") else b"".decode(),
+            object_pairs_hook=_unique_json_object,
+        )
+    except OODExternalV2ConfigError:
+        raise
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OODExternalV2IntegrityError(
+            "public inventory projection is not canonical JSON"
+        ) from error
+    if not isinstance(decoded, dict) or canonical_json_bytes(decoded) != raw:
+        raise OODExternalV2IntegrityError(
+            "public inventory projection is not in exact canonical form"
+        )
+    payload = cast(dict[str, object], decoded)
+    expected = {
+        "challenge_record_count",
+        "inventory",
+        "kind",
+        "projection_sha256",
+        "schema_version",
+        "zzu_candidate_patient_count",
+        "zzu_inventory_build_summary",
+    }
+    if (
+        set(payload) != expected
+        or payload["kind"] != "ecg_trust.ood_v2.inventory_publication"
+        or payload["schema_version"] != 1
+        or payload["challenge_record_count"] != challenge_records
+        or payload["inventory"] != external_inventory_public_projection(inventory)
+    ):
+        raise OODExternalV2IntegrityError("public inventory projection differs")
+    summary = _mapping(
+        payload["zzu_inventory_build_summary"],
+        "public ZZU inventory summary",
+    )
+    if (
+        summary.get("dataset") != ZZU_PEDIATRIC_DATASET
+        or summary.get("selected_record_count") != zzu_records
+    ):
+        raise OODExternalV2IntegrityError("public ZZU inventory summary differs")
+    body = dict(payload)
+    claimed = _digest(body.pop("projection_sha256"), "public projection")
+    domain = b"ecg_trust.ood_v2.inventory_publication.v1\x00"
+    observed = "sha256:" + hashlib.sha256(
+        domain + canonical_json_bytes(body)[:-1]
+    ).hexdigest()
+    if claimed != observed:
+        raise OODExternalV2IntegrityError("public projection logical hash differs")
+    return claimed
+
+
+def _decode_utf8_metadata(path: Path, *, context: str) -> str:
+    raw = _read_bounded(path, 64 * 1024 * 1024, context)
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise OODExternalV2IntegrityError(f"{context} must be UTF-8") from error
+
+
+def _official_record_lines(text: str, *, context: str) -> tuple[str, ...]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for line_number, raw in enumerate(text.splitlines(), start=1):
+        value = raw.strip()
+        if not value or value.startswith("#"):
+            continue
+        try:
+            canonical = _relative_path(value, f"{context} line {line_number}")
+        except OODExternalV2ConfigError as error:
+            raise OODExternalV2IntegrityError(
+                f"{context} contains an unsafe record reference"
+            ) from error
+        if canonical in seen:
+            raise OODExternalV2IntegrityError(f"{context} contains a duplicate record")
+        seen.add(canonical)
+        values.append(canonical)
+    if not values:
+        raise OODExternalV2IntegrityError(f"{context} contains no records")
+    return tuple(values)
+
+
+def _verify_role_metadata_rejoin(
+    inventory: ExternalWaveformInventory,
+    *,
+    dataset_roots: Mapping[str, Path],
+    raw_source_paths: Mapping[str, Path],
+    public_projection: Path | None,
+    parent: OODExternalV2ParentConfig,
+) -> None:
+    challenge = tuple(
+        record for record in inventory.records if record.dataset == CHALLENGE_2011_DATASET
+    )
+    all_text = _decode_utf8_metadata(
+        raw_source_paths["challenge_records"],
+        context="Challenge RECORDS",
+    )
+    acceptable_text = _decode_utf8_metadata(
+        raw_source_paths["challenge_records_acceptable"],
+        context="Challenge acceptable list",
+    )
+    unacceptable_text = _decode_utf8_metadata(
+        raw_source_paths["challenge_records_unacceptable"],
+        context="Challenge unacceptable list",
+    )
+    official_order = _official_record_lines(all_text, context="Challenge RECORDS")
+    try:
+        official_labels = parse_challenge_2011_quality_lists(
+            all_text,
+            acceptable_text,
+            unacceptable_text,
+            expected_record_count=parent.challenge_expected_records,
+        )
+        validate_challenge_2011_set_a_inventory(
+            build_external_inventory(challenge),
+            expected_record_count=parent.challenge_expected_records,
+            expected_quality_by_record=official_labels,
+        )
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "Challenge role/quality metadata does not rejoin to inventory"
+        ) from error
+    if (
+        tuple(record.record_ref for record in challenge) != official_order
+        or any(record.patient_key is not None for record in challenge)
+    ):
+        raise OODExternalV2IntegrityError(
+            "Challenge record order or null-patient contract differs"
+        )
+
+    attributes_text = _decode_utf8_metadata(
+        raw_source_paths["zzu_attributes_dictionary"],
+        context="ZZU AttributesDictionary",
+    )
+    try:
+        candidates = parse_zzu_pediatric_attributes_csv(
+            attributes_text,
+            site="Zhengzhou University pediatric ECG",
+            site_alias="zzu-pecg",
+            expected_record_count=14_190,
+            expected_patient_count=11_643,
+        )
+        verify_wfdb_candidate_file_set(
+            dataset_roots[ZZU_PEDIATRIC_DATASET],
+            tuple(candidate.record_ref for candidate in candidates),
+        )
+        selected, summary = select_zzu_pediatric_inventory_records(
+            dataset_roots[ZZU_PEDIATRIC_DATASET],
+            candidates,
+        )
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "ZZU candidate/header selection cannot be rederived"
+        ) from error
+    zzu = tuple(
+        record for record in inventory.records if record.dataset == ZZU_PEDIATRIC_DATASET
+    )
+    if selected != zzu:
+        raise OODExternalV2IntegrityError(
+            "ZZU all-and-only selection or patient mapping differs from inventory"
+        )
+    if public_projection is None:
+        raise OODExternalV2IntegrityError(
+            "public projection is required to bind ZZU exclusion accounting"
+        )
+    projection_raw = _read_bounded(
+        public_projection,
+        _CHILD_MAX_BYTES,
+        "public inventory projection",
+    )
+    try:
+        projection: object = json.loads(projection_raw)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OODExternalV2IntegrityError("public projection cannot be decoded") from error
+    if not isinstance(projection, dict) or (
+        projection.get("zzu_inventory_build_summary") != summary.to_dict()
+    ):
+        raise OODExternalV2IntegrityError(
+            "ZZU exclusion accounting differs from rederived headers"
+        )
+
+
+def _tensor_sha256(value: NDArray[np.generic]) -> str:
+    array = np.ascontiguousarray(value)
+    header = canonical_json_bytes(
+        {"dtype": array.dtype.str, "shape": list(array.shape)}
+    )[:-1]
+    digest = hashlib.sha256(b"ecg_trust.tensor.v1\x00" + header + array.tobytes())
+    return "sha256:" + digest.hexdigest()
+
+
+def _atomic_write_new(
+    path: Path,
+    payload: bytes,
+    *,
+    visibility_witness: Callable[[], None] | None = None,
+    publication_witness: Callable[[], None] | None = None,
+    expected_parent_identity: _OwnedDirectoryIdentity | None = None,
+    ownership_verifier: Callable[[], None] | None = None,
+) -> None:
+    if not isinstance(payload, bytes) or not payload:
+        raise OODExternalV2ExecutionError("immutable artifact payload is empty")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if expected_parent_identity is not None and (
+        _owned_directory_identity(path.parent) != expected_parent_identity
+    ):
+        raise OODExternalV2ExecutionError(
+            "immutable artifact parent is not owned by this execution"
+        )
+    if ownership_verifier is not None:
+        ownership_verifier()
+    if path.exists() or _is_indirect(path):
+        raise OODExternalV2ExecutionError("immutable artifact already exists")
+    descriptor, raw_temp = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    temporary = Path(raw_temp)
+    temporary_exists = True
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if expected_parent_identity is not None and (
+            _owned_directory_identity(path.parent) != expected_parent_identity
+        ):
+            raise OODExternalV2ExecutionError(
+                "immutable artifact parent changed before publication"
+            )
+        if ownership_verifier is not None:
+            ownership_verifier()
+        os.link(temporary, path)
+        if visibility_witness is not None:
+            visibility_witness()
+        if expected_parent_identity is not None and (
+            _owned_directory_identity(path.parent) != expected_parent_identity
+        ):
+            raise OODExternalV2ExecutionError(
+                "immutable artifact parent changed during publication"
+            )
+        if ownership_verifier is not None:
+            ownership_verifier()
+        temporary.unlink()
+        temporary_exists = False
+        _fsync_directory(path.parent)
+        if expected_parent_identity is not None and (
+            _owned_directory_identity(path.parent) != expected_parent_identity
+        ):
+            raise OODExternalV2ExecutionError(
+                "immutable artifact parent changed after durability flush"
+            )
+        if ownership_verifier is not None:
+            ownership_verifier()
+        if publication_witness is not None:
+            publication_witness()
+    except FileExistsError as error:
+        raise OODExternalV2ExecutionError("immutable artifact already exists") from error
+    except OSError as error:
+        raise OODExternalV2ExecutionError("atomic artifact commit failed") from error
+    finally:
+        if temporary_exists:
+            with suppress(OSError):
+                temporary.unlink()
+
+
+def _atomic_npz_new(
+    path: Path,
+    arrays: Mapping[str, NDArray[np.generic]],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() or _is_indirect(path):
+        raise OODExternalV2ExecutionError("immutable NPZ artifact already exists")
+    descriptor, raw_temp = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    temporary = Path(raw_temp)
+    temporary_exists = True
+    try:
+        with os.fdopen(descriptor, "w+b") as handle:
+            savez = cast(Any, np.savez)
+            savez(handle, **dict(arrays))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary, path)
+        temporary.unlink()
+        temporary_exists = False
+        _fsync_directory(path.parent)
+    except FileExistsError as error:
+        raise OODExternalV2ExecutionError("immutable NPZ artifact already exists") from error
+    except (OSError, ValueError) as error:
+        raise OODExternalV2ExecutionError("atomic NPZ commit failed") from error
+    finally:
+        if temporary_exists:
+            with suppress(OSError):
+                temporary.unlink()
+
+
+def _safe_npz_members(path: Path) -> None:
+    try:
+        archive_size = path.stat().st_size
+        if archive_size <= 0 or archive_size > _PRIVATE_NPZ_MAX_BYTES:
+            raise OODExternalV2IntegrityError("private NPZ size is invalid")
+        with zipfile.ZipFile(path, "r") as archive:
+            items = archive.infolist()
+            names = [item.filename for item in items]
+            if (
+                not items
+                or len(items) > _PRIVATE_NPZ_MEMBER_COUNT_MAX
+                or len(names) != len(set(names))
+                or len({name.casefold() for name in names}) != len(names)
+                or archive.comment
+            ):
+                raise OODExternalV2IntegrityError(
+                    "private NPZ member inventory is invalid"
+                )
+            total_uncompressed = 0
+            for item in items:
+                member = PurePosixPath(item.filename)
+                if (
+                    item.flag_bits & 0x1
+                    or item.compress_type != zipfile.ZIP_STORED
+                    or item.compress_size != item.file_size
+                    or item.file_size <= 0
+                    or item.file_size > _PRIVATE_NPZ_MEMBER_MAX_BYTES
+                    or member.is_absolute()
+                    or any(part in {"", ".", ".."} for part in member.parts)
+                    or len(member.parts) != 1
+                    or member.suffix != ".npy"
+                ):
+                    raise OODExternalV2IntegrityError(
+                        "private NPZ contains an unsafe member"
+                    )
+                total_uncompressed += item.file_size
+                if total_uncompressed > _PRIVATE_NPZ_MAX_BYTES:
+                    raise OODExternalV2IntegrityError(
+                        "private NPZ uncompressed payload exceeds its bound"
+                    )
+            # ZIP_STORED permits a tight expansion check: member bytes cannot
+            # exceed the archive by more than central-directory overhead.
+            if total_uncompressed > archive_size:
+                raise OODExternalV2IntegrityError(
+                    "private NPZ stored member sizes are inconsistent"
+                )
+    except OODExternalV2IntegrityError:
+        raise
+    except (OSError, zipfile.BadZipFile) as error:
+        raise OODExternalV2IntegrityError("private NPZ is invalid") from error
+
+
+def _verify_embedding_npz(path: Path, *, expected_records: int) -> None:
+    _safe_npz_members(path)
+    try:
+        with np.load(path, allow_pickle=False) as archive:
+            if set(archive.files) != {
+                "dataset",
+                "embedding_first",
+                "embedding_repeated",
+                "logits_first",
+                "logits_repeated",
+                "patient_key",
+                "probabilities",
+                "record_ref",
+                "score",
+            }:
+                raise OODExternalV2IntegrityError(
+                    "embedding NPZ fields differ from protocol"
+                )
+            embedding = archive["embedding_first"]
+            repeated_embedding = archive["embedding_repeated"]
+            logits = archive["logits_first"]
+            repeated_logits = archive["logits_repeated"]
+            probabilities = archive["probabilities"]
+            score = archive["score"]
+            if (
+                embedding.shape != (expected_records, 512)
+                or embedding.dtype != np.dtype(np.float32)
+                or repeated_embedding.shape != (expected_records, 512)
+                or repeated_embedding.dtype != np.dtype(np.float32)
+                or logits.shape != (expected_records, len(SUPERCLASSES))
+                or logits.dtype != np.dtype(np.float64)
+                or repeated_logits.shape
+                != (expected_records, len(SUPERCLASSES))
+                or repeated_logits.dtype != np.dtype(np.float64)
+                or probabilities.shape != (expected_records, len(SUPERCLASSES))
+                or probabilities.dtype != np.dtype(np.float64)
+                or score.shape != (expected_records,)
+                or score.dtype != np.dtype(np.float64)
+                or not np.isfinite(embedding).all()
+                or not np.isfinite(repeated_embedding).all()
+                or not np.isfinite(logits).all()
+                or not np.isfinite(repeated_logits).all()
+                or not np.isfinite(probabilities).all()
+                or np.any((probabilities < 0.0) | (probabilities > 1.0))
+                or not np.isfinite(score).all()
+            ):
+                raise OODExternalV2IntegrityError("embedding NPZ arrays are invalid")
+            for name in ("dataset", "patient_key", "record_ref"):
+                values = archive[name]
+                if values.shape != (expected_records,) or values.dtype.kind != "U":
+                    raise OODExternalV2IntegrityError(
+                        "embedding NPZ identity arrays are invalid"
+                    )
+    except OODExternalV2IntegrityError:
+        raise
+    except (OSError, ValueError, zipfile.BadZipFile) as error:
+        raise OODExternalV2IntegrityError("embedding NPZ cannot be verified") from error
+
+
+def _verify_bootstrap_npz(
+    path: Path,
+    *,
+    expected_names: tuple[str, ...],
+    expected_replicates: int,
+) -> None:
+    _safe_npz_members(path)
+    try:
+        with np.load(path, allow_pickle=False) as archive:
+            if tuple(sorted(archive.files)) != tuple(sorted(expected_names)):
+                raise OODExternalV2IntegrityError(
+                    "bootstrap NPZ endpoints differ from result"
+                )
+            for name in expected_names:
+                values = archive[name]
+                if (
+                    values.shape != (expected_replicates,)
+                    or values.dtype != np.dtype(np.float64)
+                    or not np.isfinite(values).all()
+                    or np.any((values < 0.0) | (values > 1.0))
+                ):
+                    raise OODExternalV2IntegrityError(
+                        "bootstrap NPZ replicate array is invalid"
+                    )
+    except OODExternalV2IntegrityError:
+        raise
+    except (OSError, ValueError, zipfile.BadZipFile) as error:
+        raise OODExternalV2IntegrityError("bootstrap NPZ cannot be verified") from error
+
+
+def _external_claim_bytes(
+    inputs: VerifiedExternalV2Inputs,
+    *,
+    owner_nonce: str,
+) -> bytes:
+    if _OWNER_NONCE.fullmatch(owner_nonce) is None:
+        raise OODExternalV2IntegrityError("external claim nonce is invalid")
+    return canonical_json_bytes(
+        {
+            "artifact_type": ACCESS_CLAIM_ARTIFACT_TYPE,
+            "child_contract_file_sha256": inputs.child.file_sha256,
+            "contains_embeddings_or_scores": False,
+            "contains_record_or_patient_identifiers": False,
+            "inventory_sha256": inputs.inventory.inventory_sha256,
+            "owner_nonce": owner_nonce,
+            "parent_config_file_sha256": inputs.parent.file_sha256,
+            "protocol_id": PROTOCOL_ID,
+            "schema_version": 1,
+            "state": "EXTERNAL_ACCESS_CLAIMED",
+        }
+    )
+
+
+def _external_marker_bytes(
+    inputs: VerifiedExternalV2Inputs,
+    *,
+    owner_nonce: str,
+    claim_file_sha256: str,
+) -> bytes:
+    _digest(claim_file_sha256, "external claim file")
+    if _OWNER_NONCE.fullmatch(owner_nonce) is None:
+        raise OODExternalV2IntegrityError("external marker nonce is invalid")
+    return canonical_json_bytes(
+        {
+            "artifact_type": ACCESS_MARKER_ARTIFACT_TYPE,
+            "child_contract_file_sha256": inputs.child.file_sha256,
+            "contains_embeddings_or_scores": False,
+            "contains_record_or_patient_identifiers": False,
+            "external_claim_file_sha256": claim_file_sha256,
+            "inventory_sha256": inputs.inventory.inventory_sha256,
+            "owner_nonce": owner_nonce,
+            "parent_config_file_sha256": inputs.parent.file_sha256,
+            "protocol_id": PROTOCOL_ID,
+            "schema_version": 1,
+            "state": "EXTERNAL_ACCESS_ARMED",
+        }
+    )
+
+
+def _verify_staged_members_before_manifest(
+    staging: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    expected_result: OODV2Result,
+    expected_claim_bytes: bytes,
+    model: ResNet1D,
+    normalization: NormalizationStats,
+    runtime: DeterministicCUDARuntime,
+) -> None:
+    result_path = staging / OOD_V2_RESULT_FILENAME
+    try:
+        loaded_result = load_ood_v2_result_bytes(
+            _read_bounded(result_path, _V1_RESULT_MAX_BYTES, "staged aggregate result")
+        )
+    except Exception as error:
+        raise OODExternalV2IntegrityError("staged aggregate result is invalid") from error
+    if loaded_result != expected_result:
+        raise OODExternalV2IntegrityError("staged aggregate result changed")
+    inventory = load_external_inventory(staging / "private" / "external-inventory.json")
+    if inventory != inputs.inventory:
+        raise OODExternalV2IntegrityError("staged private inventory changed")
+    private_rows = _load_private_record_evidence(
+        staging / "private" / "record-evidence.json",
+        inputs=inputs,
+    )
+    quality_pass_rows = tuple(
+        row for row in private_rows if row.quality_status == QualityStatus.PASS.value
+    )
+    _verify_raw_to_canonical_replay(
+        staging / "private",
+        inputs=inputs,
+        expected_records=private_rows,
+    )
+    replayed_embeddings = _replay_quality_pass_embeddings(
+        staging / "private",
+        inputs=inputs,
+        expected_records=private_rows,
+        model=model,
+        normalization=normalization,
+        runtime=runtime,
+    )
+    _verify_embedding_bundle_semantics(
+        staging / "private",
+        inputs=inputs,
+        quality_pass_rows=quality_pass_rows,
+        frozen_model=model,
+        frozen_runtime=runtime,
+        replayed_embeddings=replayed_embeddings,
+    )
+    endpoint_names = tuple(
+        sorted(
+            [endpoint.endpoint_key for endpoint in expected_result.external_cohorts]
+            + [
+                endpoint.endpoint_key
+                for endpoint in expected_result.technical_quality_endpoints
+            ]
+        )
+    )
+    _verify_bootstrap_bundle_semantics(
+        staging / "private",
+        inputs=inputs,
+        result=loaded_result,
+        private_rows=private_rows,
+        endpoint_names=endpoint_names,
+    )
+    claim_path = _resolve_project_relative(
+        inputs.project_root,
+        inputs.parent.claim_path,
+        require_file=True,
+    )
+    if _read_bounded(claim_path, _ACCESS_RECORD_MAX_BYTES, "external claim") != (
+        expected_claim_bytes
+    ):
+        raise OODExternalV2IntegrityError("external claim changed before manifest")
+    try:
+        claim_payload: object = json.loads(expected_claim_bytes)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OODExternalV2IntegrityError("external claim cannot be decoded") from error
+    if not isinstance(claim_payload, dict) or not isinstance(
+        claim_payload.get("owner_nonce"),
+        str,
+    ):
+        raise OODExternalV2IntegrityError("external claim nonce is unavailable")
+    expected_marker = _external_marker_bytes(
+        inputs,
+        owner_nonce=cast(str, claim_payload["owner_nonce"]),
+        claim_file_sha256=sha256_bytes(expected_claim_bytes),
+    )
+    if _read_bounded(
+        staging / ACCESS_MARKER_FILENAME,
+        _ACCESS_RECORD_MAX_BYTES,
+        "external marker",
+    ) != expected_marker:
+        raise OODExternalV2IntegrityError("external marker/claim binding differs")
+
+
+def _verify_canonical_signal_sidecar(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    expected_records: tuple[_PrivateRecordEvidence, ...],
+) -> tuple[dict[str, object], ...]:
+    sidecar = _load_private_sidecar(
+        private.parent / PurePosixPath(CANONICAL_SIGNAL_SIDECAR_PATH),
+        artifact_type=PRIVATE_CANONICAL_SIGNAL_ARTIFACT_TYPE,
+    )
+    fields = {
+        "artifact_sha256",
+        "artifact_type",
+        "canonical_dtype",
+        "canonical_shape_per_record",
+        "inventory_record_count",
+        "inventory_sha256",
+        "npz_file_sha256",
+        "protocol_id",
+        "schema_version",
+        "shard_count",
+        "shard_inventory_records",
+        "shards",
+        "successful_adapter_records",
+    }
+    raw_descriptors = sidecar.get("shards")
+    successful_records = sum(
+        row.adapter_provenance_sha256 is not None for row in expected_records
+    )
+    if (
+        set(sidecar) != fields
+        or sidecar.get("canonical_dtype") != "float32"
+        or sidecar.get("canonical_shape_per_record") != [len(LEADS), TARGET_SAMPLES]
+        or sidecar.get("inventory_record_count") != len(expected_records)
+        or sidecar.get("inventory_sha256") != inputs.inventory.inventory_sha256
+        or sidecar.get("shard_count") != CANONICAL_SIGNAL_SHARD_COUNT
+        or sidecar.get("shard_inventory_records")
+        != CANONICAL_SIGNAL_SHARD_RECORDS
+        or sidecar.get("successful_adapter_records") != successful_records
+        or not isinstance(raw_descriptors, list)
+        or len(raw_descriptors) != CANONICAL_SIGNAL_SHARD_COUNT
+    ):
+        raise OODExternalV2IntegrityError("canonical signal sidecar differs")
+    npz_path = private.parent / PurePosixPath(CANONICAL_SIGNAL_NPZ_PATH)
+    if sidecar.get("npz_file_sha256") != sha256_file(npz_path):
+        raise OODExternalV2IntegrityError("canonical signal NPZ hash differs")
+    _safe_npz_members(npz_path)
+    expected_names = {
+        _canonical_signal_array_name(kind, shard_index)
+        for shard_index in range(CANONICAL_SIGNAL_SHARD_COUNT)
+        for kind in (
+            "canonical_signal_sha256",
+            "dataset",
+            "inventory_index",
+            "record_ref",
+            "signal",
+        )
+    }
+    try:
+        with zipfile.ZipFile(npz_path, "r") as zip_archive:
+            for shard_index in range(CANONICAL_SIGNAL_SHARD_COUNT):
+                info = zip_archive.getinfo(
+                    _canonical_signal_array_name("signal", shard_index) + ".npy"
+                )
+                if info.file_size > CANONICAL_SIGNAL_MEMBER_MAX_BYTES:
+                    raise OODExternalV2IntegrityError(
+                        "canonical signal shard exceeds its frozen member bound"
+                    )
+        with np.load(npz_path, allow_pickle=False) as archive:
+            if set(archive.files) != expected_names:
+                raise OODExternalV2IntegrityError(
+                    "canonical signal NPZ members differ from the frozen layout"
+                )
+    except OODExternalV2IntegrityError:
+        raise
+    except (KeyError, OSError, ValueError, zipfile.BadZipFile) as error:
+        raise OODExternalV2IntegrityError(
+            "canonical signal NPZ cannot be inspected"
+        ) from error
+    return tuple(cast(dict[str, object], item) for item in raw_descriptors)
+
+
+def _load_canonical_signal_shard(
+    private: Path,
+    *,
+    shard_index: int,
+    descriptor: dict[str, object],
+    expected_records: tuple[_PrivateRecordEvidence, ...],
+) -> dict[int, Float32Array]:
+    descriptor_fields = {
+        "adapter_success_count",
+        "canonical_signal_sha256_tensor_sha256",
+        "dataset_tensor_sha256",
+        "inventory_index_tensor_sha256",
+        "record_ref_tensor_sha256",
+        "shard_index",
+        "signal_tensor_sha256",
+        "start_inventory_index",
+        "stop_inventory_index_exclusive",
+    }
+    start = shard_index * CANONICAL_SIGNAL_SHARD_RECORDS
+    stop = min(start + CANONICAL_SIGNAL_SHARD_RECORDS, len(expected_records))
+    expected_indices = np.asarray(
+        [
+            index
+            for index in range(start, stop)
+            if expected_records[index].adapter_provenance_sha256 is not None
+        ],
+        dtype=np.int64,
+    )
+    if (
+        set(descriptor) != descriptor_fields
+        or descriptor.get("shard_index") != shard_index
+        or descriptor.get("start_inventory_index") != start
+        or descriptor.get("stop_inventory_index_exclusive") != stop
+        or descriptor.get("adapter_success_count") != len(expected_indices)
+    ):
+        raise OODExternalV2IntegrityError("canonical signal descriptor differs")
+    npz_path = private.parent / PurePosixPath(CANONICAL_SIGNAL_NPZ_PATH)
+    try:
+        with np.load(npz_path, allow_pickle=False) as archive:
+            indices = np.asarray(
+                archive[_canonical_signal_array_name("inventory_index", shard_index)]
+            )
+            datasets = np.asarray(
+                archive[_canonical_signal_array_name("dataset", shard_index)]
+            )
+            record_refs = np.asarray(
+                archive[_canonical_signal_array_name("record_ref", shard_index)]
+            )
+            signal_hashes = np.asarray(
+                archive[
+                    _canonical_signal_array_name(
+                        "canonical_signal_sha256",
+                        shard_index,
+                    )
+                ]
+            )
+            signals = np.asarray(
+                archive[_canonical_signal_array_name("signal", shard_index)]
+            )
+    except (KeyError, OSError, ValueError, zipfile.BadZipFile) as error:
+        raise OODExternalV2IntegrityError(
+            "canonical signal shard cannot be loaded"
+        ) from error
+    count = len(expected_indices)
+    if (
+        indices.shape != (count,)
+        or indices.dtype != np.dtype(np.int64)
+        or not np.array_equal(indices, expected_indices)
+        or datasets.shape != (count,)
+        or datasets.dtype.kind != "U"
+        or record_refs.shape != (count,)
+        or record_refs.dtype.kind != "U"
+        or signal_hashes.shape != (count,)
+        or signal_hashes.dtype.kind != "U"
+        or signals.shape != (count, len(LEADS), TARGET_SAMPLES)
+        or signals.dtype != np.dtype(np.float32)
+        or not np.isfinite(signals).all()
+    ):
+        raise OODExternalV2IntegrityError("canonical signal shard arrays are invalid")
+    observed_datasets = tuple(str(value) for value in datasets.tolist())
+    observed_refs = tuple(str(value) for value in record_refs.tolist())
+    observed_hashes = tuple(str(value) for value in signal_hashes.tolist())
+    expected_datasets = tuple(expected_records[int(index)].dataset for index in indices)
+    expected_refs = tuple(expected_records[int(index)].record_ref for index in indices)
+    expected_hashes = tuple(
+        cast(str, expected_records[int(index)].canonical_signal_sha256)
+        for index in indices
+    )
+    if (
+        observed_datasets != expected_datasets
+        or observed_refs != expected_refs
+        or observed_hashes != expected_hashes
+        or descriptor.get("inventory_index_tensor_sha256") != _tensor_sha256(indices)
+        or descriptor.get("dataset_tensor_sha256") != _tensor_sha256(datasets)
+        or descriptor.get("record_ref_tensor_sha256") != _tensor_sha256(record_refs)
+        or descriptor.get("canonical_signal_sha256_tensor_sha256")
+        != _tensor_sha256(signal_hashes)
+        or descriptor.get("signal_tensor_sha256") != _tensor_sha256(signals)
+    ):
+        raise OODExternalV2IntegrityError(
+            "canonical signal shard identities or tensor hashes differ"
+        )
+    result: dict[int, Float32Array] = {}
+    for local_index, inventory_index in enumerate(indices.tolist()):
+        signal = np.ascontiguousarray(signals[local_index], dtype=np.float32)
+        expected_hash = expected_records[int(inventory_index)].canonical_signal_sha256
+        if _tensor_sha256(signal) != expected_hash:
+            raise OODExternalV2IntegrityError("canonical per-record signal hash differs")
+        result[int(inventory_index)] = signal
+    return result
+
+
+def _verify_raw_to_canonical_replay(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    expected_records: tuple[_PrivateRecordEvidence, ...],
+) -> None:
+    """Re-run every bound adapter and bind raw bytes to stored canonical signals."""
+
+    descriptors = _verify_canonical_signal_sidecar(
+        private,
+        inputs=inputs,
+        expected_records=expected_records,
+    )
+    if any(row.adapter_provenance_sha256 is None for row in expected_records):
+        raise OODExternalV2IntegrityError(
+            "a completed bundle contains an adapter-failure row"
+        )
+    replayed = 0
+    for shard_index, descriptor in enumerate(descriptors):
+        stored = _load_canonical_signal_shard(
+            private,
+            shard_index=shard_index,
+            descriptor=descriptor,
+            expected_records=expected_records,
+        )
+        for index, stored_signal in stored.items():
+            record = inputs.inventory.records[index]
+            evidence = expected_records[index]
+            base = resolve_inventory_record_base(
+                inputs.dataset_roots[record.dataset],
+                record,
+            )
+            adapted = _adapter_for_record(record, base)
+            _verify_adapter_against_inventory(adapted, record)
+            if (
+                evidence.adapter_provenance_sha256 != adapted.provenance_sha256
+                or evidence.canonical_signal_sha256 != _tensor_sha256(adapted.signal_mv)
+                or not np.array_equal(stored_signal, adapted.signal_mv)
+            ):
+                raise OODExternalV2IntegrityError(
+                    "raw-source adapter replay differs from stored canonical evidence"
+                )
+            replayed += 1
+    if replayed != len(inputs.inventory.records):
+        raise OODExternalV2IntegrityError(
+            "raw-source adapter replay did not cover every selected record"
+        )
+    _verify_raw_source_files_unchanged(inputs)
+
+
+def _verify_raw_source_files_unchanged(inputs: VerifiedExternalV2Inputs) -> None:
+    for name in REQUIRED_RAW_SOURCE_BINDING_KEYS:
+        path = inputs.raw_source_paths[name]
+        binding = inputs.child.raw_source_bindings[name]
+        try:
+            size = path.stat().st_size
+        except OSError as error:
+            raise OODExternalV2IntegrityError(
+                "raw-source provenance cannot be reinspected"
+            ) from error
+        if (
+            size != binding.size_bytes
+            or sha256_file(path) != binding.file_sha256
+            or (
+                binding.official_md5 is not None
+                and _md5_file(path) != binding.official_md5
+            )
+        ):
+            raise OODExternalV2IntegrityError(
+                "raw-source provenance changed during canonical replay"
+            )
+
+
+def _replay_quality_pass_embeddings(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    expected_records: tuple[_PrivateRecordEvidence, ...],
+    model: ResNet1D,
+    normalization: NormalizationStats,
+    runtime: DeterministicCUDARuntime,
+) -> tuple[Float32Array, Float32Array]:
+    """Replay the exact normalized full backbone twice from stored signals."""
+
+    pass_indices = tuple(
+        index
+        for index, row in enumerate(expected_records)
+        if row.quality_status == QualityStatus.PASS.value
+    )
+    if not pass_indices:
+        empty = np.empty((0, 512), dtype=np.float32)
+        return empty, empty.copy()
+    descriptors = _verify_canonical_signal_sidecar(
+        private,
+        inputs=inputs,
+        expected_records=expected_records,
+    )
+    signals = np.empty(
+        (len(pass_indices), len(LEADS), TARGET_SAMPLES),
+        dtype=np.float32,
+    )
+    output_positions = {
+        inventory_index: index
+        for index, inventory_index in enumerate(pass_indices)
+    }
+    seen: set[int] = set()
+    for shard_index, descriptor in enumerate(descriptors):
+        shard = _load_canonical_signal_shard(
+            private,
+            shard_index=shard_index,
+            descriptor=descriptor,
+            expected_records=expected_records,
+        )
+        for inventory_index, signal in shard.items():
+            output_index = output_positions.get(inventory_index)
+            if output_index is not None:
+                signals[output_index] = signal
+                seen.add(inventory_index)
+    if seen != set(pass_indices):
+        raise OODExternalV2IntegrityError(
+            "quality-PASS canonical signals are incomplete for full-model replay"
+        )
+    state_before = model_state_sha256(model)
+    replay = extract_embeddings_twice(
+        model,
+        _NormalizedSignalDataset(signals, normalization),
+        runtime=runtime,
+    )
+    state_after = model_state_sha256(model)
+    if state_before != state_after or not np.array_equal(replay.first, replay.repeated):
+        raise OODExternalV2IntegrityError(
+            "full-model CUDA embedding replay is nondeterministic or mutated the model"
+        )
+    return (
+        np.ascontiguousarray(replay.first, dtype=np.float32),
+        np.ascontiguousarray(replay.repeated, dtype=np.float32),
+    )
+
+
+def _verify_quality_audit_shards(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    expected_records: tuple[_PrivateRecordEvidence, ...],
+) -> None:
+    if len(expected_records) != QUALITY_AUDIT_EXPECTED_RECORDS:
+        raise OODExternalV2IntegrityError(
+            "quality audit record count differs from the frozen layout"
+        )
+    signal_descriptors = _verify_canonical_signal_sidecar(
+        private,
+        inputs=inputs,
+        expected_records=expected_records,
+    )
+    index = _load_private_sidecar(
+        private.parent / PurePosixPath(QUALITY_AUDIT_INDEX_PATH),
+        artifact_type=PRIVATE_QUALITY_AUDIT_INDEX_ARTIFACT_TYPE,
+    )
+    expected_index_fields = {
+        "artifact_sha256",
+        "artifact_type",
+        "inventory_sha256",
+        "protocol_id",
+        "record_count",
+        "schema_version",
+        "shard_count",
+        "shard_max_bytes",
+        "shard_records",
+        "shards",
+    }
+    descriptors = index.get("shards")
+    if (
+        set(index) != expected_index_fields
+        or index.get("inventory_sha256") != inputs.inventory.inventory_sha256
+        or index.get("record_count") != len(expected_records)
+        or index.get("shard_count") != QUALITY_AUDIT_SHARD_COUNT
+        or index.get("shard_max_bytes") != QUALITY_AUDIT_SHARD_MAX_BYTES
+        or index.get("shard_records") != QUALITY_AUDIT_SHARD_RECORDS
+        or not isinstance(descriptors, list)
+        or len(descriptors) != QUALITY_AUDIT_SHARD_COUNT
+    ):
+        raise OODExternalV2IntegrityError("quality audit index differs")
+    descriptor_fields = {
+        "artifact_sha256",
+        "file_sha256",
+        "record_count",
+        "relative_path",
+        "size_bytes",
+        "start_inventory_index",
+        "stop_inventory_index_exclusive",
+    }
+    for shard_index, (descriptor, relative_path) in enumerate(
+        zip(descriptors, QUALITY_AUDIT_SHARD_PATHS, strict=True)
+    ):
+        start = shard_index * QUALITY_AUDIT_SHARD_RECORDS
+        stop = min(start + QUALITY_AUDIT_SHARD_RECORDS, len(expected_records))
+        canonical_signals = _load_canonical_signal_shard(
+            private,
+            shard_index=shard_index,
+            descriptor=signal_descriptors[shard_index],
+            expected_records=expected_records,
+        )
+        if not isinstance(descriptor, dict) or set(descriptor) != descriptor_fields:
+            raise OODExternalV2IntegrityError("quality audit descriptor fields differ")
+        if (
+            descriptor.get("relative_path") != relative_path
+            or descriptor.get("record_count") != stop - start
+            or descriptor.get("start_inventory_index") != start
+            or descriptor.get("stop_inventory_index_exclusive") != stop
+        ):
+            raise OODExternalV2IntegrityError("quality audit descriptor range differs")
+        file_sha256 = _digest(
+            descriptor.get("file_sha256"),
+            "quality audit shard file",
+        )
+        artifact_sha256 = _digest(
+            descriptor.get("artifact_sha256"),
+            "quality audit shard artifact",
+        )
+        size_bytes = _positive_integer(
+            descriptor.get("size_bytes"),
+            "quality audit shard size",
+        )
+        if size_bytes > QUALITY_AUDIT_SHARD_MAX_BYTES:
+            raise OODExternalV2IntegrityError("quality audit shard size exceeds limit")
+        shard_path = private.parent / PurePosixPath(relative_path)
+        raw = _read_bounded(
+            shard_path,
+            QUALITY_AUDIT_SHARD_MAX_BYTES,
+            "quality audit shard",
+        )
+        if len(raw) != size_bytes or sha256_bytes(raw) != file_sha256:
+            raise OODExternalV2IntegrityError("quality audit shard bytes differ")
+        try:
+            decoded: object = json.loads(
+                raw[:-1].decode("ascii") if raw.endswith(b"\n") else "",
+                object_pairs_hook=_unique_json_object,
+            )
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise OODExternalV2IntegrityError(
+                "quality audit shard cannot be decoded"
+            ) from error
+        if not isinstance(decoded, dict) or canonical_json_bytes(decoded) != raw:
+            raise OODExternalV2IntegrityError("quality audit shard is not canonical")
+        shard = cast(dict[str, object], decoded)
+        shard_fields = {
+            "artifact_sha256",
+            "artifact_type",
+            "inventory_sha256",
+            "protocol_id",
+            "record_count",
+            "records",
+            "schema_version",
+            "shard_index",
+            "start_inventory_index",
+            "stop_inventory_index_exclusive",
+        }
+        shard_body = {key: value for key, value in shard.items() if key != "artifact_sha256"}
+        rows = shard.get("records")
+        if (
+            set(shard) != shard_fields
+            or shard.get("artifact_type") != PRIVATE_QUALITY_AUDIT_ARTIFACT_TYPE
+            or shard.get("protocol_id") != PROTOCOL_ID
+            or shard.get("schema_version") != 1
+            or shard.get("inventory_sha256") != inputs.inventory.inventory_sha256
+            or shard.get("artifact_sha256") != artifact_sha256
+            or canonical_sha256(shard_body) != artifact_sha256
+            or shard.get("shard_index") != shard_index
+            or shard.get("start_inventory_index") != start
+            or shard.get("stop_inventory_index_exclusive") != stop
+            or shard.get("record_count") != stop - start
+            or not isinstance(rows, list)
+            or len(rows) != stop - start
+        ):
+            raise OODExternalV2IntegrityError("quality audit shard lineage differs")
+        row_fields = {
+            "canonical_signal_sha256",
+            "dataset",
+            "inventory_index",
+            "quality_report",
+            "quality_report_sha256",
+            "record_ref",
+        }
+        for offset, raw_row in enumerate(rows):
+            evidence = expected_records[start + offset]
+            inventory_index = start + offset
+            if not isinstance(raw_row, dict) or set(raw_row) != row_fields:
+                raise OODExternalV2IntegrityError("quality audit row fields differ")
+            report = raw_row.get("quality_report")
+            report_sha256 = raw_row.get("quality_report_sha256")
+            if (
+                raw_row.get("inventory_index") != start + offset
+                or raw_row.get("dataset") != evidence.dataset
+                or raw_row.get("record_ref") != evidence.record_ref
+                or raw_row.get("canonical_signal_sha256")
+                != evidence.canonical_signal_sha256
+                or report_sha256 != evidence.quality_report_sha256
+                or (report is None) is not (report_sha256 is None)
+            ):
+                raise OODExternalV2IntegrityError("quality audit row alignment differs")
+            if report is None:
+                if inventory_index in canonical_signals:
+                    raise OODExternalV2IntegrityError(
+                        "adapter-failure audit row unexpectedly has a canonical signal"
+                    )
+                _verify_private_quality_report_semantics(evidence)
+                continue
+            if not isinstance(report, dict) or not all(
+                isinstance(key, str) for key in report
+            ):
+                raise OODExternalV2IntegrityError("quality audit report is invalid")
+            if _quality_report_sha256(report) != report_sha256:
+                raise OODExternalV2IntegrityError("quality audit report hash differs")
+            signal = canonical_signals.get(inventory_index)
+            if signal is None:
+                raise OODExternalV2IntegrityError(
+                    "successful adapter audit row lacks its canonical signal"
+                )
+            recomputed_report = _quality_report_dict(
+                assess_signal_quality(
+                    signal,
+                    SignalMetadata.canonical(DEFAULT_SIGNAL_QUALITY_CONFIG),
+                )
+            )
+            if recomputed_report != report:
+                raise OODExternalV2IntegrityError(
+                    "quality report differs from exact canonical-signal reassessment"
+                )
+            _verify_private_quality_report_semantics(
+                replace(
+                    evidence,
+                    quality_report=cast(dict[str, object], report),
+                )
+            )
+        if set(canonical_signals) != {
+            start + offset
+            for offset, raw_row in enumerate(rows)
+            if isinstance(raw_row, dict) and raw_row.get("quality_report") is not None
+        }:
+            raise OODExternalV2IntegrityError(
+                "canonical signal shard coverage differs from quality reports"
+            )
+
+
+def _load_private_record_evidence(
+    path: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+) -> tuple[_PrivateRecordEvidence, ...]:
+    raw = _read_bounded(path, _PRIVATE_JSON_MAX_BYTES, "private record evidence")
+    try:
+        decoded: object = json.loads(
+            raw[:-1].decode("ascii") if raw.endswith(b"\n") else b"".decode(),
+            object_pairs_hook=_unique_json_object,
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OODExternalV2IntegrityError("private record evidence is invalid") from error
+    if not isinstance(decoded, dict) or canonical_json_bytes(decoded) != raw:
+        raise OODExternalV2IntegrityError("private record evidence is not canonical")
+    payload = cast(dict[str, object], decoded)
+    claimed = _digest(payload.get("artifact_sha256"), "private record evidence")
+    body = {key: value for key, value in payload.items() if key != "artifact_sha256"}
+    if claimed != canonical_sha256(body):
+        raise OODExternalV2IntegrityError("private record evidence self-hash differs")
+    if (
+        payload.get("artifact_type") != PRIVATE_EVIDENCE_ARTIFACT_TYPE
+        or payload.get("protocol_id") != PROTOCOL_ID
+        or payload.get("record_count") != len(inputs.inventory.records)
+        or payload.get("inventory_sha256") != inputs.inventory.inventory_sha256
+        or payload.get("parent_config_file_sha256") != inputs.parent.file_sha256
+        or payload.get("child_contract_file_sha256") != inputs.child.file_sha256
+        or payload.get("threshold") != inputs.parent.threshold
+        or payload.get("decision_bindings")
+        != {
+            "demo_policy_file_sha256": inputs.routing.demo_policy_file_sha256,
+            "source_calibration_file_sha256": (
+                inputs.routing.source_calibration_file_sha256
+            ),
+        }
+    ):
+        raise OODExternalV2IntegrityError("private record evidence lineage differs")
+    raw_records = payload.get("records")
+    if not isinstance(raw_records, list) or len(raw_records) != len(inputs.inventory.records):
+        raise OODExternalV2IntegrityError("private record evidence rows are incomplete")
+    records: list[_PrivateRecordEvidence] = []
+    expected_fields = set(
+        _private_record_index_dict(
+            _PrivateRecordEvidence(
+            dataset="x",
+            record_ref="x",
+            patient_key=None,
+            challenge_quality_label=None,
+            adapter_provenance_sha256=None,
+            adapter_source_sample_count=None,
+            adapter_raw_physical_units=None,
+            canonical_signal_sha256=None,
+            quality_report_sha256=None,
+            quality_report=None,
+            quality_status="x",
+            quality_reason_codes=(),
+            route="x",
+            distribution_score=None,
+            entropy=None,
+            entropy_accepted=None,
+            conformal_decisions=None,
+            all_conformal_decisions_singleton=None,
+            )
+        )
+    )
+    for raw_record in raw_records:
+        if not isinstance(raw_record, dict) or set(raw_record) != expected_fields:
+            raise OODExternalV2IntegrityError("private record evidence row differs")
+        if raw_record["quality_report"] is not None:
+            raise OODExternalV2IntegrityError(
+                "record evidence must store only the sharded quality-report hash"
+            )
+        reasons = raw_record["quality_reason_codes"]
+        if not isinstance(reasons, list) or not all(isinstance(item, str) for item in reasons):
+            raise OODExternalV2IntegrityError("private quality reasons are invalid")
+        source_sample_count = raw_record["adapter_source_sample_count"]
+        if source_sample_count is not None and (
+            type(source_sample_count) is not int or source_sample_count <= 0
+        ):
+            raise OODExternalV2IntegrityError(
+                "private adapter source sample count is invalid"
+            )
+        raw_physical_units = raw_record["adapter_raw_physical_units"]
+        if raw_physical_units is not None and (
+            not isinstance(raw_physical_units, list)
+            or len(raw_physical_units) != len(LEADS)
+            or not all(isinstance(item, str) for item in raw_physical_units)
+        ):
+            raise OODExternalV2IntegrityError(
+                "private adapter raw physical units are invalid"
+            )
+        canonical_signal_sha256 = raw_record["canonical_signal_sha256"]
+        if canonical_signal_sha256 is not None:
+            canonical_signal_sha256 = _digest(
+                canonical_signal_sha256,
+                "private canonical signal",
+            )
+        quality_report_sha256 = raw_record["quality_report_sha256"]
+        if quality_report_sha256 is not None:
+            quality_report_sha256 = _digest(
+                quality_report_sha256,
+                "private quality report",
+            )
+        conformal_decisions = raw_record["conformal_decisions"]
+        if conformal_decisions is not None and (
+            not isinstance(conformal_decisions, list)
+            or len(conformal_decisions) != len(SUPERCLASSES)
+            or any(
+                item not in {decision.value for decision in BinaryDecision}
+                for item in conformal_decisions
+            )
+        ):
+            raise OODExternalV2IntegrityError(
+                "private conformal decisions are invalid"
+            )
+        records.append(
+            _PrivateRecordEvidence(
+                dataset=cast(str, raw_record["dataset"]),
+                record_ref=cast(str, raw_record["record_ref"]),
+                patient_key=cast(str | None, raw_record["patient_key"]),
+                challenge_quality_label=cast(
+                    str | None,
+                    raw_record["challenge_quality_label"],
+                ),
+                adapter_provenance_sha256=cast(
+                    str | None,
+                    raw_record["adapter_provenance_sha256"],
+                ),
+                adapter_source_sample_count=source_sample_count,
+                adapter_raw_physical_units=(
+                    None
+                    if raw_physical_units is None
+                    else tuple(cast(list[str], raw_physical_units))
+                ),
+                canonical_signal_sha256=cast(
+                    str | None,
+                    canonical_signal_sha256,
+                ),
+                quality_report_sha256=cast(
+                    str | None,
+                    quality_report_sha256,
+                ),
+                quality_report=None,
+                quality_status=cast(str, raw_record["quality_status"]),
+                quality_reason_codes=tuple(cast(list[str], reasons)),
+                route=cast(str, raw_record["route"]),
+                distribution_score=cast(
+                    float | None,
+                    raw_record["distribution_score"],
+                ),
+                entropy=cast(float | None, raw_record["entropy"]),
+                entropy_accepted=cast(bool | None, raw_record["entropy_accepted"]),
+                conformal_decisions=(
+                    None
+                    if conformal_decisions is None
+                    else tuple(cast(list[str], conformal_decisions))
+                ),
+                all_conformal_decisions_singleton=cast(
+                    bool | None,
+                    raw_record["all_conformal_decisions_singleton"],
+                ),
+            )
+        )
+    result = tuple(records)
+    if any(row.adapter_provenance_sha256 is None for row in result):
+        raise OODExternalV2IntegrityError(
+            "completed evidence cannot contain an adapter-contract failure row"
+        )
+    _verify_quality_audit_shards(
+        path.parent,
+        inputs=inputs,
+        expected_records=result,
+    )
+    for evidence, inventory_record in zip(
+        result,
+        inputs.inventory.records,
+        strict=True,
+    ):
+        if (
+            evidence.dataset != inventory_record.dataset
+            or evidence.record_ref != inventory_record.record_ref
+            or evidence.patient_key != inventory_record.patient_key
+            or evidence.challenge_quality_label
+            != inventory_record.challenge_quality_label
+        ):
+            raise OODExternalV2IntegrityError(
+                "private record row order or inventory identity differs"
+            )
+        _verify_private_route_semantics(
+            evidence,
+            threshold=inputs.parent.threshold,
+        )
+        _verify_private_adapter_semantics(evidence, inventory_record)
+    observed_route_counts = Counter(item.route for item in result)
+    observed_routes = {
+        route: observed_route_counts.get(route, 0) for route in FROZEN_ROUTE_ORDER
+    }
+    if payload.get("route_counts") != observed_routes:
+        raise OODExternalV2IntegrityError("private route counts differ from rows")
+    return result
+
+
+def _verify_private_route_semantics(
+    evidence: _PrivateRecordEvidence,
+    *,
+    threshold: float,
+) -> None:
+    allowed_quality = {status.value for status in QualityStatus}
+    if evidence.quality_status not in allowed_quality:
+        raise OODExternalV2IntegrityError("private quality status is invalid")
+    if not all(isinstance(item, str) and item for item in evidence.quality_reason_codes):
+        raise OODExternalV2IntegrityError("private quality reason is invalid")
+    if evidence.quality_status == QualityStatus.PASS.value:
+        if (
+            evidence.distribution_score is None
+            or type(evidence.distribution_score) is not float
+            or not math.isfinite(evidence.distribution_score)
+            or evidence.entropy is None
+            or type(evidence.entropy) is not float
+            or not math.isfinite(evidence.entropy)
+            or type(evidence.entropy_accepted) is not bool
+            or evidence.conformal_decisions is None
+            or len(evidence.conformal_decisions) != len(SUPERCLASSES)
+            or type(evidence.all_conformal_decisions_singleton) is not bool
+        ):
+            raise OODExternalV2IntegrityError(
+                "quality-PASS row lacks complete routing evidence"
+            )
+        expected_route = (
+            "UNSUPPORTED_INPUT"
+            if evidence.distribution_score > threshold
+            else (
+                "PREDICTION_ALLOWED"
+                if evidence.entropy_accepted
+                and evidence.all_conformal_decisions_singleton
+                else "ABSTAIN"
+            )
+        )
+        if evidence.route != expected_route:
+            raise OODExternalV2IntegrityError("private strict routing decision differs")
+        expected_singleton = all(
+            decision != BinaryDecision.UNCERTAIN.value
+            for decision in evidence.conformal_decisions
+        )
+        if evidence.all_conformal_decisions_singleton is not expected_singleton:
+            raise OODExternalV2IntegrityError(
+                "private conformal singleton summary differs from five decisions"
+            )
+    else:
+        expected_route = (
+            "INVALID_INPUT"
+            if evidence.quality_status == QualityStatus.INVALID.value
+            else "REACQUIRE"
+        )
+        if evidence.route != expected_route or any(
+            value is not None
+            for value in (
+                evidence.distribution_score,
+                evidence.entropy,
+                evidence.entropy_accepted,
+                evidence.conformal_decisions,
+                evidence.all_conformal_decisions_singleton,
+            )
+        ):
+            raise OODExternalV2IntegrityError("non-PASS row has invalid routing evidence")
+
+
+def _verify_private_adapter_semantics(
+    evidence: _PrivateRecordEvidence,
+    inventory_record: ExternalInventoryRecord,
+) -> None:
+    """Reconstruct the exact adapter provenance from inventory-bound metadata."""
+
+    if evidence.adapter_provenance_sha256 is None:
+        raise OODExternalV2IntegrityError(
+            "completed evidence cannot encode an adapter-contract failure"
+        )
+    _digest(evidence.adapter_provenance_sha256, "private adapter provenance")
+    source_sample_count = evidence.adapter_source_sample_count
+    raw_physical_units = evidence.adapter_raw_physical_units
+    if source_sample_count is None or raw_physical_units is None:
+        raise OODExternalV2IntegrityError(
+            "private adapter provenance lacks source sample or unit evidence"
+        )
+    if (
+        evidence.canonical_signal_sha256 is None
+        or evidence.quality_report_sha256 is None
+    ):
+        raise OODExternalV2IntegrityError(
+            "successful adapter row lacks signal or quality audit evidence"
+        )
+    _digest(evidence.canonical_signal_sha256, "private canonical signal")
+    _digest(evidence.quality_report_sha256, "private quality report")
+    if evidence.quality_report is not None and (
+        _quality_report_sha256(evidence.quality_report)
+        != evidence.quality_report_sha256
+    ):
+        raise OODExternalV2IntegrityError("private quality report hash differs")
+    if source_sample_count != _expected_source_sample_count(inventory_record):
+        raise OODExternalV2IntegrityError(
+            "private adapter source sample count differs from inventory"
+        )
+    if raw_physical_units != inventory_record.raw_physical_units:
+        raise OODExternalV2IntegrityError(
+            "private adapter raw physical units differ from exact mV"
+        )
+    source_rate = Fraction(str(inventory_record.sampling_frequency_hz))
+    source_window = source_rate * WINDOW_SECONDS
+    if source_window.denominator != 1:
+        raise OODExternalV2IntegrityError(
+            "private adapter source window does not contain an integer sample count"
+        )
+    ratio = Fraction(TARGET_FREQUENCY_HZ, 1) / source_rate
+    try:
+        reconstructed = AdapterProvenance(
+            adapter_version=ADAPTER_VERSION,
+            raw_header_sha256=inventory_record.raw_header_sha256,
+            raw_header_size_bytes=inventory_record.raw_header_size_bytes,
+            raw_data_sha256=inventory_record.raw_data_sha256,
+            raw_data_size_bytes=inventory_record.raw_data_size_bytes,
+            source_frequency_hz=inventory_record.sampling_frequency_hz,
+            source_sample_count=source_sample_count,
+            source_duration_seconds=inventory_record.duration_seconds,
+            source_lead_names=inventory_record.raw_ordered_leads,
+            canonical_leads=inventory_record.canonical_ordered_leads,
+            output_leads=LEADS,
+            source_data_file_names=inventory_record.raw_data_file_names,
+            raw_physical_units=raw_physical_units,
+            physical_units=PHYSICAL_UNITS,
+            window_start_sample=0,
+            window_source_samples=source_window.numerator,
+            window_seconds=WINDOW_SECONDS,
+            resample_up=ratio.numerator,
+            resample_down=ratio.denominator,
+            resample_window=RESAMPLE_WINDOW,
+            resample_padtype=RESAMPLE_PADTYPE,
+            target_frequency_hz=TARGET_FREQUENCY_HZ,
+            target_samples=TARGET_SAMPLES,
+        )
+    except ExternalECGAdapterError as error:
+        raise OODExternalV2IntegrityError(
+            "private adapter provenance cannot be reconstructed"
+        ) from error
+    if reconstructed.sha256 != evidence.adapter_provenance_sha256:
+        raise OODExternalV2IntegrityError(
+            "private adapter provenance identity differs from frozen inventory"
+        )
+
+
+def _verify_private_quality_report_semantics(
+    evidence: _PrivateRecordEvidence,
+) -> None:
+    report = evidence.quality_report
+    if report is None:
+        return
+    if set(report) != {
+        "config_version",
+        "global_issues",
+        "leads",
+        "reversal_evidence",
+        "status",
+    } or report["config_version"] != DEFAULT_SIGNAL_QUALITY_CONFIG.version:
+        raise OODExternalV2IntegrityError("private quality report fields differ")
+
+    allowed_statuses = {status.value for status in QualityStatus}
+    allowed_reasons = {reason.value for reason in ReasonCode}
+    status_rank = {
+        QualityStatus.PASS.value: 0,
+        QualityStatus.LIMITED.value: 1,
+        QualityStatus.REACQUIRE.value: 2,
+        QualityStatus.INVALID.value: 3,
+    }
+
+    def issue_values(value: object, *, expected_lead: str | None) -> tuple[str, str]:
+        if not isinstance(value, dict) or set(value) != {
+            "boundary_value",
+            "code",
+            "lead_name",
+            "metric_name",
+            "observed_value",
+            "status",
+        }:
+            raise OODExternalV2IntegrityError("private quality issue fields differ")
+        code = value["code"]
+        status = value["status"]
+        if code not in allowed_reasons or status not in allowed_statuses:
+            raise OODExternalV2IntegrityError("private quality issue identity differs")
+        if value["lead_name"] != expected_lead:
+            raise OODExternalV2IntegrityError("private quality issue lead differs")
+        metric_name = value["metric_name"]
+        if metric_name is not None and (
+            not isinstance(metric_name, str) or not metric_name
+        ):
+            raise OODExternalV2IntegrityError("private quality metric name is invalid")
+        for key in ("observed_value", "boundary_value"):
+            numeric = value[key]
+            if numeric is not None and (
+                type(numeric) is not float or not math.isfinite(numeric)
+            ):
+                raise OODExternalV2IntegrityError(
+                    "private quality issue numeric evidence is invalid"
+                )
+        return cast(str, code), cast(str, status)
+
+    global_issues = report["global_issues"]
+    if not isinstance(global_issues, list):
+        raise OODExternalV2IntegrityError("private global quality issues are invalid")
+    global_values = tuple(
+        issue_values(issue, expected_lead=None) for issue in global_issues
+    )
+
+    metric_fields = {
+        "baseline_wander_power_ratio",
+        "clipping_fraction",
+        "flat_step_fraction",
+        "high_frequency_power_ratio",
+        "longest_clipping_run_samples",
+        "maximum_absolute_amplitude_mv",
+        "maximum_step_mv",
+        "peak_to_peak_mv",
+        "powerline_50hz_power_ratio",
+        "powerline_60hz_power_ratio",
+        "spike_step_fraction",
+        "standard_deviation_mv",
+    }
+    raw_leads = report["leads"]
+    if not isinstance(raw_leads, list) or len(raw_leads) != len(LEADS):
+        raise OODExternalV2IntegrityError("private quality lead reports are incomplete")
+    lead_values: list[tuple[tuple[str, ...], str]] = []
+    for index, (raw_lead, expected_name) in enumerate(zip(raw_leads, LEADS, strict=True)):
+        if not isinstance(raw_lead, dict) or set(raw_lead) != {
+            "issues",
+            "lead_index",
+            "lead_name",
+            "metrics",
+            "reason_codes",
+            "status",
+        }:
+            raise OODExternalV2IntegrityError("private quality lead fields differ")
+        if raw_lead["lead_index"] != index or raw_lead["lead_name"] != expected_name:
+            raise OODExternalV2IntegrityError("private quality lead alignment differs")
+        metrics = raw_lead["metrics"]
+        if not isinstance(metrics, dict) or set(metrics) != metric_fields:
+            raise OODExternalV2IntegrityError("private quality metrics differ")
+        for name, numeric in metrics.items():
+            if name == "longest_clipping_run_samples":
+                valid = type(numeric) is int and numeric >= 0
+            else:
+                valid = type(numeric) is float and math.isfinite(numeric)
+            if not valid:
+                raise OODExternalV2IntegrityError(
+                    "private quality metric value is invalid"
+                )
+        issues = raw_lead["issues"]
+        if not isinstance(issues, list):
+            raise OODExternalV2IntegrityError("private lead quality issues are invalid")
+        parsed_issues = tuple(
+            issue_values(issue, expected_lead=expected_name) for issue in issues
+        )
+        reason_codes = raw_lead["reason_codes"]
+        expected_reasons = tuple(code for code, _ in parsed_issues)
+        if (
+            not isinstance(reason_codes, list)
+            or tuple(reason_codes) != expected_reasons
+            or any(reason not in allowed_reasons for reason in reason_codes)
+        ):
+            raise OODExternalV2IntegrityError("private lead reason codes differ")
+        expected_status = max(
+            (status for _, status in parsed_issues),
+            key=lambda value: status_rank[value],
+            default=QualityStatus.PASS.value,
+        )
+        if raw_lead["status"] != expected_status:
+            raise OODExternalV2IntegrityError("private lead quality status differs")
+        lead_values.append((expected_reasons, expected_status))
+
+    reversal = report["reversal_evidence"]
+    if reversal is not None:
+        if not isinstance(reversal, dict) or set(reversal) != {
+            "correlations",
+            "dominant_polarities",
+            "evidence_codes",
+            "probable_kind",
+            "score",
+        }:
+            raise OODExternalV2IntegrityError("private reversal evidence differs")
+        score = reversal["score"]
+        if type(score) is not float or not math.isfinite(score):
+            raise OODExternalV2IntegrityError("private reversal score is invalid")
+        for key in ("correlations", "dominant_polarities"):
+            pairs = reversal[key]
+            if not isinstance(pairs, list) or any(
+                not isinstance(pair, list)
+                or len(pair) != 2
+                or not isinstance(pair[0], str)
+                or type(pair[1]) is not float
+                or not math.isfinite(pair[1])
+                for pair in pairs
+            ):
+                raise OODExternalV2IntegrityError(
+                    "private reversal numeric evidence is invalid"
+                )
+        if not isinstance(reversal["probable_kind"], str) or not isinstance(
+            reversal["evidence_codes"],
+            list,
+        ):
+            raise OODExternalV2IntegrityError("private reversal identity is invalid")
+
+    expected_overall = max(
+        [status for _, status in global_values]
+        + [status for _, status in lead_values],
+        key=lambda value: status_rank[value],
+        default=QualityStatus.PASS.value,
+    )
+    ordered_reasons = [code for code, _ in global_values]
+    for reasons, _ in lead_values:
+        ordered_reasons.extend(reasons)
+    expected_reason_codes = tuple(dict.fromkeys(ordered_reasons))
+    if (
+        report["status"] != expected_overall
+        or evidence.quality_status != expected_overall
+        or evidence.quality_reason_codes != expected_reason_codes
+    ):
+        raise OODExternalV2IntegrityError(
+            "private quality status or reason codes differ from full report"
+        )
+
+
+def _load_private_sidecar(
+    path: Path,
+    *,
+    artifact_type: str,
+) -> dict[str, object]:
+    raw = _read_bounded(path, _PRIVATE_JSON_MAX_BYTES, "private sidecar")
+    try:
+        decoded: object = json.loads(
+            raw[:-1].decode("ascii") if raw.endswith(b"\n") else b"".decode(),
+            object_pairs_hook=_unique_json_object,
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OODExternalV2IntegrityError("private sidecar cannot be decoded") from error
+    if not isinstance(decoded, dict) or canonical_json_bytes(decoded) != raw:
+        raise OODExternalV2IntegrityError("private sidecar is not canonical")
+    payload = cast(dict[str, object], decoded)
+    claimed = _digest(payload.get("artifact_sha256"), "private sidecar")
+    body = {key: value for key, value in payload.items() if key != "artifact_sha256"}
+    if (
+        claimed != canonical_sha256(body)
+        or payload.get("artifact_type") != artifact_type
+        or payload.get("protocol_id") != PROTOCOL_ID
+        or payload.get("schema_version") != 1
+    ):
+        raise OODExternalV2IntegrityError("private sidecar identity differs")
+    return payload
+
+
+def _verify_result_endpoint_row_semantics(
+    result: OODV2Result,
+    rows: tuple[_PrivateRecordEvidence, ...],
+) -> None:
+    _verify_result_route_counts(result, rows)
+    _verify_result_endpoint_row_semantics_after_routes(result, rows)
+
+
+def _verify_result_route_counts(
+    result: OODV2Result,
+    rows: tuple[_PrivateRecordEvidence, ...],
+) -> None:
+    """Cross-check the public five-state aggregate against private row truth."""
+
+    observed_route_counts = Counter(row.route for row in rows)
+    expected_public_routes = {
+        route: observed_route_counts.get(route, 0) for route in FROZEN_ROUTE_ORDER
+    }
+    public_routes = result.final_route_counts.model_dump(mode="python")
+    if public_routes != {**expected_public_routes, "total_records": len(rows)}:
+        raise OODExternalV2IntegrityError(
+            "public five-state route counts differ from private rows"
+        )
+
+
+def _verify_result_endpoint_row_semantics_after_routes(
+    result: OODV2Result,
+    rows: tuple[_PrivateRecordEvidence, ...],
+) -> None:
+    technical = {
+        endpoint.endpoint_key: endpoint
+        for endpoint in result.technical_quality_endpoints
+    }
+    external = {endpoint.endpoint_key: endpoint for endpoint in result.external_cohorts}
+    group3 = tuple(
+        row
+        for row in rows
+        if row.dataset == CHALLENGE_2011_DATASET
+        and row.challenge_quality_label == "unacceptable"
+    )
+    group1 = tuple(
+        row
+        for row in rows
+        if row.dataset == CHALLENGE_2011_DATASET
+        and row.challenge_quality_label == "acceptable"
+    )
+    technical_truth = {
+        "challenge_group3_technical_block_sensitivity": (
+            len(group3),
+            sum(row.quality_status == QualityStatus.REACQUIRE.value for row in group3),
+        ),
+        "challenge_group1_quality_pass_rate": (
+            len(group1),
+            sum(row.quality_status == QualityStatus.PASS.value for row in group1),
+        ),
+    }
+    if set(technical) != {
+        key for key, (records, _) in technical_truth.items() if records > 0
+    }:
+        raise OODExternalV2IntegrityError(
+            "technical endpoint presence differs from row denominators"
+        )
+    for key, endpoint in technical.items():
+        records, events = technical_truth[key]
+        if (
+            endpoint.records != records
+            or endpoint.subjects != records
+            or endpoint.events != events
+            or endpoint.non_events != records - events
+            or endpoint.point_rate != events / records
+            or endpoint.interval.records != records
+            or endpoint.interval.resampling_units != records
+            or endpoint.interval.event_count != events
+            or endpoint.interval.point_estimate != events / records
+        ):
+            raise OODExternalV2IntegrityError(
+                "technical endpoint counts or rate differ from private rows"
+            )
+
+    challenge_pass = tuple(
+        row
+        for row in rows
+        if row.dataset == CHALLENGE_2011_DATASET
+        and row.quality_status == QualityStatus.PASS.value
+    )
+    zzu_pass = tuple(
+        row
+        for row in rows
+        if row.dataset == ZZU_PEDIATRIC_DATASET
+        and row.quality_status == QualityStatus.PASS.value
+    )
+    zzu_subjects = len({cast(str, row.patient_key) for row in zzu_pass})
+    external_truth = {
+        "challenge_external_distribution_recall": (
+            len(challenge_pass),
+            len(challenge_pass),
+            sum(row.route == "UNSUPPORTED_INPUT" for row in challenge_pass),
+        ),
+        "zzu_external_distribution_recall": (
+            len(zzu_pass),
+            zzu_subjects,
+            sum(row.route == "UNSUPPORTED_INPUT" for row in zzu_pass),
+        ),
+    }
+    if set(external) != {
+        key for key, (records, _, _) in external_truth.items() if records > 0
+    }:
+        raise OODExternalV2IntegrityError(
+            "external endpoint presence differs from row denominators"
+        )
+    for key, external_endpoint in external.items():
+        records, subjects, detected = external_truth[key]
+        rate = detected / records
+        if (
+            external_endpoint.records != records
+            or external_endpoint.subjects != subjects
+            or external_endpoint.detected_records != detected
+            or external_endpoint.missed_records != records - detected
+            or external_endpoint.ood_recall != rate
+            or external_endpoint.interval.records != records
+            or external_endpoint.interval.resampling_units != subjects
+            or external_endpoint.interval.event_count != detected
+            or external_endpoint.interval.point_estimate != rate
+        ):
+            raise OODExternalV2IntegrityError(
+                "external endpoint counts or recall differ from private rows"
+            )
+
+
+def _load_private_frozen_model(
+    private: Path,
+    *,
+    routing_payload: Mapping[str, object],
+) -> ResNet1D:
+    checkpoint_path = private / "frozen-model.ckpt"
+    resolved_path = private / "frozen-resolved-config.json"
+    if (
+        routing_payload.get("checkpoint_file_sha256")
+        != sha256_file(checkpoint_path)
+        or routing_payload.get("checkpoint_file_sha256")
+        != EXPECTED_CHECKPOINT_FILE_SHA256
+        or routing_payload.get("resolved_config_file_sha256")
+        != sha256_file(resolved_path)
+        or routing_payload.get("resolved_config_file_sha256")
+        != EXPECTED_RESOLVED_CONFIG_FILE_SHA256
+        or routing_payload.get("resolved_config_sha256")
+        != EXPECTED_RESOLVED_CONFIG_SHA256
+    ):
+        raise OODExternalV2IntegrityError("private frozen model file lineage differs")
+    try:
+        resolved_object: object = json.loads(
+            _read_bounded(
+                resolved_path,
+                _CONFIG_MAX_BYTES,
+                "private resolved config",
+            ).decode("utf-8")
+        )
+        resolved = _mapping(resolved_object, "private resolved config")
+        inner = _mapping(resolved.get("config"), "private resolved inner config")
+        if (
+            set(resolved) != {"config", "config_hash"}
+            or resolved.get("config_hash") != EXPECTED_RESOLVED_CONFIG_SHA256
+            or canonical_sha256(inner) != EXPECTED_RESOLVED_CONFIG_SHA256
+        ):
+            raise OODExternalV2IntegrityError(
+                "private resolved config content differs"
+            )
+        checkpoint_object: object = torch.load(
+            checkpoint_path,
+            map_location="cpu",
+            weights_only=True,
+        )
+        checkpoint = _mapping(checkpoint_object, "private checkpoint")
+        if (
+            set(checkpoint)
+            != {
+                "config",
+                "config_hash",
+                "early_stopping_state_dict",
+                "epoch",
+                "manifest_hash",
+                "model_state_dict",
+                "optimizer_state_dict",
+                "protocol_hash",
+                "scaler_state_dict",
+                "schema_version",
+            }
+            or checkpoint.get("schema_version") != 1
+            or checkpoint.get("config") != inner
+            or checkpoint.get("config_hash") != EXPECTED_RESOLVED_CONFIG_SHA256
+        ):
+            raise OODExternalV2IntegrityError("private checkpoint content differs")
+        model = build_experiment_model(
+            ModelConfig(architecture="resnet1d", preset="matched_capacity")
+        )
+        model.load_state_dict(cast(Any, checkpoint["model_state_dict"]), strict=True)
+    except OODExternalV2IntegrityError:
+        raise
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "private frozen model cannot be reconstructed"
+        ) from error
+    if type(model) is not ResNet1D:
+        raise OODExternalV2IntegrityError("private frozen model type differs")
+    model.requires_grad_(False)
+    model.cpu().eval()
+    if model_state_sha256(model) != routing_payload.get("model_state_sha256"):
+        raise OODExternalV2IntegrityError(
+            "private frozen model state differs from routing contract"
+        )
+    return model
+
+
+def _configure_frozen_external_v2_cuda() -> DeterministicCUDARuntime:
+    """Configure the exact preregistered CUDA runtime for head-only replay."""
+
+    return configure_deterministic_cuda(
+        expected_device_name="NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+        expected_compute_capability=(12, 0),
+        expected_python_version="3.12.13",
+        expected_torch_version="2.13.0+cu130",
+        expected_cuda_runtime="13.0",
+        expected_cudnn_version=92_000,
+        expected_nvidia_driver_version="596.49",
+        nvidia_smi_executable=_nvidia_driver_tool_paths()[0],
+    )
+
+
+def verify_private_external_v2_bundle_semantics(
+    output_root: str | Path,
+    *,
+    result: OODV2Result,
+    inventory: ExternalWaveformInventory,
+    parent_config_file_sha256: str,
+    child_contract_file_sha256: str,
+    project_root: str | Path | None,
+    seven_zip_executable: str | Path | None,
+) -> None:
+    """Rederive bundle semantics against the exact live frozen source closure."""
+
+    root = Path(os.path.abspath(os.fspath(output_root)))
+    private = root / "private"
+    if project_root is None or seven_zip_executable is None:
+        raise OODExternalV2IntegrityError(
+            "terminal semantic verification requires the live project and 7-Zip tool"
+        )
+    live_project = _strict_project_root(project_root)
+    live_parent = load_successor_parent_config(
+        live_project.joinpath(*PurePosixPath(SUCCESSOR_PARENT_CONFIG_PATH).parts),
+        project_root=live_project,
+    )
+    live_child = load_child_contract(
+        live_project.joinpath(*PurePosixPath(SUCCESSOR_CHILD_CONFIG_PATH).parts)
+    )
+    live_inputs = verify_external_v2_inputs(
+        live_parent,
+        live_child,
+        project_root=live_project,
+        code_revision=result.code_revision,
+        seven_zip_executable=seven_zip_executable,
+    )
+    expected_output_root = _resolve_project_relative(
+        live_project,
+        live_child.output_root,
+        require_directory=True,
+    )
+    if (
+        root != expected_output_root
+        or live_parent.file_sha256 != parent_config_file_sha256
+        or live_child.file_sha256 != child_contract_file_sha256
+        or live_inputs.inventory != inventory
+    ):
+        raise OODExternalV2IntegrityError(
+            "terminal bundle differs from its exact live project lineage"
+        )
+    routing_payload = _load_private_sidecar(
+        private / "routing-contract.json",
+        artifact_type=PRIVATE_ROUTING_CONTRACT_ARTIFACT_TYPE,
+    )
+    _verify_private_lineage_copies(
+        private,
+        result=result,
+        inventory=inventory,
+        routing_payload=routing_payload,
+        parent_config_file_sha256=parent_config_file_sha256,
+        child_contract_file_sha256=child_contract_file_sha256,
+    )
+    expected_fields = {
+        "artifact_sha256",
+        "artifact_type",
+        "bootstrap",
+        "checkpoint_file_sha256",
+        "conformal",
+        "distribution_policy_artifact_sha256",
+        "distribution_policy_file_sha256",
+        "distribution_threshold",
+        "demo_policy_file_sha256",
+        "entropy_maximum",
+        "inventory_sha256",
+        "label_order",
+        "model_state_sha256",
+        "normalization_file_sha256",
+        "protocol_id",
+        "quality_config_version",
+        "resolved_config_file_sha256",
+        "resolved_config_sha256",
+        "schema_version",
+        "source_calibration_artifact_sha256",
+        "source_calibration_file_sha256",
+        "temperature",
+        "threshold_comparison",
+    }
+    policy_path = private / "frozen-distribution-policy.json"
+    policy_bytes = _read_bounded(
+        policy_path,
+        _V1_POLICY_MAX_BYTES,
+        "private frozen distribution policy",
+    )
+    try:
+        policy = load_distribution_policy_bytes(policy_bytes)
+        raw_conformal = _mapping(
+            routing_payload.get("conformal"),
+            "private conformal routing contract",
+        )
+        conformal = LabelwiseBinaryConformal.from_dict(raw_conformal)
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "private frozen routing components are invalid"
+        ) from error
+    raw_bootstrap = _mapping(
+        routing_payload.get("bootstrap"),
+        "private bootstrap routing contract",
+    )
+    if set(raw_bootstrap) != {
+        "challenge_seed",
+        "confidence_level",
+        "replicates",
+        "zzu_seed",
+    }:
+        raise OODExternalV2IntegrityError("private bootstrap contract fields differ")
+    threshold = routing_payload.get("distribution_threshold")
+    temperature = routing_payload.get("temperature")
+    entropy_maximum = routing_payload.get("entropy_maximum")
+    if (
+        set(routing_payload) != expected_fields
+        or routing_payload.get("inventory_sha256") != inventory.inventory_sha256
+        or routing_payload.get("label_order") != list(SUPERCLASSES)
+        or routing_payload.get("quality_config_version")
+        != DEFAULT_SIGNAL_QUALITY_CONFIG.version
+        or routing_payload.get("threshold_comparison")
+        != "score_strictly_greater_than_threshold"
+        or routing_payload.get("demo_policy_file_sha256")
+        != EXPECTED_DEMO_POLICY_FILE_SHA256
+        or routing_payload.get("source_calibration_file_sha256")
+        != EXPECTED_SOURCE_CALIBRATION_FILE_SHA256
+        or routing_payload.get("source_calibration_artifact_sha256")
+        != EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256
+        or routing_payload.get("distribution_policy_file_sha256")
+        != sha256_file(policy_path)
+        or sha256_file(policy_path) != result.detector_policy_sha256
+        or routing_payload.get("distribution_policy_artifact_sha256")
+        != policy.artifact_sha256
+        or policy.artifact_sha256
+        != EXPECTED_DISTRIBUTION_POLICY_ARTIFACT_SHA256
+        or type(threshold) is not float
+        or threshold != policy.detector.threshold
+        or threshold != EXPECTED_DISTRIBUTION_THRESHOLD
+        or type(temperature) is not float
+        or temperature != EXPECTED_TEMPERATURE
+        or type(entropy_maximum) is not float
+        or entropy_maximum != EXPECTED_ENTROPY_MAXIMUM
+        or conformal.label_names != SUPERCLASSES
+        or conformal.alpha != 0.1
+        or conformal.n_calibration_samples != 834
+        or conformal.quantile_rank != 752
+        or conformal.quantile_level != 0.9016786570743405
+        or conformal.thresholds != EXPECTED_CONFORMAL_THRESHOLDS
+        or raw_bootstrap.get("replicates")
+        != result.evidence_requirements.bootstrap_replicates
+        or raw_bootstrap.get("challenge_seed")
+        != result.evidence_requirements.challenge_bootstrap_seed
+        or raw_bootstrap.get("zzu_seed")
+        != result.evidence_requirements.zzu_bootstrap_seed
+        or raw_bootstrap.get("confidence_level")
+        != result.evidence_requirements.co_primary_confidence_level
+    ):
+        raise OODExternalV2IntegrityError("private routing contract differs")
+    rows = _load_private_record_evidence(
+        private / "record-evidence.json",
+        inputs=live_inputs,
+    )
+    _verify_raw_to_canonical_replay(
+        private,
+        inputs=live_inputs,
+        expected_records=rows,
+    )
+    quality_pass_rows = tuple(
+        row for row in rows if row.quality_status == QualityStatus.PASS.value
+    )
+    frozen_model = _load_private_frozen_model(
+        private,
+        routing_payload=routing_payload,
+    )
+    frozen_runtime = _configure_frozen_external_v2_cuda()
+    frozen_model = prepare_resnet_for_embedding(
+        frozen_model,
+        runtime=frozen_runtime,
+    )
+    normalization = _load_private_normalization(
+        private / "frozen-normalization.json",
+        expected_file_sha256=_digest(
+            routing_payload.get("normalization_file_sha256"),
+            "private normalization file",
+        ),
+    )
+    replayed_embeddings = _replay_quality_pass_embeddings(
+        private,
+        inputs=live_inputs,
+        expected_records=rows,
+        model=frozen_model,
+        normalization=normalization,
+        runtime=frozen_runtime,
+    )
+    _verify_embedding_bundle_semantics(
+        private,
+        inputs=live_inputs,
+        quality_pass_rows=quality_pass_rows,
+        frozen_model=frozen_model,
+        frozen_runtime=frozen_runtime,
+        replayed_embeddings=replayed_embeddings,
+    )
+    endpoint_names = tuple(
+        sorted(
+            [endpoint.endpoint_key for endpoint in result.external_cohorts]
+            + [endpoint.endpoint_key for endpoint in result.technical_quality_endpoints]
+        )
+    )
+    _verify_bootstrap_bundle_semantics(
+        private,
+        inputs=live_inputs,
+        result=result,
+        private_rows=rows,
+        endpoint_names=endpoint_names,
+    )
+    _verify_result_endpoint_row_semantics(result, rows)
+
+
+def _load_private_normalization(
+    path: Path,
+    *,
+    expected_file_sha256: str,
+) -> NormalizationStats:
+    _digest(expected_file_sha256, "private normalization file")
+    if sha256_file(path) != expected_file_sha256:
+        raise OODExternalV2IntegrityError(
+            "private frozen normalization hash differs from routing contract"
+        )
+    try:
+        normalization = NormalizationStats.load(path)
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "private frozen normalization cannot be loaded"
+        ) from error
+    if (
+        normalization.provenance.training_folds != (1, 2, 3, 4, 5, 6, 7)
+        or normalization.provenance.samples_per_record != TARGET_SAMPLES
+        or normalization.provenance.sampling_frequency_hz != TARGET_FREQUENCY_HZ
+        or normalization.provenance.target_columns != TARGET_COLUMNS
+    ):
+        raise OODExternalV2IntegrityError(
+            "private frozen normalization scientific contract differs"
+        )
+    return normalization
+
+
+def _verify_private_lineage_copies(
+    private: Path,
+    *,
+    result: OODV2Result,
+    inventory: ExternalWaveformInventory,
+    routing_payload: Mapping[str, object],
+    parent_config_file_sha256: str,
+    child_contract_file_sha256: str,
+) -> None:
+    """Parse and cross-link exact manifest-covered parent/child/decision bytes."""
+
+    parent_path = private / "frozen-parent-config.yaml"
+    child_path = private / "frozen-child-contract.json"
+    source_path = private / "frozen-source-calibration-result.json"
+    sealed_v1_result_path = private / "frozen-v1-ood-completion-result.json"
+    demo_path = private / "frozen-demo-policy.json"
+    if (
+        sha256_file(parent_path) != parent_config_file_sha256
+        or parent_config_file_sha256 != result.preregistration_sha256
+        or sha256_file(child_path) != child_contract_file_sha256
+        or sha256_file(source_path) != EXPECTED_SOURCE_CALIBRATION_FILE_SHA256
+        or sha256_file(sealed_v1_result_path) != result.sealed_v1_result_sha256
+        or sha256_file(demo_path) != EXPECTED_DEMO_POLICY_FILE_SHA256
+    ):
+        raise OODExternalV2IntegrityError("private frozen lineage file hash differs")
+    try:
+        if parent_config_file_sha256 == EXPECTED_PARENT_CONFIG_SHA256:
+            original_parent = load_parent_config(parent_path)
+            parent_file_sha256 = original_parent.file_sha256
+            parent_output_root = original_parent.output_root
+            parent_checkpoint_sha256 = original_parent.checkpoint.file_sha256
+            parent_normalization_sha256 = original_parent.normalization.file_sha256
+            parent_raw_sources = original_parent.raw_source_bindings
+            parent_seven_zip_tool = original_parent.seven_zip_tool_binding
+        else:
+            successor_payload, parent_raw_sources, parent_seven_zip_tool = (
+                _parse_successor_parent_copy(
+                    parent_path,
+                    expected_file_sha256=parent_config_file_sha256,
+                )
+            )
+            parent_file_sha256 = parent_config_file_sha256
+            successor_one_shot = _mapping(
+                successor_payload.get("one_shot_external_access"),
+                "private successor one shot",
+            )
+            parent_output_root = _relative_path(
+                successor_one_shot.get("output_root"),
+                "private successor output root",
+            )
+            successor_bindings = _mapping(
+                successor_payload.get("bindings"),
+                "private successor bindings",
+            )
+            successor_checkpoint = _mapping(
+                successor_bindings.get("v1_checkpoint"),
+                "private successor checkpoint",
+            )
+            parent_checkpoint_sha256 = _digest(
+                successor_checkpoint.get("file_sha256"),
+                "private successor checkpoint hash",
+            )
+            successor_normalization = _mapping(
+                successor_bindings.get("normalization"),
+                "private successor normalization",
+            )
+            parent_normalization_sha256 = _digest(
+                successor_normalization.get("file_sha256"),
+                "private successor normalization hash",
+            )
+        child = load_child_contract(child_path)
+        source = load_source_calibration_result_bytes(
+            _read_bounded(
+                source_path,
+                _V1_RESULT_MAX_BYTES,
+                "private source-calibration result",
+            )
+        )
+        sealed_v1_result = load_ood_completion_result_bytes(
+            _read_bounded(
+                sealed_v1_result_path,
+                _V1_RESULT_MAX_BYTES,
+                "private sealed v1 aggregate result",
+            )
+        )
+        demo = FrozenDecisionPolicy.load(demo_path)
+    except Exception as error:
+        raise OODExternalV2IntegrityError(
+            "private frozen lineage artifact cannot be parsed"
+        ) from error
+    source_components = source.frozen_components
+    if (
+        parent_file_sha256 != parent_config_file_sha256
+        or child.file_sha256 != child_contract_file_sha256
+        or child.parent_config_file_sha256 != parent_file_sha256
+        or child.artifact_sha256 != result.cohort_role_manifest_sha256
+        or child.inventory.inventory_sha256 != inventory.inventory_sha256
+        or sha256_file(private / "external-inventory.json")
+        != child.inventory.file_sha256
+        or child.output_root != parent_output_root
+        or sha256_file(private / "frozen-normalization.json")
+        != parent_normalization_sha256
+        or routing_payload.get("normalization_file_sha256")
+        != parent_normalization_sha256
+        or _current_runtime_environment() != child.runtime_environment
+        or (
+            parent_raw_sources is not None
+            and dict(child.raw_source_bindings) != dict(parent_raw_sources)
+        )
+        or (
+            parent_seven_zip_tool is not None
+            and child.inventory.archive_closures[1].tool_binding
+            != parent_seven_zip_tool
+        )
+        or child.decision_bindings["source_calibration_result"].file_sha256
+        != EXPECTED_SOURCE_CALIBRATION_FILE_SHA256
+        or child.decision_bindings["source_calibration_result"].artifact_sha256
+        != EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256
+        or child.decision_bindings["demo_policy"].file_sha256
+        != EXPECTED_DEMO_POLICY_FILE_SHA256
+        or child.decision_bindings["demo_policy"].artifact_sha256
+        != EXPECTED_DEMO_POLICY_ARTIFACT_SHA256
+        or source.artifact_sha256 != EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256
+        or source.split.assignment_sha256
+        != result.source_gate.cohort_manifest_sha256
+        or result.source_gate != _historical_source_gate(sealed_v1_result)
+        or source.artifact_sha256
+        != routing_payload.get("source_calibration_artifact_sha256")
+        or source_components.temperature.temperature != EXPECTED_TEMPERATURE
+        or source_components.entropy_gate.maximum_entropy
+        != EXPECTED_ENTROPY_MAXIMUM
+        or demo.provenance.checkpoint_sha256
+        != parent_checkpoint_sha256.removeprefix("sha256:")
+        or routing_payload.get("source_calibration_file_sha256")
+        != sha256_file(source_path)
+        or routing_payload.get("demo_policy_file_sha256") != sha256_file(demo_path)
+    ):
+        raise OODExternalV2IntegrityError("private frozen lineage semantics differ")
+
+
+def _verify_embedding_bundle_semantics(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    quality_pass_rows: tuple[_PrivateRecordEvidence, ...],
+    frozen_model: ResNet1D | None = None,
+    frozen_runtime: DeterministicCUDARuntime | None = None,
+    replayed_embeddings: tuple[Float32Array, Float32Array] | None = None,
+) -> None:
+    npz_path = private / "quality-pass-embeddings.npz"
+    _verify_embedding_npz(npz_path, expected_records=len(quality_pass_rows))
+    sidecar = _load_private_sidecar(
+        private / "quality-pass-embeddings.json",
+        artifact_type=PRIVATE_EMBEDDING_ARTIFACT_TYPE,
+    )
+    expected_sidecar_fields = {
+        "artifact_sha256",
+        "artifact_type",
+        "embedding_dimension",
+        "embedding_dtype",
+        "embedding_tensor_sha256",
+        "first_logits_tensor_sha256",
+        "inventory_sha256",
+        "logits_dtype",
+        "model_state_after_sha256",
+        "model_state_before_sha256",
+        "model_state_unchanged",
+        "npz_file_sha256",
+        "probabilities_dtype",
+        "probabilities_tensor_sha256",
+        "protocol_id",
+        "quality_pass_records",
+        "repeated_embedding_tensor_sha256",
+        "repeated_logits_tensor_sha256",
+        "repeat_verified",
+        "schema_version",
+        "score_dtype",
+        "score_tensor_sha256",
+    }
+    if (
+        set(sidecar) != expected_sidecar_fields
+        or sidecar.get("inventory_sha256") != inputs.inventory.inventory_sha256
+        or sidecar.get("npz_file_sha256") != sha256_file(npz_path)
+        or sidecar.get("quality_pass_records") != len(quality_pass_rows)
+        or sidecar.get("embedding_dimension") != 512
+        or sidecar.get("embedding_dtype") != "float32"
+        or sidecar.get("logits_dtype") != "float64"
+        or sidecar.get("probabilities_dtype") != "float64"
+        or sidecar.get("score_dtype") != "float64"
+        or sidecar.get("repeat_verified") is not True
+        or sidecar.get("model_state_unchanged") is not True
+    ):
+        raise OODExternalV2IntegrityError("embedding sidecar metadata differs")
+    model_state_before = _digest(
+        sidecar.get("model_state_before_sha256"),
+        "private model state before",
+    )
+    model_state_after = _digest(
+        sidecar.get("model_state_after_sha256"),
+        "private model state after",
+    )
+    if model_state_before != model_state_after:
+        raise OODExternalV2IntegrityError("private model state changed")
+    try:
+        with np.load(npz_path, allow_pickle=False) as archive:
+            embeddings = np.ascontiguousarray(
+                archive["embedding_first"],
+                dtype=np.float32,
+            )
+            repeated_embeddings = np.ascontiguousarray(
+                archive["embedding_repeated"],
+                dtype=np.float32,
+            )
+            logits = np.ascontiguousarray(archive["logits_first"], dtype=np.float64)
+            repeated_logits = np.ascontiguousarray(
+                archive["logits_repeated"],
+                dtype=np.float64,
+            )
+            probabilities = np.ascontiguousarray(
+                archive["probabilities"],
+                dtype=np.float64,
+            )
+            scores = np.ascontiguousarray(archive["score"], dtype=np.float64)
+            observed_dataset = tuple(str(value) for value in archive["dataset"].tolist())
+            observed_patient = tuple(str(value) for value in archive["patient_key"].tolist())
+            observed_record = tuple(str(value) for value in archive["record_ref"].tolist())
+    except (OSError, ValueError) as error:
+        raise OODExternalV2IntegrityError("embedding NPZ cannot be loaded") from error
+    expected_dataset = tuple(row.dataset for row in quality_pass_rows)
+    expected_patient = tuple(
+        "" if row.patient_key is None else row.patient_key for row in quality_pass_rows
+    )
+    expected_record = tuple(row.record_ref for row in quality_pass_rows)
+    expected_scores = np.asarray(
+        [cast(float, row.distribution_score) for row in quality_pass_rows],
+        dtype=np.float64,
+    )
+    if len(quality_pass_rows) == 0:
+        recomputed_scores = np.empty((0,), dtype=np.float64)
+        recomputed_probabilities = np.empty(
+            (0, len(SUPERCLASSES)), dtype=np.float64
+        )
+        recomputed_decisions: tuple[tuple[str, ...], ...] = ()
+        recomputed_singleton: tuple[bool, ...] = ()
+        recomputed_entropy_accepted: tuple[bool, ...] = ()
+    else:
+        recomputed_scores = np.ascontiguousarray(
+            inputs.v1.policy.to_detector().score(embeddings),
+            dtype=np.float64,
+        )
+        recomputed_probabilities = _sigmoid(logits / inputs.routing.temperature)
+        recomputed_entropy = normalized_bernoulli_entropy(probabilities)
+        recomputed_prediction_sets = inputs.routing.conformal.predict(probabilities)
+        recomputed_decisions = tuple(
+            tuple(decision.value for decision in row)
+            for row in recomputed_prediction_sets.decisions
+        )
+        recomputed_singleton = tuple(
+            all(decision != BinaryDecision.UNCERTAIN.value for decision in row)
+            for row in recomputed_decisions
+        )
+        recomputed_entropy_accepted = tuple(
+            bool(value <= inputs.routing.maximum_entropy)
+            for value in recomputed_entropy.tolist()
+        )
+    embedding_hash = _tensor_sha256(embeddings)
+    repeated_embedding_hash = _tensor_sha256(repeated_embeddings)
+    logits_hash = _tensor_sha256(logits)
+    repeated_logits_hash = _tensor_sha256(repeated_logits)
+    probabilities_hash = _tensor_sha256(probabilities)
+    score_hash = _tensor_sha256(scores)
+    if replayed_embeddings is not None:
+        replayed_first, replayed_repeated = replayed_embeddings
+        if (
+            replayed_first.shape != embeddings.shape
+            or replayed_repeated.shape != repeated_embeddings.shape
+            or replayed_first.dtype != np.dtype(np.float32)
+            or replayed_repeated.dtype != np.dtype(np.float32)
+            or not np.array_equal(embeddings, replayed_first)
+            or not np.array_equal(repeated_embeddings, replayed_repeated)
+        ):
+            raise OODExternalV2IntegrityError(
+                "stored embeddings differ from exact full-model CUDA replay"
+            )
+    if (
+        observed_dataset != expected_dataset
+        or observed_patient != expected_patient
+        or observed_record != expected_record
+        or not np.array_equal(scores, expected_scores)
+        or not np.array_equal(scores, recomputed_scores)
+        or not np.array_equal(embeddings, repeated_embeddings)
+        or not np.array_equal(logits, repeated_logits)
+        or not np.array_equal(probabilities, recomputed_probabilities)
+        or sidecar.get("embedding_tensor_sha256") != embedding_hash
+        or sidecar.get("repeated_embedding_tensor_sha256")
+        != repeated_embedding_hash
+        or sidecar.get("first_logits_tensor_sha256") != logits_hash
+        or sidecar.get("repeated_logits_tensor_sha256") != repeated_logits_hash
+        or sidecar.get("probabilities_tensor_sha256") != probabilities_hash
+        or sidecar.get("score_tensor_sha256") != score_hash
+    ):
+        raise OODExternalV2IntegrityError(
+            "embedding identities, classifier arrays, scores, or hashes differ"
+        )
+    if (frozen_model is None) is not (frozen_runtime is None):
+        raise OODExternalV2IntegrityError(
+            "frozen classifier and CUDA runtime must be supplied together"
+        )
+    if (
+        frozen_model is not None
+        and sidecar.get("model_state_before_sha256")
+        != model_state_sha256(frozen_model)
+    ):
+        raise OODExternalV2IntegrityError(
+            "stored model state differs from the frozen classifier"
+        )
+    if (
+        frozen_model is not None
+        and frozen_runtime is not None
+        and len(quality_pass_rows) > 0
+    ):
+        first_reference = _classify_embeddings(
+            frozen_model,
+            embeddings,
+            runtime=frozen_runtime,
+        )
+        repeated_reference = _classify_embeddings(
+            frozen_model,
+            repeated_embeddings,
+            runtime=frozen_runtime,
+        )
+        if (
+            not np.array_equal(logits, first_reference)
+            or not np.array_equal(repeated_logits, repeated_reference)
+        ):
+            raise OODExternalV2IntegrityError(
+                "stored logits or model state differ from exact CUDA classifier replay"
+            )
+    for index, row in enumerate(quality_pass_rows):
+        if (
+            row.entropy != float(recomputed_entropy[index])
+            or row.entropy_accepted is not recomputed_entropy_accepted[index]
+            or row.conformal_decisions != recomputed_decisions[index]
+            or row.all_conformal_decisions_singleton
+            is not recomputed_singleton[index]
+        ):
+            raise OODExternalV2IntegrityError(
+                "private entropy or conformal routing audit differs"
+            )
+
+
+def _verify_bootstrap_bundle_semantics(
+    private: Path,
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    result: OODV2Result,
+    private_rows: tuple[_PrivateRecordEvidence, ...],
+    endpoint_names: tuple[str, ...],
+) -> None:
+    npz_path = private / "bootstrap-replicates.npz"
+    _verify_bootstrap_npz(
+        npz_path,
+        expected_names=endpoint_names,
+        expected_replicates=inputs.parent.bootstrap_resamples,
+    )
+    sidecar = _load_private_sidecar(
+        private / "bootstrap-replicates.json",
+        artifact_type=PRIVATE_BOOTSTRAP_ARTIFACT_TYPE,
+    )
+    if (
+        sidecar.get("endpoint_names") != list(endpoint_names)
+        or sidecar.get("npz_file_sha256") != sha256_file(npz_path)
+        or sidecar.get("quantile_method") != "linear"
+        or sidecar.get("replicates_per_endpoint")
+        != inputs.parent.bootstrap_resamples
+    ):
+        raise OODExternalV2IntegrityError("bootstrap sidecar metadata differs")
+
+    group3 = np.asarray(
+        [
+            row.quality_status == QualityStatus.REACQUIRE.value
+            for row in private_rows
+            if row.dataset == CHALLENGE_2011_DATASET
+            and row.challenge_quality_label == "unacceptable"
+        ],
+        dtype=np.bool_,
+    )
+    group1 = np.asarray(
+        [
+            row.quality_status == QualityStatus.PASS.value
+            for row in private_rows
+            if row.dataset == CHALLENGE_2011_DATASET
+            and row.challenge_quality_label == "acceptable"
+        ],
+        dtype=np.bool_,
+    )
+    challenge_pass = tuple(
+        row
+        for row in private_rows
+        if row.dataset == CHALLENGE_2011_DATASET
+        and row.quality_status == QualityStatus.PASS.value
+    )
+    zzu_pass = tuple(
+        row
+        for row in private_rows
+        if row.dataset == ZZU_PEDIATRIC_DATASET
+        and row.quality_status == QualityStatus.PASS.value
+    )
+    challenge_detected = np.asarray(
+        [row.route == "UNSUPPORTED_INPUT" for row in challenge_pass],
+        dtype=np.bool_,
+    )
+    zzu_detected = np.asarray(
+        [row.route == "UNSUPPORTED_INPUT" for row in zzu_pass],
+        dtype=np.bool_,
+    )
+    patient_keys = sorted({cast(str, row.patient_key) for row in zzu_pass})
+    patient_index = {key: index + 1 for index, key in enumerate(patient_keys)}
+    zzu_clusters = np.asarray(
+        [patient_index[cast(str, row.patient_key)] for row in zzu_pass],
+        dtype=np.int64,
+    )
+    parent = inputs.parent
+    expected: dict[str, Float64Array] = {}
+    for name, events, unit, labels, seed in (
+        (
+            "challenge_group3_technical_block_sensitivity",
+            group3,
+            ResamplingUnit.RECORD,
+            None,
+            parent.challenge_bootstrap_seed,
+        ),
+        (
+            "challenge_group1_quality_pass_rate",
+            group1,
+            ResamplingUnit.RECORD,
+            None,
+            parent.challenge_bootstrap_seed,
+        ),
+        (
+            "challenge_external_distribution_recall",
+            challenge_detected,
+            ResamplingUnit.RECORD,
+            None,
+            parent.challenge_bootstrap_seed,
+        ),
+        (
+            "zzu_external_distribution_recall",
+            zzu_detected,
+            ResamplingUnit.PATIENT_CLUSTER,
+            zzu_clusters,
+            parent.zzu_bootstrap_seed,
+        ),
+    ):
+        if name in endpoint_names:
+            expected[name] = _bootstrap_rates(
+                events,
+                resampling_unit=unit,
+                cluster_labels=labels,
+                seed=seed,
+                replicates=parent.bootstrap_resamples,
+            )
+    try:
+        with np.load(npz_path, allow_pickle=False) as archive:
+            observed = {
+                name: np.ascontiguousarray(archive[name], dtype=np.float64)
+                for name in endpoint_names
+            }
+    except (OSError, ValueError) as error:
+        raise OODExternalV2IntegrityError("bootstrap NPZ cannot be loaded") from error
+    if set(expected) != set(observed) or any(
+        not np.array_equal(expected[name], observed[name]) for name in expected
+    ):
+        raise OODExternalV2IntegrityError(
+            "bootstrap arrays differ from exact record/patient index draws"
+        )
+    _verify_replicate_quantiles(
+        cast(tuple[object, ...], result.technical_quality_endpoints),
+        cast(tuple[object, ...], result.external_cohorts),
+        MappingProxyType(observed),
+        parent=parent,
+    )
+
+
+class _ExternalV2OutputCommitError(OODExternalV2ExecutionError):
+    def __init__(self, message: str, *, output_root_committed: bool) -> None:
+        super().__init__(message)
+        self.output_root_committed = output_root_committed
+
+
+def _create_durable_staging_directory(
+    output_root: Path,
+    *,
+    expected_parent_identity: _OwnedDirectoryIdentity,
+) -> Path:
+    """Create staging and persist its parent entry before any armed marker."""
+
+    _verify_owned_namespace_parent(
+        output_root.parent,
+        expected_identity=expected_parent_identity,
+    )
+    raw_staging = tempfile.mkdtemp(
+        prefix=f".{output_root.name}.staging-",
+        dir=output_root.parent,
+    )
+    staging = Path(raw_staging).resolve(strict=True)
+    try:
+        _verify_owned_namespace_parent(
+            output_root.parent,
+            expected_identity=expected_parent_identity,
+        )
+        _fsync_directory(output_root.parent)
+        _verify_owned_namespace_parent(
+            output_root.parent,
+            expected_identity=expected_parent_identity,
+        )
+    except OSError as error:
+        with suppress(OSError):
+            staging.rmdir()
+        raise OODExternalV2ExecutionError(
+            "staging directory parent entry is not durable"
+        ) from error
+    return staging
+
+
+def _fsync_directory(path: Path) -> None:
+    if os.name == "nt":
+        # Windows does not expose POSIX directory fsync.  Open the directory
+        # itself with backup semantics and write access, then demand a real
+        # FlushFileBuffers success.  Unsupported filesystems fail closed.
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create_file = kernel32.CreateFileW
+        create_file.argtypes = [
+            ctypes.c_wchar_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+        ]
+        create_file.restype = ctypes.c_void_p
+        handle = create_file(
+            os.fspath(path),
+            0x40000000,  # GENERIC_WRITE
+            0x00000001 | 0x00000002 | 0x00000004,
+            None,
+            3,  # OPEN_EXISTING
+            0x02000000,  # FILE_FLAG_BACKUP_SEMANTICS
+            None,
+        )
+        invalid_handle = ctypes.c_void_p(-1).value
+        if handle == invalid_handle:
+            error = ctypes.get_last_error()
+            raise OSError(error, "directory durability handle could not be opened")
+        try:
+            flush = kernel32.FlushFileBuffers
+            flush.argtypes = [ctypes.c_void_p]
+            flush.restype = ctypes.c_int
+            if flush(handle) == 0:
+                error = ctypes.get_last_error()
+                raise OSError(error, "directory FlushFileBuffers failed")
+        finally:
+            close = kernel32.CloseHandle
+            close.argtypes = [ctypes.c_void_p]
+            close.restype = ctypes.c_int
+            close(handle)
+        return
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        raise
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _commit_staged_directory(
+    staging_root: Path,
+    output_root: Path,
+    *,
+    visibility_witness: Callable[[], None] | None = None,
+    expected_directory_identity: _OwnedDirectoryIdentity,
+    expected_marker_bytes: bytes,
+    expected_parent_identity: _OwnedDirectoryIdentity,
+) -> None:
+    _verify_owned_namespace_parent(
+        output_root.parent,
+        expected_identity=expected_parent_identity,
+    )
+    _verify_owned_evidence_directory(
+        staging_root,
+        expected_identity=expected_directory_identity,
+        expected_marker_bytes=expected_marker_bytes,
+    )
+    if output_root.exists() or _is_indirect(output_root):
+        raise _ExternalV2OutputCommitError(
+            "immutable output root already exists",
+            output_root_committed=False,
+        )
+    renamed = False
+    try:
+        _verify_owned_namespace_parent(
+            output_root.parent,
+            expected_identity=expected_parent_identity,
+        )
+        os.rename(staging_root, output_root)
+        renamed = True
+        if visibility_witness is not None:
+            visibility_witness()
+        _verify_owned_namespace_parent(
+            output_root.parent,
+            expected_identity=expected_parent_identity,
+        )
+        _verify_owned_evidence_directory(
+            output_root,
+            expected_identity=expected_directory_identity,
+            expected_marker_bytes=expected_marker_bytes,
+        )
+        _fsync_directory(output_root.parent)
+        _verify_owned_namespace_parent(
+            output_root.parent,
+            expected_identity=expected_parent_identity,
+        )
+        _verify_owned_evidence_directory(
+            output_root,
+            expected_identity=expected_directory_identity,
+            expected_marker_bytes=expected_marker_bytes,
+        )
+    except FileExistsError as error:
+        raise _ExternalV2OutputCommitError(
+            "immutable output root already exists",
+            output_root_committed=False,
+        ) from error
+    except OSError as error:
+        raise _ExternalV2OutputCommitError(
+            "atomic output-root commit failed",
+            output_root_committed=renamed,
+        ) from error
+
+
+def _atomic_write_terminal_success(
+    output_root: Path,
+    payload: bytes,
+    *,
+    visibility_witness: Callable[[], None] | None = None,
+    ownership_verifier: Callable[[], None],
+) -> None:
+    target = output_root / SUCCESS_MANIFEST_FILENAME
+    if _is_indirect(output_root) or not output_root.is_dir():
+        raise OODExternalV2ExecutionError("committed output root is unavailable")
+    if target.exists() or _is_indirect(target):
+        raise OODExternalV2ExecutionError("terminal success manifest already exists")
+    ownership_verifier()
+    descriptor, raw_temp = tempfile.mkstemp(
+        prefix=".success-manifest-",
+        suffix=".tmp",
+        dir=output_root,
+    )
+    temporary = Path(raw_temp)
+    temporary_exists = True
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        ownership_verifier()
+        os.link(temporary, target)
+        if visibility_witness is not None:
+            visibility_witness()
+        ownership_verifier()
+        temporary.unlink()
+        temporary_exists = False
+        _fsync_directory(output_root)
+        ownership_verifier()
+    except FileExistsError as error:
+        raise OODExternalV2ExecutionError(
+            "terminal success manifest already exists"
+        ) from error
+    except OSError as error:
+        raise OODExternalV2ExecutionError(
+            "terminal success-manifest commit failed"
+        ) from error
+    finally:
+        if temporary_exists:
+            with suppress(OSError):
+                temporary.unlink()
+
+
+def _failure_code(error: BaseException) -> str:
+    if isinstance(error, OODExternalV2ConfigError):
+        return "CONFIG_INVALID"
+    if isinstance(error, OODExternalV2IntegrityError):
+        return "INTEGRITY_CHECK_FAILED"
+    if isinstance(error, _ExternalV2OutputCommitError):
+        return "OUTPUT_ROOT_COMMIT_FAILED"
+    if isinstance(error, ExternalECGAdapterError):
+        return "ADAPTER_EXECUTION_FAILED"
+    if isinstance(error, (torch.cuda.OutOfMemoryError, MemoryError)):
+        return "RESOURCE_EXHAUSTED"
+    return "EXECUTION_FAILED"
+
+
+def _failure_receipt_bytes(
+    *,
+    inputs: VerifiedExternalV2Inputs,
+    code_revision: str,
+    error: BaseException,
+    ambiguous_terminal_commit: bool,
+    external_claim_file_sha256: str,
+    owner_nonce: str,
+) -> bytes:
+    _digest(external_claim_file_sha256, "failure receipt external claim")
+    if _OWNER_NONCE.fullmatch(owner_nonce) is None:
+        raise OODExternalV2IntegrityError("failure receipt owner nonce is invalid")
+    body: dict[str, object] = {
+        "artifact_type": FAILURE_ARTIFACT_TYPE,
+        "child_contract_file_sha256": inputs.child.file_sha256,
+        "code_revision": code_revision,
+        "contains_embeddings_or_scores": False,
+        "contains_filesystem_paths": False,
+        "contains_record_or_patient_identifiers": False,
+        "failure_code": _failure_code(error),
+        "external_claim_file_sha256": external_claim_file_sha256,
+        "inventory_sha256": inputs.inventory.inventory_sha256,
+        "parent_config_file_sha256": inputs.parent.file_sha256,
+        "owner_nonce": owner_nonce,
+        "protocol_id": PROTOCOL_ID,
+        "retry_requires_new_protocol_and_output_root": True,
+        "schema_version": 1,
+        "status": "FAILED",
+        "terminal_state": (
+            "AMBIGUOUS_TERMINAL_COMMIT"
+            if ambiguous_terminal_commit
+            else "NO_SUCCESS_MANIFEST_VISIBLE"
+        ),
+    }
+    body["artifact_sha256"] = canonical_sha256(body)
+    return canonical_json_bytes(body)
+
+
+def _retain_postclaim_failure(
+    *,
+    staging: Path,
+    output_root: Path,
+    inputs: VerifiedExternalV2Inputs,
+    code_revision: str,
+    error: BaseException,
+    output_root_owned: bool,
+    terminal_manifest_visible: bool,
+    external_claim_file_sha256: str,
+    owner_nonce: str,
+    expected_directory_identity: _OwnedDirectoryIdentity,
+    expected_marker_bytes: bytes,
+    expected_parent_identity: _OwnedDirectoryIdentity,
+) -> None:
+    if type(output_root_owned) is not bool or type(terminal_manifest_visible) is not bool:
+        raise TypeError("output and terminal visibility states must be bool")
+    ambiguous_terminal = output_root_owned and terminal_manifest_visible
+    receipt = _failure_receipt_bytes(
+        inputs=inputs,
+        code_revision=code_revision,
+        error=error,
+        ambiguous_terminal_commit=ambiguous_terminal,
+        external_claim_file_sha256=external_claim_file_sha256,
+        owner_nonce=owner_nonce,
+    )
+    target_root = output_root if output_root_owned else staging
+    try:
+        # A manifest directory entry whose durability or independent reread
+        # failed is not success.  Retain an explicit receipt beside it; the
+        # whole-root verifier rejects any root containing both artifacts.
+        def verifier() -> None:
+            _verify_owned_namespace_parent(
+                output_root.parent,
+                expected_identity=expected_parent_identity,
+            )
+            _verify_owned_evidence_directory(
+                target_root,
+                expected_identity=expected_directory_identity,
+                expected_marker_bytes=expected_marker_bytes,
+            )
+
+        _atomic_write_new(
+            target_root / FAILURE_RECEIPT_FILENAME,
+            receipt,
+            expected_parent_identity=expected_directory_identity,
+            ownership_verifier=verifier,
+        )
+        if not output_root_owned:
+            retained_ownership = _OutputRootOwnershipState(
+                expected_directory_identity
+            )
+            try:
+                _commit_staged_directory(
+                    staging,
+                    output_root,
+                    visibility_witness=retained_ownership.mark_visible,
+                    expected_directory_identity=expected_directory_identity,
+                    expected_marker_bytes=expected_marker_bytes,
+                    expected_parent_identity=expected_parent_identity,
+                )
+            except _ExternalV2OutputCommitError as commit_error:
+                if commit_error.output_root_committed or retained_ownership.visible:
+                    raise
+                # A foreign root won the name. Keep this process's marked,
+                # receipt-bearing staging directory intact; never write into
+                # the foreign root. Future attempts are blocked by the marker.
+                return
+    except Exception as receipt_error:
+        raise OODExternalV2ExecutionError(
+            "post-claim failure evidence could not be retained"
+        ) from receipt_error
+
+
+def _assert_no_marked_staging_retry(output_root: Path) -> None:
+    prefix = f".{output_root.name}.staging-"
+    try:
+        candidates = tuple(output_root.parent.iterdir())
+    except OSError as error:
+        raise OODExternalV2ExecutionError(
+            "prior staging roots cannot be inspected"
+        ) from error
+    for candidate in candidates:
+        if not candidate.name.startswith(prefix):
+            continue
+        marker = candidate / ACCESS_MARKER_FILENAME
+        if _is_indirect(candidate) or marker.exists() or _is_indirect(marker):
+            raise OODExternalV2ExecutionError(
+                "marked external staging evidence exists; retry is forbidden"
+            )
+
+
+def _remove_staging_root(staging: Path, *, expected_parent: Path) -> None:
+    resolved = Path(os.path.abspath(os.fspath(staging)))
+    parent = Path(os.path.abspath(os.fspath(expected_parent)))
+    if (
+        resolved.parent != parent
+        or not resolved.name.startswith(".")
+        or ".staging-" not in resolved.name
+        or _is_indirect(resolved)
+    ):
+        raise OODExternalV2ExecutionError(
+            "refusing to remove an unexpected staging root"
+        )
+    try:
+        shutil.rmtree(resolved, ignore_errors=False)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise OODExternalV2ExecutionError("failed staging root cannot be removed") from error
