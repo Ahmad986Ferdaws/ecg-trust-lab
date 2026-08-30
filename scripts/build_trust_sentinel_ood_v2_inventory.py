@@ -306,8 +306,11 @@ from ecg_trust.ood_v2.inventory import (  # noqa: E402
     verify_wfdb_candidate_file_set,
 )
 from ecg_trust.ood_v2.pipeline import (  # noqa: E402
+    consume_inventory_builder_authorization,
+    verify_inventory_builder_input_contract,
     verify_inventory_builder_postflight,
     verify_inventory_builder_preflight,
+    verify_inventory_builder_raw_source_bindings,
 )
 
 EXPECTED_CHALLENGE_RECORDS = 1_000
@@ -315,6 +318,16 @@ EXPECTED_ZZU_RECORDS = 14_190
 EXPECTED_ZZU_PATIENTS = 11_643
 EXPECTED_ZZU_TWELVE_LEAD_RECORDS = 12_334
 EXPECTED_ZZU_NINE_LEAD_RECORDS = 1_856
+EXPECTED_ZZU_SELECTED_RECORDS = 12_328
+EXPECTED_ZZU_SELECTED_PATIENTS = 10_350
+EXPECTED_TOTAL_SELECTED_RECORDS = 13_328
+EXPECTED_ZZU_EXCLUSION_COUNTS = {
+    "duration_under_10_seconds": 6,
+    "lead_count_not_12": 0,
+    "noncanonical_lead_set": 0,
+    "pediatric_12_lead_flag_false": 1_856,
+    "sampling_frequency_not_500_hz": 0,
+}
 
 CHALLENGE_PRIVATE_SITE = "PhysioNet Challenge 2011 Set A"
 CHALLENGE_SITE_ALIAS = "challenge-set-a"
@@ -346,6 +359,22 @@ class InventoryExpectations:
     zzu_patients: int = EXPECTED_ZZU_PATIENTS
     zzu_twelve_lead_records: int = EXPECTED_ZZU_TWELVE_LEAD_RECORDS
     zzu_nine_lead_records: int = EXPECTED_ZZU_NINE_LEAD_RECORDS
+    zzu_selected_records: int = EXPECTED_ZZU_SELECTED_RECORDS
+    zzu_selected_patients: int = EXPECTED_ZZU_SELECTED_PATIENTS
+    total_selected_records: int = EXPECTED_TOTAL_SELECTED_RECORDS
+    zzu_duration_under_10_seconds: int = EXPECTED_ZZU_EXCLUSION_COUNTS[
+        "duration_under_10_seconds"
+    ]
+    zzu_lead_count_not_12: int = EXPECTED_ZZU_EXCLUSION_COUNTS["lead_count_not_12"]
+    zzu_noncanonical_lead_set: int = EXPECTED_ZZU_EXCLUSION_COUNTS[
+        "noncanonical_lead_set"
+    ]
+    zzu_pediatric_12_lead_flag_false: int = EXPECTED_ZZU_EXCLUSION_COUNTS[
+        "pediatric_12_lead_flag_false"
+    ]
+    zzu_sampling_frequency_not_500_hz: int = EXPECTED_ZZU_EXCLUSION_COUNTS[
+        "sampling_frequency_not_500_hz"
+    ]
 
     def __post_init__(self) -> None:
         for field, value in (
@@ -354,6 +383,9 @@ class InventoryExpectations:
             ("zzu_patients", self.zzu_patients),
             ("zzu_twelve_lead_records", self.zzu_twelve_lead_records),
             ("zzu_nine_lead_records", self.zzu_nine_lead_records),
+            ("zzu_selected_records", self.zzu_selected_records),
+            ("zzu_selected_patients", self.zzu_selected_patients),
+            ("total_selected_records", self.total_selected_records),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise InventoryCLIError(f"{field} must be a positive integer")
@@ -361,6 +393,45 @@ class InventoryExpectations:
             raise InventoryCLIError("ZZU lead-count strata must sum to the total record count")
         if self.zzu_patients > self.zzu_records:
             raise InventoryCLIError("ZZU patient count cannot exceed its record count")
+        if self.zzu_selected_records > self.zzu_records:
+            raise InventoryCLIError("selected ZZU count cannot exceed its candidate count")
+        if self.zzu_selected_patients > self.zzu_selected_records:
+            raise InventoryCLIError("selected ZZU patient count cannot exceed selected records")
+        if self.total_selected_records != self.challenge_records + self.zzu_selected_records:
+            raise InventoryCLIError("total selected count must equal both frozen cohorts")
+        exclusions = self.zzu_exclusion_counts
+        if self.zzu_selected_records + sum(exclusions.values()) != self.zzu_records:
+            raise InventoryCLIError("selected and excluded ZZU counts must equal candidates")
+        if (
+            exclusions["pediatric_12_lead_flag_false"]
+            != self.zzu_nine_lead_records
+        ):
+            raise InventoryCLIError("ZZU nine-lead and flag-false counts must match")
+        if (
+            self.zzu_selected_records
+            + exclusions["duration_under_10_seconds"]
+            + exclusions["lead_count_not_12"]
+            + exclusions["noncanonical_lead_set"]
+            + exclusions["sampling_frequency_not_500_hz"]
+            != self.zzu_twelve_lead_records
+        ):
+            raise InventoryCLIError("ZZU twelve-lead accounting differs from candidates")
+
+    @property
+    def zzu_exclusion_counts(self) -> dict[str, int]:
+        values = {
+            "duration_under_10_seconds": self.zzu_duration_under_10_seconds,
+            "lead_count_not_12": self.zzu_lead_count_not_12,
+            "noncanonical_lead_set": self.zzu_noncanonical_lead_set,
+            "pediatric_12_lead_flag_false": self.zzu_pediatric_12_lead_flag_false,
+            "sampling_frequency_not_500_hz": self.zzu_sampling_frequency_not_500_hz,
+        }
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in values.values()
+        ):
+            raise InventoryCLIError("ZZU exclusion counts must be non-negative integers")
+        return values
 
 
 @dataclass(frozen=True, slots=True)
@@ -522,6 +593,28 @@ def _validate_zzu_metadata_counts(
         raise InventoryCLIError(
             "ZZU nine-lead metadata count differs from the frozen upstream count"
         )
+
+
+def _validate_zzu_selection_counts(
+    selected: Sequence[ExternalInventoryRecord],
+    summary: ExternalInventoryBuildSummary,
+    expectations: InventoryExpectations,
+) -> None:
+    if summary.selected_record_count != expectations.zzu_selected_records or len(
+        selected
+    ) != expectations.zzu_selected_records:
+        raise InventoryCLIError("ZZU selected record count differs from the frozen count")
+    selected_patient_keys = {
+        record.patient_key for record in selected if record.patient_key is not None
+    }
+    if any(record.patient_key is None for record in selected) or len(
+        selected_patient_keys
+    ) != expectations.zzu_selected_patients:
+        raise InventoryCLIError("ZZU selected patient count differs from the frozen count")
+    if dict(summary.exclusion_counts) != expectations.zzu_exclusion_counts:
+        raise InventoryCLIError("ZZU exclusion vector differs from the frozen counts")
+    if summary.candidate_record_count != expectations.zzu_records:
+        raise InventoryCLIError("ZZU selection summary differs from the candidate count")
 
 
 def _challenge_records(
@@ -986,8 +1079,9 @@ def build_inventory_artifacts(
     selected_zzu, zzu_summary = select_zzu_pediatric_inventory_records(inputs.zzu_root, candidates)
     if not selected_zzu:
         raise InventoryCLIError("no ZZU record satisfies the frozen input contract")
-    if zzu_summary.candidate_record_count != resolved_expectations.zzu_records:
-        raise InventoryCLIError("ZZU build summary lost candidate records")
+    _validate_zzu_selection_counts(selected_zzu, zzu_summary, resolved_expectations)
+    if len(challenge) + len(selected_zzu) != resolved_expectations.total_selected_records:
+        raise InventoryCLIError("combined selected count differs from the frozen total")
 
     archive_closures = _build_archive_closures(inputs, challenge, candidates)
     inventory = build_external_inventory(
@@ -1275,7 +1369,56 @@ def run_inventory_build(arguments: argparse.Namespace) -> InventoryCLIResult:
         sampling_point_column=arguments.zzu_sampling_point_column,
         delimiter=_delimiter(arguments.zzu_delimiter),
     )
-    artifacts = build_inventory_artifacts(inputs, zzu_schema=schema)
+    if schema != ZZUMetadataSchema():
+        raise InventoryCLIError("production ZZU metadata schema differs from the frozen contract")
+    dataset_roots = {
+        CHALLENGE_2011_DATASET: inputs.challenge_root,
+        ZZU_PEDIATRIC_DATASET: inputs.zzu_root,
+    }
+    raw_source_paths = {
+        "challenge_archive": arguments.challenge_archive,
+        "challenge_records": arguments.challenge_records,
+        "challenge_records_acceptable": arguments.challenge_acceptable,
+        "challenge_records_unacceptable": arguments.challenge_unacceptable,
+        "zzu_archive_z01": arguments.zzu_archive_z01,
+        "zzu_archive_zip": arguments.zzu_archive_zip,
+        "zzu_attributes_dictionary": arguments.zzu_metadata,
+    }
+    verify_inventory_builder_input_contract(
+        preflight,
+        project_root=project_root,
+        dataset_roots=dataset_roots,
+        raw_source_paths=raw_source_paths,
+        seven_zip_executable=arguments.seven_zip_executable,
+    )
+    consume_inventory_builder_authorization(preflight, project_root=project_root)
+    verify_inventory_builder_raw_source_bindings(preflight, project_root=project_root)
+    counts = preflight.inventory_counts
+    exclusions = counts.zzu_exclusion_counts
+    expectations = InventoryExpectations(
+        challenge_records=counts.challenge_records,
+        zzu_records=counts.zzu_candidate_records,
+        zzu_patients=counts.zzu_candidate_patients,
+        zzu_twelve_lead_records=counts.zzu_twelve_lead_records,
+        zzu_nine_lead_records=counts.zzu_nine_lead_records,
+        zzu_selected_records=counts.zzu_records,
+        zzu_selected_patients=counts.zzu_patients,
+        total_selected_records=counts.total_records,
+        zzu_duration_under_10_seconds=exclusions["duration_under_10_seconds"],
+        zzu_lead_count_not_12=exclusions["lead_count_not_12"],
+        zzu_noncanonical_lead_set=exclusions["noncanonical_lead_set"],
+        zzu_pediatric_12_lead_flag_false=exclusions[
+            "pediatric_12_lead_flag_false"
+        ],
+        zzu_sampling_frequency_not_500_hz=exclusions[
+            "sampling_frequency_not_500_hz"
+        ],
+    )
+    artifacts = build_inventory_artifacts(
+        inputs,
+        zzu_schema=schema,
+        expectations=expectations,
+    )
     private_bytes = artifacts.inventory.to_canonical_json_bytes()
     public_bytes = _canonical_json_bytes(artifacts.public_projection) + b"\n"
     result = write_inventory_artifacts(

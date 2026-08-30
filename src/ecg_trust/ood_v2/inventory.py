@@ -239,6 +239,24 @@ def _canonical_archive_leaf(value: object, field: str) -> str:
     return leaf
 
 
+def _canonical_seven_zip_slt_member_path(value: object, field: str) -> str:
+    """Canonicalize one 7-Zip Windows ``-slt`` presentation path.
+
+    The bound Windows 7-Zip executable renders nested archive-member paths with
+    backslash separators even when the ZIP stores portable path names.  Keep
+    the global archive-path contract POSIX-only and normalize only this
+    presentation boundary.  A path may use one separator convention, never a
+    mixture of both; the shared canonical validator then rejects every unsafe
+    or non-canonical normalized path.
+    """
+
+    member = _require_text(value, field)
+    if "/" in member and "\\" in member:
+        raise ExternalInventoryError(f"{field} uses mixed path separators")
+    normalized = member.replace("\\", "/")
+    return _canonical_archive_path(normalized, field)
+
+
 def _require_prefixed_sha256(value: object, field: str) -> str:
     digest = _require_text(value, field)
     if not digest.startswith("sha256:"):
@@ -2036,7 +2054,9 @@ def parse_seven_zip_slt_listing(text: str) -> tuple[_SevenZipListedMember, ...]:
             if "Type" in block or "Physical Size" in block:
                 continue
             raise ExternalInventoryError("7-Zip member listing omits Size")
-        path = _canonical_archive_path(block["Path"], "7-Zip member path")
+        path = _canonical_seven_zip_slt_member_path(
+            block["Path"], "7-Zip member path"
+        )
         if path in seen or path.casefold() in seen_casefolded:
             raise ExternalInventoryError("7-Zip listing contains duplicate member paths")
         seen.add(path)

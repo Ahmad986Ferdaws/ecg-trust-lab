@@ -30,6 +30,7 @@ if sys.flags.no_site:
 import numpy as np
 import pytest
 import torch
+import yaml  # type: ignore[import-untyped]
 from torch import Tensor
 from torch.utils.data import Dataset, get_worker_info
 
@@ -300,6 +301,179 @@ def _exact_live_remote_stdout(revision: str) -> str:
         f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
         f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
     )
+
+
+def _successor_parent_yaml() -> dict[str, Any]:
+    source = _SMOKE_PROJECT_ROOT / "configs" / "trust_sentinel_ood_external_v2_1.yaml"
+    return cast(dict[str, Any], yaml.safe_load(source.read_text(encoding="utf-8")))
+
+
+def test_x4_amendment_closes_failed_x3_lineage_and_exact_git_resolution() -> None:
+    modified_paths = [
+        "configs/trust_sentinel_ood_external_v2_1.yaml",
+        "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+        "scripts/build_trust_sentinel_ood_v2_inventory.py",
+        "src/ecg_trust/ood_v2/inventory.py",
+        "src/ecg_trust/ood_v2/models.py",
+        "src/ecg_trust/ood_v2/pipeline.py",
+        "tests/unit/test_ood_v2_inventory.py",
+        "tests/unit/test_ood_v2_inventory_cli.py",
+        "tests/unit/test_ood_v2_models.py",
+        "tests/unit/test_ood_v2_pipeline.py",
+        "tests/unit/test_ood_v2_protocol_closure.py",
+    ]
+    payload = _successor_parent_yaml()
+    design = cast(dict[str, Any], payload["design_history"])
+
+    assert design["x3_inventory_builder_preflight"] == {
+        "amendment": (
+            "pin_exact_Git_install_root_add_single_durable_inventory_build_"
+            "authorization_and_harden_inventory_contracts"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_predecessor_private_auth_revision": 1,
+            "exact_modified_paths": modified_paths,
+            "sole_parent": "6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6",
+            "status_for_every_path": "modified",
+        },
+        "new_successor_external_source_archive_header_record_metadata_or_"
+        "waveform_byte_read": False,
+        "new_successor_trained_checkpoint_or_inference_access_occurred": False,
+        "operational_amendment_only": True,
+        "outcome": "refused_before_successor_parent_or_external_source_access",
+        "predecessor_private_auth_frozen_at_utc": "2026-08-30T00:50:40Z",
+        "predecessor_private_auth_implementation_revision": (
+            "6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6"
+        ),
+        "predecessor_private_auth_parent_config_file_sha256": (
+            "sha256:9b0358be1d4a12ca1771c57d8387c1b332bbef5698e01d3da2707f59157a586c"
+        ),
+        "root_cause": (
+            "isolated_runtime_PATH_was_System32_only_while_Git_resolution_used_"
+            "shutil_which_git"
+        ),
+        "scientific_protocol_change": False,
+        "successor_external_access_armed_marker_created": False,
+        "successor_external_one_shot_claim_created": False,
+        "successor_inventory_build_authorization_marker_created": False,
+        "successor_inventory_created": False,
+        "successor_output_root_created": False,
+        "successor_parent_protocol_byte_read": False,
+    }
+
+    revision = cast(dict[str, Any], payload["revision_boundary"])
+    git_execution = cast(dict[str, Any], revision["git_execution"])
+    assert git_execution["install_root_windows"] == r"C:\Program Files\Git"
+    assert git_execution["executable_resolution"] == (
+        "exact_install_root_cmd_launcher_and_mingw64_binary_without_PATH_lookup"
+    )
+    protected = cast(dict[str, Any], revision["forbidden_private_history"])
+    assert (
+        "artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json"
+        in protected["paths"]
+    )
+
+
+def test_x4_inventory_authorization_counts_and_seven_zip_contract_are_exact() -> None:
+    payload = _successor_parent_yaml()
+    inventory = cast(dict[str, Any], payload["successor_inventory_contract"])
+    assert inventory["exact_zzu_exclusion_counts"] == {
+        "duration_under_10_seconds": 6,
+        "lead_count_not_12": 0,
+        "noncanonical_lead_set": 0,
+        "pediatric_12_lead_flag_false": 1_856,
+        "sampling_frequency_not_500_hz": 0,
+    }
+    assert inventory["count_invariants"] == {
+        "challenge_plus_zzu_selected_equals_total_records": True,
+        "pediatric_12_lead_flag_false_equals_nine_lead_records": True,
+        "zzu_selected_patients_not_greater_than_zzu_selected_records": True,
+        "zzu_selected_plus_exclusions_equals_candidate_records": True,
+        "zzu_selected_plus_nonflag_exclusions_equals_twelve_lead_records": True,
+        "zzu_twelve_lead_plus_nine_lead_equals_candidate_records": True,
+    }
+
+    runtime = cast(dict[str, Any], payload["runtime"])
+    seven_zip = cast(dict[str, Any], runtime["split_archive_tool"])
+    assert seven_zip["windows_slt_member_path_normalization"] == {
+        "accepted_separator_conventions": [
+            "forward_slash_only",
+            "backslash_only",
+        ],
+        "backslash_to_forward_slash_before_shared_canonical_validation": True,
+        "mixed_separators": "forbidden",
+        "rejected_after_normalization": [
+            "absolute_rooted_drive_UNC_or_device_paths",
+            "traversal_dot_empty_or_trailing_components",
+            "Windows_reserved_names_or_control_characters",
+            "exact_or_casefolded_collisions",
+        ],
+        "scope": "bound_windows_7zip_slt_presentation_only",
+        "shared_canonical_path_validation_after_normalization": "required",
+        "stored_archive_and_evidence_paths_remain_posix_forward_slash_only": True,
+    }
+
+    one_shot = cast(dict[str, Any], payload["one_shot_external_access"])
+    assert one_shot["inventory_build_authorization"] == {
+        "artifact_type": "ecg_trust.ood_external_v2_1_inventory_builder_attempt",
+        "authorization_id": "x4_inventory_build_attempt_1",
+        "contains_external_source_bytes_or_identifiers": False,
+        "contains_model_outputs_embeddings_or_scores": False,
+        "creation": "atomic_create_new_no_overwrite",
+        "distinct_from_external_waveform_one_shot_claim": True,
+        "durability": "exact_file_flush_and_parent_directory_durability_or_fail_closed",
+        "external_one_shot_claim_consumed_at_marker_creation": False,
+        "failure_after_consumption_requires_new_frozen_amendment_and_new_"
+        "authorization_id": True,
+        "first_official_source_byte_requires_durable_marker": True,
+        "git_ignored_and_untracked": True,
+        "maximum_consumptions": 1,
+        "path": (
+            "artifacts/trust_sentinel/"
+            ".ood_external_v2_1.x4-inventory-build-attempt.json"
+        ),
+        "postconsumption_first_raw_action": (
+            "hash_every_official_source_against_exact_parent_size_sha256_and_md5"
+        ),
+        "preconsumption_requirements": [
+            "exact_frozen_parent_schema_and_count_invariants_verified",
+            "exact_canonical_dataset_root_and_raw_source_path_keysets_verified",
+            "exact_bound_7zip_tool_identity_verified",
+            "raw_source_declared_path_size_sha256_and_md5_bindings_loaded_from_parent",
+        ],
+        "retention": "permanent",
+        "retry_resume_or_reuse": "forbidden",
+        "scope": "sole_x4_preclaim_inventory_build_attempt",
+        "timing": (
+            "after_exact_preflight_path_schema_and_tool_binding_before_first_"
+            "official_source_byte"
+        ),
+    }
+    assert one_shot["postclaim_no_retry"] == {
+        "absolute_without_operator_or_failure_exception": True,
+        "failure_requires_new_protocol_and_new_output_root": True,
+        "integrity_replays_declared_by_this_protocol_are_same_claim_"
+        "verification_not_retries": True,
+        "retry_resume_reuse_or_second_scientific_inference": "forbidden",
+        "scope": "after_external_one_shot_claim_entry_first_becomes_visible",
+    }
+    assert "retry_resume_or_second_inference" not in one_shot
+    assert "durable_x4_inventory_build_authorization_marker_verified" in one_shot[
+        "prerequisites"
+    ]
+
+    protocol = (
+        _SMOKE_PROJECT_ROOT / "docs" / "TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md"
+    ).read_text(encoding="utf-8")
+    required_literals = (
+        "6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6",
+        "sha256:9b0358be1d4a12ca1771c57d8387c1b332bbef5698e01d3da2707f59157a586c",
+        "2026-08-30T00:50:40Z",
+        r"C:\Program Files\Git",
+        "artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json",
+        "no-retry rule is absolute",
+    )
+    assert all(literal in protocol for literal in required_literals)
 
 
 @pytest.mark.parametrize("relative_path", _ISOLATED_ENTRYPOINTS)
@@ -1124,6 +1298,7 @@ def test_private_history_query_covers_every_forbidden_path_and_fails_closed(
         pipeline.SUCCESSOR_OUTPUT_PATH,
         pipeline.PREDECESSOR_CLAIM_PATH,
         pipeline.SUCCESSOR_CLAIM_PATH,
+        pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
         ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
         ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**",
         ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.runtime-*/**",

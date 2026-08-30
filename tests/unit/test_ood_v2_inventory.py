@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import binascii
 import json
+import shutil
 import sys
 import tarfile
+import zipfile
 from collections.abc import Callable
 from dataclasses import replace
 from io import BytesIO
@@ -1123,3 +1125,133 @@ def test_seven_zip_listing_parser_rejects_traversal_duplicates_and_links(
 ) -> None:
     with pytest.raises(ExternalInventoryError):
         parse_seven_zip_slt_listing(listing)
+
+
+def _seven_zip_slt_file_block(path: str) -> str:
+    return (
+        f"Path = {path}\n"
+        "Size = 1\n"
+        "Folder = -\n"
+        "Attributes = A\n"
+        "CRC = 00000000\n"
+        "Encrypted = -\n"
+    )
+
+
+def test_seven_zip_listing_parser_normalizes_windows_presentation_paths() -> None:
+    listing = (
+        "Path = Child_ecg\\P00\n"
+        "Size = 0\n"
+        "Folder = +\n"
+        "Attributes = D\n"
+        "CRC = \n"
+        "Encrypted = -\n\n"
+        + _seven_zip_slt_file_block(
+            r"Child_ecg\P00\P00001\P00001_E01.hea"
+        )
+    )
+
+    members = parse_seven_zip_slt_listing(listing)
+
+    assert [(member.path, member.is_directory) for member in members] == [
+        ("Child_ecg/P00", True),
+        ("Child_ecg/P00/P00001/P00001_E01.hea", False),
+    ]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        r"Child_ecg\P00/file.dat",
+        r"\\server\share\file.dat",
+        r"\Child_ecg\file.dat",
+        r"C:\Child_ecg\file.dat",
+        r"Child_ecg\..\evil.dat",
+        r"Child_ecg\.\file.dat",
+        r"Child_ecg\\file.dat",
+        "Child_ecg\\folder\\",
+        r"Child_ecg\folder.\file.dat",
+        r"Child_ecg\folder \file.dat",
+        r"Child_ecg\AUX.txt",
+        "Child_ecg\\bad\x01\\file.dat",
+    ],
+)
+def test_seven_zip_listing_parser_rejects_unsafe_windows_paths(path: str) -> None:
+    with pytest.raises(ExternalInventoryError):
+        parse_seven_zip_slt_listing(_seven_zip_slt_file_block(path))
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (r"Child_ecg\P00\record.dat", "Child_ecg/P00/record.dat"),
+        (r"Child_ecg\P00\RECORD.dat", r"child_ecg\p00\record.dat"),
+    ],
+)
+def test_seven_zip_listing_parser_rejects_normalized_path_collisions(
+    first: str,
+    second: str,
+) -> None:
+    listing = _seven_zip_slt_file_block(first) + "\n" + _seven_zip_slt_file_block(second)
+
+    with pytest.raises(ExternalInventoryError, match="duplicate member paths"):
+        parse_seven_zip_slt_listing(listing)
+
+
+def _exact_bound_seven_zip_26_02_or_skip() -> Path:
+    candidates: list[Path] = [
+        Path(r"C:\Program Files\7-Zip\7z.exe"),
+        Path.home() / "scoop" / "shims" / "7z.exe",
+    ]
+    for command in ("7z", "7z.exe"):
+        located = shutil.which(command)
+        if located is not None:
+            candidates.append(Path(located))
+    expected_identity = (
+        "26.02",
+        "7z.exe",
+        576_000,
+        "83967f1b02b43c4efeda302795722c809e0e81b8307de73558d10484d5676a7d",
+        "7z.dll",
+        1_906_688,
+        "69fd4df057985c40e510e2fac182881c7f85e90aa13ec703f763a8fdb2ce61f8",
+    )
+    for requested in dict.fromkeys(candidates):
+        try:
+            executable, _ = inventory_module._resolve_seven_zip_executable(requested)
+            binding = resolve_seven_zip_tool_binding(requested)
+        except (OSError, ExternalInventoryError):
+            continue
+        observed_identity = (
+            binding.version,
+            binding.executable_name,
+            binding.executable_size_bytes,
+            binding.executable_sha256,
+            binding.library_name,
+            binding.library_size_bytes,
+            binding.library_sha256,
+        )
+        if observed_identity == expected_identity:
+            return executable
+    pytest.skip("the exact frozen 7-Zip 26.02 executable is unavailable")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="exact Windows 7-Zip presentation")
+def test_exact_windows_seven_zip_nested_path_smoke(tmp_path: Path) -> None:
+    executable = _exact_bound_seven_zip_26_02_or_skip()
+    archive = tmp_path / "synthetic-nested.zip"
+    nested_path = "Child_ecg/P00/P00001/P00001_E01.hea"
+    with zipfile.ZipFile(archive, mode="w", compression=zipfile.ZIP_STORED) as handle:
+        handle.writestr(nested_path, b"synthetic-header")
+
+    listing = inventory_module._run_seven_zip(
+        executable,
+        ("l", "-slt", "-sccUTF-8", str(archive)),
+    )
+    windows_presentation = nested_path.replace("/", "\\")
+
+    assert f"Path = {windows_presentation}" in listing
+    members = parse_seven_zip_slt_listing(listing)
+    assert [(member.path, member.is_directory) for member in members] == [
+        (nested_path, False)
+    ]

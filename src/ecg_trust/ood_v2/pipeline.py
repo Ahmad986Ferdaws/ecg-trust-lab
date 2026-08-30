@@ -187,7 +187,7 @@ EXPECTED_PARENT_CONFIG_SHA256: Final = (
     "sha256:3aacb31be939d1a2bea96bb29f193d60a4b54c38a40a1a7e2a490cfe60c3b0d9"
 )
 EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256: Final[str | None] = (
-    "sha256:9b0358be1d4a12ca1771c57d8387c1b332bbef5698e01d3da2707f59157a586c"
+    "sha256:ac3653cd3a83d8d963531e54566487749c0faf03b5bc816ae66bdbde7f21927c"
 )
 SUCCESSOR_PROTOCOL_ID: Final = PROTOCOL_ID
 PREDECESSOR_TERMINATION_PATH: Final = (
@@ -224,6 +224,12 @@ SUCCESSOR_OUTPUT_PATH: Final = "artifacts/trust_sentinel/ood_external_v2_1"
 SUCCESSOR_CLAIM_PATH: Final = (
     "artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json"
 )
+SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
+    "artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json"
+)
+SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE: Final = (
+    "ecg_trust.ood_external_v2_1_inventory_builder_attempt"
+)
 FORBIDDEN_GIT_HISTORY_PATHS: Final[tuple[str, ...]] = (
     ":(glob)data/raw/external-ood/**",
     ":(glob)artifacts/trust_sentinel/ood_external_v2_preflight/private/**",
@@ -232,6 +238,7 @@ FORBIDDEN_GIT_HISTORY_PATHS: Final[tuple[str, ...]] = (
     SUCCESSOR_OUTPUT_PATH,
     PREDECESSOR_CLAIM_PATH,
     SUCCESSOR_CLAIM_PATH,
+    SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
     ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
     ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**",
     ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.runtime-*/**",
@@ -344,6 +351,7 @@ RUNTIME_FILESYSTEM_TREE_KINDS: Final[tuple[str, str, str]] = (
     "git_mingw64_runtime",
 )
 EXPECTED_GIT_VERSION: Final = "git version 2.53.0.windows.2"
+EXPECTED_GIT_INSTALL_ROOT: Final = r"C:\Program Files\Git"
 EXPECTED_GIT_LAUNCHER_NAME: Final = "git.exe"
 EXPECTED_GIT_LAUNCHER_SIZE_BYTES: Final = 46_464
 EXPECTED_GIT_LAUNCHER_SHA256: Final = (
@@ -508,6 +516,37 @@ EXPECTED_RAW_SOURCE_PATHS: Final[Mapping[str, str]] = MappingProxyType(
     }
 )
 
+EXPECTED_SUCCESSOR_INVENTORY_COUNTS: Final[Mapping[str, int]] = MappingProxyType(
+    {
+        "challenge_records": 1_000,
+        "total_records": 13_328,
+        "zzu_candidate_patients": 11_643,
+        "zzu_candidate_records": 14_190,
+        "zzu_nine_lead_records": 1_856,
+        "zzu_patients": 10_350,
+        "zzu_records": 12_328,
+        "zzu_twelve_lead_records": 12_334,
+    }
+)
+EXPECTED_SUCCESSOR_ZZU_EXCLUSION_COUNTS: Final[Mapping[str, int]] = MappingProxyType(
+    {
+        "duration_under_10_seconds": 6,
+        "lead_count_not_12": 0,
+        "noncanonical_lead_set": 0,
+        "pediatric_12_lead_flag_false": 1_856,
+        "sampling_frequency_not_500_hz": 0,
+    }
+)
+INVENTORY_BUILDER_RAW_SOURCE_KEYS: Final[tuple[str, ...]] = (
+    "challenge_archive",
+    "challenge_records",
+    "challenge_records_acceptable",
+    "challenge_records_unacceptable",
+    "zzu_archive_z01",
+    "zzu_archive_zip",
+    "zzu_attributes_dictionary",
+)
+
 # The exact frozen v2 parent is retained as a transparent pre-inference
 # infeasibility.  Its canonical-lead wording forbids the case-only augmented
 # lead aliases present in the already inventoried ZZU headers.  No execution
@@ -632,6 +671,12 @@ SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
 SECOND_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
     "sha256:33da72f63106f7783ff63bf40f33ca94d55dac457d05bdc551a26fa72d11fac0"
 )
+THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
+    "6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6"
+)
+THIRD_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
+    "sha256:9b0358be1d4a12ca1771c57d8387c1b332bbef5698e01d3da2707f59157a586c"
+)
 SUCCESSOR_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "configs/trust_sentinel_ood_external_v2_1.yaml",
     "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
@@ -646,6 +691,19 @@ SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
     "src/ecg_trust/ood_v2/models.py",
     "src/ecg_trust/ood_v2/pipeline.py",
+    "tests/unit/test_ood_v2_models.py",
+    "tests/unit/test_ood_v2_pipeline.py",
+    "tests/unit/test_ood_v2_protocol_closure.py",
+)
+SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
+    "configs/trust_sentinel_ood_external_v2_1.yaml",
+    "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+    "scripts/build_trust_sentinel_ood_v2_inventory.py",
+    "src/ecg_trust/ood_v2/inventory.py",
+    "src/ecg_trust/ood_v2/models.py",
+    "src/ecg_trust/ood_v2/pipeline.py",
+    "tests/unit/test_ood_v2_inventory.py",
+    "tests/unit/test_ood_v2_inventory_cli.py",
     "tests/unit/test_ood_v2_models.py",
     "tests/unit/test_ood_v2_pipeline.py",
     "tests/unit/test_ood_v2_protocol_closure.py",
@@ -780,6 +838,69 @@ class ProjectSourceTreeBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class SuccessorInventoryCountBinding:
+    challenge_records: int
+    zzu_candidate_records: int
+    zzu_candidate_patients: int
+    zzu_twelve_lead_records: int
+    zzu_nine_lead_records: int
+    zzu_records: int
+    zzu_patients: int
+    total_records: int
+    zzu_exclusion_counts: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        values = {
+            "challenge_records": self.challenge_records,
+            "total_records": self.total_records,
+            "zzu_candidate_patients": self.zzu_candidate_patients,
+            "zzu_candidate_records": self.zzu_candidate_records,
+            "zzu_nine_lead_records": self.zzu_nine_lead_records,
+            "zzu_patients": self.zzu_patients,
+            "zzu_records": self.zzu_records,
+            "zzu_twelve_lead_records": self.zzu_twelve_lead_records,
+        }
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 1
+            for value in values.values()
+        ):
+            raise OODExternalV2ConfigError(
+                "successor inventory counts must be positive integers"
+            )
+        exclusions = dict(self.zzu_exclusion_counts)
+        if set(exclusions) != set(EXPECTED_SUCCESSOR_ZZU_EXCLUSION_COUNTS) or any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in exclusions.values()
+        ):
+            raise OODExternalV2ConfigError(
+                "successor ZZU exclusion counts differ from the frozen reasons"
+            )
+        if (
+            self.challenge_records + self.zzu_records != self.total_records
+            or self.zzu_records + sum(exclusions.values())
+            != self.zzu_candidate_records
+            or self.zzu_twelve_lead_records + self.zzu_nine_lead_records
+            != self.zzu_candidate_records
+            or exclusions["pediatric_12_lead_flag_false"]
+            != self.zzu_nine_lead_records
+            or (
+                self.zzu_records
+                + exclusions["duration_under_10_seconds"]
+                + exclusions["lead_count_not_12"]
+                + exclusions["noncanonical_lead_set"]
+                + exclusions["sampling_frequency_not_500_hz"]
+                != self.zzu_twelve_lead_records
+            )
+            or self.zzu_patients > self.zzu_records
+            or self.zzu_candidate_patients > self.zzu_candidate_records
+        ):
+            raise OODExternalV2ConfigError(
+                "successor inventory count accounting is inconsistent"
+            )
+        object.__setattr__(self, "zzu_exclusion_counts", MappingProxyType(exclusions))
+
+
+@dataclass(frozen=True, slots=True)
 class OODExternalV2ParentConfig:
     path: Path
     file_sha256: str
@@ -809,6 +930,7 @@ class OODExternalV2ParentConfig:
     claim_path: str
     raw_source_bindings: Mapping[str, RawSourceBinding] | None
     seven_zip_tool_binding: SevenZipToolBinding | None
+    inventory_counts: SuccessorInventoryCountBinding | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -818,6 +940,7 @@ class SuccessorParentPreflight:
     status: str
     raw_source_bindings: Mapping[str, RawSourceBinding]
     seven_zip_tool_binding: SevenZipToolBinding
+    inventory_counts: SuccessorInventoryCountBinding
 
 
 @dataclass(frozen=True, slots=True)
@@ -830,6 +953,9 @@ class InventoryBuilderPreflight:
     project_source_tree_sha256: str
     python_environment_sha256: str
     git_runtime_tree_sha256: str
+    raw_source_bindings: Mapping[str, RawSourceBinding]
+    seven_zip_tool_binding: SevenZipToolBinding
+    inventory_counts: SuccessorInventoryCountBinding
 
 
 @dataclass(frozen=True, slots=True)
@@ -881,6 +1007,7 @@ class OODExternalV2ChildContract:
     dataset_roots: Mapping[str, str]
     decision_bindings: Mapping[str, BoundFile]
     raw_source_bindings: Mapping[str, RawSourceBinding]
+    inventory_builder_attempt: BoundFile
     runtime_environment: RuntimeEnvironmentBinding
     runtime_bindings: Mapping[str, str]
     project_source_tree: ProjectSourceTreeBinding
@@ -1238,7 +1365,109 @@ def load_parent_config(path: str | Path) -> OODExternalV2ParentConfig:
         # The v2.1 loader must populate this from successor-parent bytes.
         raw_source_bindings=None,
         seven_zip_tool_binding=None,
+        inventory_counts=None,
     )
+
+
+def _successor_inventory_count_binding(
+    payload: Mapping[str, object],
+) -> SuccessorInventoryCountBinding:
+    external_sources = _mapping(
+        payload.get("external_sources"),
+        "successor external sources",
+    )
+    challenge = _mapping(
+        external_sources.get(CHALLENGE_2011_DATASET),
+        "successor Challenge source",
+    )
+    zzu = _mapping(
+        external_sources.get(ZZU_PEDIATRIC_DATASET),
+        "successor ZZU source",
+    )
+    upstream = _mapping(zzu.get("upstream_counts"), "successor ZZU upstream counts")
+    observed = _mapping(
+        zzu.get("observed_metadata_only_counts"),
+        "successor ZZU observed metadata counts",
+    )
+    inventory_contract = _mapping(
+        payload.get("successor_inventory_contract"),
+        "successor inventory contract",
+    )
+    selected = _mapping(
+        inventory_contract.get("exact_selected_counts"),
+        "successor exact selected counts",
+    )
+    exclusions = _mapping(
+        inventory_contract.get("exact_zzu_exclusion_counts"),
+        "successor exact ZZU exclusion counts",
+    )
+    count_invariants = _mapping(
+        inventory_contract.get("count_invariants"),
+        "successor inventory count invariants",
+    )
+    expected_upstream = {
+        "nine_lead_records": 1_856,
+        "patients_total": 11_643,
+        "records_total": 14_190,
+        "twelve_lead_records": 12_334,
+    }
+    expected_observed = {
+        "candidate_patients": 11_643,
+        "candidate_records": 14_190,
+        "excluded_non_12_lead": 1_856,
+        "excluded_other": 0,
+        "excluded_under_10_seconds": 6,
+        "selected_patients": 10_350,
+        "selected_records": 12_328,
+    }
+    expected_selected = {
+        "challenge_records": 1_000,
+        "total_records": 13_328,
+        "zzu_patients": 10_350,
+        "zzu_records": 12_328,
+    }
+    if (
+        challenge.get("expected_records") != 1_000
+        or dict(upstream) != expected_upstream
+        or dict(observed) != expected_observed
+        or dict(selected) != expected_selected
+        or dict(exclusions) != dict(EXPECTED_SUCCESSOR_ZZU_EXCLUSION_COUNTS)
+        or count_invariants
+        != {
+            "challenge_plus_zzu_selected_equals_total_records": True,
+            "pediatric_12_lead_flag_false_equals_nine_lead_records": True,
+            "zzu_selected_patients_not_greater_than_zzu_selected_records": True,
+            "zzu_selected_plus_exclusions_equals_candidate_records": True,
+            "zzu_selected_plus_nonflag_exclusions_equals_twelve_lead_records": True,
+            "zzu_twelve_lead_plus_nine_lead_equals_candidate_records": True,
+        }
+    ):
+        raise OODExternalV2ConfigError(
+            "successor inventory counts differ from the frozen metadata contract"
+        )
+    binding = SuccessorInventoryCountBinding(
+        challenge_records=1_000,
+        zzu_candidate_records=14_190,
+        zzu_candidate_patients=11_643,
+        zzu_twelve_lead_records=12_334,
+        zzu_nine_lead_records=1_856,
+        zzu_records=12_328,
+        zzu_patients=10_350,
+        total_records=13_328,
+        zzu_exclusion_counts=cast(Mapping[str, int], exclusions),
+    )
+    if {
+        "challenge_records": binding.challenge_records,
+        "total_records": binding.total_records,
+        "zzu_candidate_patients": binding.zzu_candidate_patients,
+        "zzu_candidate_records": binding.zzu_candidate_records,
+        "zzu_nine_lead_records": binding.zzu_nine_lead_records,
+        "zzu_patients": binding.zzu_patients,
+        "zzu_records": binding.zzu_records,
+        "zzu_twelve_lead_records": binding.zzu_twelve_lead_records,
+    } != dict(EXPECTED_SUCCESSOR_INVENTORY_COUNTS):
+        raise OODExternalV2ConfigError("successor inventory count binding differs")
+    return binding
 
 
 def verify_successor_parent_preflight(
@@ -1400,6 +1629,51 @@ def verify_successor_parent_preflight(
         raise OODExternalV2ConfigError(
             "successor private-remote authentication amendment declaration differs"
         )
+    inventory_builder_amendment = _mapping(
+        design.get("x3_inventory_builder_preflight"),
+        "successor inventory-builder amendment",
+    )
+    expected_inventory_builder_amendment = {
+        "amendment": (
+            "pin_exact_Git_install_root_add_single_durable_inventory_build_"
+            "authorization_and_harden_inventory_contracts"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_predecessor_private_auth_revision": 1,
+            "exact_modified_paths": list(
+                SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS
+            ),
+            "sole_parent": THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+            "status_for_every_path": "modified",
+        },
+        "new_successor_external_source_archive_header_record_metadata_or_"
+        "waveform_byte_read": False,
+        "new_successor_trained_checkpoint_or_inference_access_occurred": False,
+        "operational_amendment_only": True,
+        "outcome": "refused_before_successor_parent_or_external_source_access",
+        "predecessor_private_auth_frozen_at_utc": "2026-08-30T00:50:40Z",
+        "predecessor_private_auth_implementation_revision": (
+            THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+        ),
+        "predecessor_private_auth_parent_config_file_sha256": (
+            THIRD_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+        ),
+        "root_cause": (
+            "isolated_runtime_PATH_was_System32_only_while_Git_resolution_used_"
+            "shutil_which_git"
+        ),
+        "scientific_protocol_change": False,
+        "successor_external_access_armed_marker_created": False,
+        "successor_external_one_shot_claim_created": False,
+        "successor_inventory_build_authorization_marker_created": False,
+        "successor_inventory_created": False,
+        "successor_output_root_created": False,
+        "successor_parent_protocol_byte_read": False,
+    }
+    if inventory_builder_amendment != expected_inventory_builder_amendment:
+        raise OODExternalV2ConfigError(
+            "successor inventory-builder amendment declaration differs"
+        )
     revision_boundary = _mapping(
         payload.get("revision_boundary"),
         "successor revision boundary",
@@ -1560,6 +1834,49 @@ def verify_successor_parent_preflight(
         "tracking_ref": EXPECTED_GIT_REMOTE_MAIN_REF,
     }:
         raise OODExternalV2ConfigError("successor remote declaration differs")
+    git_execution = _mapping(
+        revision_boundary.get("git_execution"),
+        "successor Git execution",
+    )
+    if git_execution != {
+        "executable": "exact_bound_mingw64_bin_git_exe",
+        "executable_resolution": (
+            "exact_install_root_cmd_launcher_and_mingw64_binary_without_PATH_lookup"
+        ),
+        "full_mingw64_tree_path_free_hash_bound": True,
+        "global_system_includes_replacements_alternates_grafts_shallow_sparse_"
+        "and_worktree_config": "forbidden",
+        "install_root_windows": EXPECTED_GIT_INSTALL_ROOT,
+        "local_config": "exact_section_key_value_allowlist_only",
+        "sanitized_environment_and_exact_git_dir_work_tree": True,
+        "status_hardening": {
+            "core_checkStat": "default",
+            "core_fsmonitor": False,
+            "core_ignoreStat": False,
+            "core_preloadIndex": False,
+            "core_trustctime": True,
+            "core_untrackedCache": False,
+        },
+        "version": "git_version_2.53.0.windows.2",
+    }:
+        raise OODExternalV2ConfigError("successor Git execution declaration differs")
+    forbidden_history = _mapping(
+        revision_boundary.get("forbidden_private_history"),
+        "successor forbidden private history",
+    )
+    if forbidden_history != {
+        "command": (
+            "git_log_full_history_all_reflog_format_H_double_dash_exact_glob_pathspecs"
+        ),
+        "limitation": "unreachable_object_contents_are_not_claimed_absent",
+        "paths": list(FORBIDDEN_GIT_HISTORY_PATHS),
+        "proven_scope": "protected_pathnames_reachable_from_local_refs_and_reflogs",
+        "required_output": "exact_empty_stdout",
+        "timing": ["child_freeze", "immediately_preclaim", "post_evaluation"],
+    }:
+        raise OODExternalV2ConfigError(
+            "successor forbidden private history declaration differs"
+        )
     predecessor_parent = root_path.joinpath(*PurePosixPath(PARENT_CONFIG_DEFAULT).parts)
     if load_parent_config(predecessor_parent).file_sha256 != EXPECTED_PARENT_CONFIG_SHA256:
         raise OODExternalV2IntegrityError("predecessor parent bytes differ")
@@ -1673,12 +1990,21 @@ def verify_successor_parent_preflight(
                 "original v2 claim or output path was unexpectedly used"
             )
 
+    inventory_counts = _successor_inventory_count_binding(payload)
     inventory_contract = _mapping(
         payload.get("successor_inventory_contract"),
         "successor inventory contract",
     )
     one_shot = _mapping(payload.get("one_shot_external_access"), "successor one shot")
     claim = _mapping(one_shot.get("external_claim"), "successor external claim")
+    inventory_authorization = _mapping(
+        one_shot.get("inventory_build_authorization"),
+        "successor inventory build authorization",
+    )
+    postclaim_no_retry = _mapping(
+        one_shot.get("postclaim_no_retry"),
+        "successor postclaim no-retry contract",
+    )
     if (
         inventory_contract.get("private_path") != SUCCESSOR_PRIVATE_INVENTORY_PATH
         or inventory_contract.get("public_projection_path")
@@ -1689,6 +2015,70 @@ def verify_successor_parent_preflight(
         != "artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json"
     ):
         raise OODExternalV2ConfigError("successor namespace paths differ")
+    if inventory_authorization != {
+        "artifact_type": SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE,
+        "authorization_id": "x4_inventory_build_attempt_1",
+        "contains_external_source_bytes_or_identifiers": False,
+        "contains_model_outputs_embeddings_or_scores": False,
+        "creation": "atomic_create_new_no_overwrite",
+        "distinct_from_external_waveform_one_shot_claim": True,
+        "durability": (
+            "exact_file_flush_and_parent_directory_durability_or_fail_closed"
+        ),
+        "external_one_shot_claim_consumed_at_marker_creation": False,
+        "failure_after_consumption_requires_new_frozen_amendment_and_new_"
+        "authorization_id": True,
+        "first_official_source_byte_requires_durable_marker": True,
+        "git_ignored_and_untracked": True,
+        "maximum_consumptions": 1,
+        "path": SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+        "postconsumption_first_raw_action": (
+            "hash_every_official_source_against_exact_parent_size_sha256_and_md5"
+        ),
+        "preconsumption_requirements": [
+            "exact_frozen_parent_schema_and_count_invariants_verified",
+            "exact_canonical_dataset_root_and_raw_source_path_keysets_verified",
+            "exact_bound_7zip_tool_identity_verified",
+            "raw_source_declared_path_size_sha256_and_md5_bindings_loaded_from_parent",
+        ],
+        "retention": "permanent",
+        "retry_resume_or_reuse": "forbidden",
+        "scope": "sole_x4_preclaim_inventory_build_attempt",
+        "timing": (
+            "after_exact_preflight_path_schema_and_tool_binding_before_first_"
+            "official_source_byte"
+        ),
+    }:
+        raise OODExternalV2ConfigError(
+            "successor inventory build authorization differs"
+        )
+    if (
+        postclaim_no_retry
+        != {
+            "absolute_without_operator_or_failure_exception": True,
+            "failure_requires_new_protocol_and_new_output_root": True,
+            "integrity_replays_declared_by_this_protocol_are_same_claim_"
+            "verification_not_retries": True,
+            "retry_resume_reuse_or_second_scientific_inference": "forbidden",
+            "scope": "after_external_one_shot_claim_entry_first_becomes_visible",
+        }
+        or "retry_resume_or_second_inference" in one_shot
+        or one_shot.get("prerequisites")
+        != [
+            "parent_protocol_frozen_and_committed",
+            "child_execution_contract_with_exact_input_hashes_frozen_and_committed",
+            "exact_v1_bundle_verified",
+            "exact_raw_source_hashes_and_semantic_roles_rederived",
+            "exact_python_scientific_package_tree_and_7zip_identities_verified",
+            "quality_implementation_hash_verified",
+            "durable_x4_inventory_build_authorization_marker_verified",
+            "output_root_absent",
+            "clean_committed_revision",
+        ]
+    ):
+        raise OODExternalV2ConfigError(
+            "successor postclaim or prerequisite declaration differs"
+        )
 
     raw_sources = _mapping(payload.get("raw_source_bindings"), "successor raw sources")
     raw_files = _mapping(raw_sources.get("files"), "successor raw source files")
@@ -1749,12 +2139,37 @@ def verify_successor_parent_preflight(
             "7-Zip library SHA-256",
         ),
     )
+    slt_normalization = _mapping(
+        tool_payload.get("windows_slt_member_path_normalization"),
+        "successor 7-Zip Windows SLT path normalization",
+    )
+    if slt_normalization != {
+        "accepted_separator_conventions": [
+            "forward_slash_only",
+            "backslash_only",
+        ],
+        "backslash_to_forward_slash_before_shared_canonical_validation": True,
+        "mixed_separators": "forbidden",
+        "rejected_after_normalization": [
+            "absolute_rooted_drive_UNC_or_device_paths",
+            "traversal_dot_empty_or_trailing_components",
+            "Windows_reserved_names_or_control_characters",
+            "exact_or_casefolded_collisions",
+        ],
+        "scope": "bound_windows_7zip_slt_presentation_only",
+        "shared_canonical_path_validation_after_normalization": "required",
+        "stored_archive_and_evidence_paths_remain_posix_forward_slash_only": True,
+    }:
+        raise OODExternalV2ConfigError(
+            "successor 7-Zip SLT normalization declaration differs"
+        )
     return SuccessorParentPreflight(
         path=source,
         file_sha256=sha256_bytes(raw),
         status=status,
         raw_source_bindings=MappingProxyType(parsed_raw),
         seven_zip_tool_binding=tool,
+        inventory_counts=inventory_counts,
     )
 
 
@@ -1873,6 +2288,7 @@ def load_successor_parent_config(
         claim_path="artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json",
         raw_source_bindings=preflight.raw_source_bindings,
         seven_zip_tool_binding=preflight.seven_zip_tool_binding,
+        inventory_counts=preflight.inventory_counts,
     )
 
 
@@ -1907,6 +2323,12 @@ def _parse_successor_parent_copy(
         or payload.get("research_only") is not True
     ):
         raise OODExternalV2IntegrityError("private successor parent identity differs")
+    try:
+        _successor_inventory_count_binding(payload)
+    except OODExternalV2ConfigError as error:
+        raise OODExternalV2IntegrityError(
+            "private successor inventory counts differ"
+        ) from error
     raw_sources = _mapping(payload.get("raw_source_bindings"), "private raw sources")
     raw_files = _mapping(raw_sources.get("files"), "private raw source files")
     if set(raw_files) != set(REQUIRED_RAW_SOURCE_BINDING_KEYS):
@@ -2208,6 +2630,7 @@ def load_child_contract(path: str | Path) -> OODExternalV2ChildContract:
         "frozen_at_utc",
         "implementation_revision",
         "inventory",
+        "inventory_builder_attempt",
         "output_root",
         "parent_config_file_sha256",
         "project_source_tree",
@@ -2236,6 +2659,30 @@ def load_child_contract(path: str | Path) -> OODExternalV2ChildContract:
         payload.get("implementation_revision"),
         "child implementation revision",
     )
+    raw_builder_attempt = _mapping(
+        payload.get("inventory_builder_attempt"),
+        "child inventory builder attempt",
+    )
+    if set(raw_builder_attempt) != {
+        "artifact_sha256",
+        "file_sha256",
+        "relative_path",
+    }:
+        raise OODExternalV2ConfigError(
+            "child inventory builder attempt fields differ from protocol"
+        )
+    inventory_builder_attempt = _bound_file(
+        raw_builder_attempt,
+        "child inventory builder attempt",
+        require_artifact=True,
+    )
+    if (
+        inventory_builder_attempt.relative_path
+        != SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH
+    ):
+        raise OODExternalV2ConfigError(
+            "child inventory builder attempt path differs from protocol"
+        )
     raw_inventory = _mapping(payload.get("inventory"), "child inventory")
     inventory_expected = {
         "archive_closures",
@@ -2375,6 +2822,7 @@ def load_child_contract(path: str | Path) -> OODExternalV2ChildContract:
         dataset_roots=roots,
         decision_bindings=decision_bindings,
         raw_source_bindings=raw_source_bindings,
+        inventory_builder_attempt=inventory_builder_attempt,
         runtime_environment=runtime_environment,
         runtime_bindings=runtime_bindings,
         project_source_tree=project_source_tree,
@@ -2435,6 +2883,7 @@ def verify_external_v2_inputs(
             or dict(successor.raw_source_bindings)
             != dict(parent.raw_source_bindings or {})
             or successor.seven_zip_tool_binding != parent.seven_zip_tool_binding
+            or successor.inventory_counts != parent.inventory_counts
         ):
             raise OODExternalV2IntegrityError(
                 "operational successor parent/child lineage differs"
@@ -2450,6 +2899,20 @@ def verify_external_v2_inputs(
         )
     if child.output_root != parent.output_root:
         raise OODExternalV2IntegrityError("child output root differs from parent")
+    if parent.inventory_counts is not None and (
+        child.inventory.challenge_records,
+        child.inventory.zzu_records,
+        child.inventory.zzu_patients,
+        child.inventory.selected_records_total,
+    ) != (
+        parent.inventory_counts.challenge_records,
+        parent.inventory_counts.zzu_records,
+        parent.inventory_counts.zzu_patients,
+        parent.inventory_counts.total_records,
+    ):
+        raise OODExternalV2IntegrityError(
+            "child inventory counts differ from the successor parent"
+        )
     if (
         child.inventory.relative_path != SUCCESSOR_PRIVATE_INVENTORY_PATH
         or child.public_inventory_projection is None
@@ -2500,6 +2963,11 @@ def verify_external_v2_inputs(
     if sha256_file(projection_path) != projection_binding.file_sha256:
         raise OODExternalV2IntegrityError("public inventory projection hash differs")
 
+    _verify_child_inventory_builder_attempt(
+        parent,
+        child,
+        project_root=root,
+    )
     raw_source_paths: dict[str, Path] = {}
     for name, binding in child.raw_source_bindings.items():
         source_path = _resolve_project_relative(
@@ -2567,11 +3035,16 @@ def verify_external_v2_inputs(
     if inventory.inventory_sha256 != child.inventory.inventory_sha256:
         raise OODExternalV2IntegrityError("external inventory logical identity differs")
     _verify_inventory_counts(parent, child, inventory)
+    if parent.inventory_counts is None:
+        raise OODExternalV2IntegrityError(
+            "successor parent inventory counts are unavailable"
+        )
     projection_artifact_sha256 = _verify_public_projection_file(
         projection_path,
         inventory=inventory,
         challenge_records=child.inventory.challenge_records,
         zzu_records=child.inventory.zzu_records,
+        expected_counts=parent.inventory_counts,
     )
     if projection_artifact_sha256 != projection_binding.artifact_sha256:
         raise OODExternalV2IntegrityError(
@@ -3117,7 +3590,7 @@ def _verify_successor_amendment_revision(
     *,
     implementation_revision: str,
 ) -> None:
-    """Bind both pre-inventory amendments to their consecutive frozen parents."""
+    """Bind all pre-inventory amendments to their consecutive frozen parents."""
 
     revision = _revision(
         implementation_revision,
@@ -3139,7 +3612,7 @@ def _verify_successor_amendment_revision(
     )
     _verify_exact_modification_child(
         project_root,
-        child_revision=revision,
+        child_revision=THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         parent_revision=SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         modified_paths=SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS,
         context="private-remote successor amendment",
@@ -3150,6 +3623,20 @@ def _verify_successor_amendment_revision(
         relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
         expected_file_sha256=SECOND_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
         context="second frozen successor parent",
+    )
+    _verify_exact_modification_child(
+        project_root,
+        child_revision=revision,
+        parent_revision=THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        modified_paths=SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS,
+        context="inventory-builder successor amendment",
+    )
+    _verify_historical_revision_blob(
+        project_root,
+        revision=THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=THIRD_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        context="third frozen successor parent",
     )
 
 
@@ -5358,6 +5845,14 @@ def verify_inventory_builder_preflight(
         raise OODExternalV2IntegrityError(
             "inventory builder controls changed during preflight"
         )
+    if (
+        parent.raw_source_bindings is None
+        or parent.seven_zip_tool_binding is None
+        or parent.inventory_counts is None
+    ):
+        raise OODExternalV2ConfigError(
+            "inventory builder parent lacks executable source/count bindings"
+        )
     return InventoryBuilderPreflight(
         status="INVENTORY_BUILDER_PREFLIGHT_VERIFIED",
         parent_config_file_sha256=parent.file_sha256,
@@ -5365,7 +5860,254 @@ def verify_inventory_builder_preflight(
         project_source_tree_sha256=source_tree.tree_sha256,
         python_environment_sha256=runtime.python_environment_sha256,
         git_runtime_tree_sha256=runtime.git_tool.runtime_tree.tree_sha256,
+        raw_source_bindings=parent.raw_source_bindings,
+        seven_zip_tool_binding=parent.seven_zip_tool_binding,
+        inventory_counts=parent.inventory_counts,
     )
+
+
+def verify_inventory_builder_input_contract(
+    preflight: InventoryBuilderPreflight,
+    *,
+    project_root: str | Path,
+    dataset_roots: Mapping[str, Path],
+    raw_source_paths: Mapping[str, Path],
+    seven_zip_executable: str | Path,
+) -> None:
+    """Bind every production path and the tool before official source-byte access."""
+
+    if not isinstance(preflight, InventoryBuilderPreflight):
+        raise TypeError("preflight must be InventoryBuilderPreflight")
+    root = _strict_project_root(project_root)
+    if set(dataset_roots) != set(EXPECTED_DATASET_ROOTS):
+        raise OODExternalV2IntegrityError("inventory dataset root set differs")
+    for dataset, expected_relative in EXPECTED_DATASET_ROOTS.items():
+        requested = Path(os.path.abspath(os.fspath(dataset_roots[dataset])))
+        expected = root.joinpath(*PurePosixPath(expected_relative).parts)
+        if (
+            requested != expected
+            or _assert_direct_ancestry(
+                requested,
+                context=f"inventory dataset root {dataset}",
+            )
+            != requested
+            or not requested.is_dir()
+        ):
+            raise OODExternalV2IntegrityError(
+                "inventory dataset root differs from the frozen path"
+            )
+    if set(raw_source_paths) != set(INVENTORY_BUILDER_RAW_SOURCE_KEYS):
+        raise OODExternalV2IntegrityError("inventory CLI raw-source set differs")
+    for name in INVENTORY_BUILDER_RAW_SOURCE_KEYS:
+        binding = preflight.raw_source_bindings[name]
+        requested = Path(os.path.abspath(os.fspath(raw_source_paths[name])))
+        expected = root.joinpath(*PurePosixPath(binding.relative_path).parts)
+        if (
+            requested != expected
+            or _assert_direct_ancestry(
+                requested,
+                context=f"inventory raw source {name}",
+            )
+            != requested
+            or not requested.is_file()
+        ):
+            raise OODExternalV2IntegrityError(
+                "inventory raw-source path differs from the frozen path"
+            )
+    for name, binding in preflight.raw_source_bindings.items():
+        expected = root.joinpath(*PurePosixPath(binding.relative_path).parts)
+        if (
+            binding.relative_path != EXPECTED_RAW_SOURCE_PATHS[name]
+            or _assert_direct_ancestry(
+                expected,
+                context=f"inventory frozen raw source {name}",
+            )
+            != expected
+            or not expected.is_file()
+        ):
+            raise OODExternalV2IntegrityError(
+                "inventory frozen raw-source path is unavailable"
+            )
+    verify_seven_zip_tool_binding(
+        Path(os.path.abspath(os.fspath(seven_zip_executable))),
+        preflight.seven_zip_tool_binding,
+    )
+
+
+def _inventory_builder_attempt_body(
+    preflight: InventoryBuilderPreflight,
+) -> dict[str, object]:
+    if not isinstance(preflight, InventoryBuilderPreflight):
+        raise TypeError("preflight must be InventoryBuilderPreflight")
+    body: dict[str, object] = {
+        "artifact_type": SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE,
+        "authorization_id": "x4_inventory_build_attempt_1",
+        "contains_external_source_bytes_or_identifiers": False,
+        "contains_model_outputs_embeddings_or_scores": False,
+        "consumption_ordinal": 1,
+        "external_one_shot_claim_consumed_at_marker_creation": False,
+        "git_runtime_tree_sha256": preflight.git_runtime_tree_sha256,
+        "implementation_revision": preflight.implementation_revision,
+        "maximum_consumptions": 1,
+        "parent_config_file_sha256": preflight.parent_config_file_sha256,
+        "project_source_tree_sha256": preflight.project_source_tree_sha256,
+        "protocol_id": PROTOCOL_ID,
+        "python_environment_sha256": preflight.python_environment_sha256,
+        "schema_version": 1,
+        "state": "PRECLAIM_INVENTORY_BUILD_AUTHORIZATION_CONSUMED",
+    }
+    body["artifact_sha256"] = canonical_sha256(body)
+    return body
+
+
+def _inventory_builder_attempt_bytes(preflight: InventoryBuilderPreflight) -> bytes:
+    return canonical_json_bytes(_inventory_builder_attempt_body(preflight))
+
+
+def _inventory_builder_preflight_from_contract(
+    parent: OODExternalV2ParentConfig,
+    child: OODExternalV2ChildContract,
+) -> InventoryBuilderPreflight:
+    """Reconstruct the X-revision attempt identity while executing revision Y."""
+
+    if not isinstance(parent, OODExternalV2ParentConfig):
+        raise TypeError("parent must be OODExternalV2ParentConfig")
+    if not isinstance(child, OODExternalV2ChildContract):
+        raise TypeError("child must be OODExternalV2ChildContract")
+    if (
+        parent.raw_source_bindings is None
+        or parent.seven_zip_tool_binding is None
+        or parent.inventory_counts is None
+        or child.parent_config_file_sha256 != parent.file_sha256
+    ):
+        raise OODExternalV2IntegrityError(
+            "child cannot reconstruct its inventory builder authorization"
+        )
+    return InventoryBuilderPreflight(
+        status="INVENTORY_BUILDER_PREFLIGHT_VERIFIED",
+        parent_config_file_sha256=parent.file_sha256,
+        implementation_revision=child.implementation_revision,
+        project_source_tree_sha256=child.project_source_tree.tree_sha256,
+        python_environment_sha256=(
+            child.runtime_environment.python_environment_sha256
+        ),
+        git_runtime_tree_sha256=(
+            child.runtime_environment.git_tool.runtime_tree.tree_sha256
+        ),
+        raw_source_bindings=parent.raw_source_bindings,
+        seven_zip_tool_binding=parent.seven_zip_tool_binding,
+        inventory_counts=parent.inventory_counts,
+    )
+
+
+def _verify_child_inventory_builder_attempt(
+    parent: OODExternalV2ParentConfig,
+    child: OODExternalV2ChildContract,
+    *,
+    project_root: str | Path,
+) -> None:
+    preflight = _inventory_builder_preflight_from_contract(parent, child)
+    observed_file_sha256 = verify_inventory_builder_attempt_marker(
+        preflight,
+        project_root=project_root,
+    )
+    expected_body = _inventory_builder_attempt_body(preflight)
+    expected_artifact_sha256 = _digest(
+        expected_body.get("artifact_sha256"),
+        "inventory builder attempt artifact",
+    )
+    if (
+        child.inventory_builder_attempt.file_sha256 != observed_file_sha256
+        or child.inventory_builder_attempt.artifact_sha256
+        != expected_artifact_sha256
+    ):
+        raise OODExternalV2IntegrityError(
+            "child inventory builder attempt binding differs"
+        )
+
+
+def verify_inventory_builder_attempt_marker(
+    preflight: InventoryBuilderPreflight,
+    *,
+    project_root: str | Path,
+) -> str:
+    if not isinstance(preflight, InventoryBuilderPreflight):
+        raise TypeError("preflight must be InventoryBuilderPreflight")
+    root = _strict_project_root(project_root)
+    marker = _resolve_project_relative(
+        root,
+        SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+        require_file=True,
+    )
+    expected = _inventory_builder_attempt_bytes(preflight)
+    observed = _read_bounded(
+        marker,
+        _CHILD_MAX_BYTES,
+        "inventory builder attempt marker",
+    )
+    if observed != expected:
+        raise OODExternalV2IntegrityError(
+            "inventory builder attempt marker differs from its authorization"
+        )
+    _require_git_ignored_and_untracked(
+        root,
+        SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+        context="inventory builder attempt marker",
+    )
+    return sha256_bytes(observed)
+
+
+def consume_inventory_builder_authorization(
+    preflight: InventoryBuilderPreflight,
+    *,
+    project_root: str | Path,
+) -> str:
+    """Durably consume the sole X4 build authorization before source-byte access."""
+
+    if not isinstance(preflight, InventoryBuilderPreflight):
+        raise TypeError("preflight must be InventoryBuilderPreflight")
+    root = _strict_project_root(project_root)
+    if _verify_clean_git_revision(root) != preflight.implementation_revision:
+        raise OODExternalV2IntegrityError(
+            "inventory builder revision changed before authorization consumption"
+        )
+    marker = _resolve_project_relative(
+        root,
+        SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+        require_file=False,
+    )
+    if marker.exists() or _is_indirect(marker):
+        raise OODExternalV2IntegrityError(
+            "X4 inventory builder authorization is already consumed"
+        )
+    _atomic_write_new(marker, _inventory_builder_attempt_bytes(preflight))
+    return verify_inventory_builder_attempt_marker(preflight, project_root=root)
+
+
+def verify_inventory_builder_raw_source_bindings(
+    preflight: InventoryBuilderPreflight,
+    *,
+    project_root: str | Path,
+) -> None:
+    """Hash every frozen official source after the attempt marker is durable."""
+
+    if not isinstance(preflight, InventoryBuilderPreflight):
+        raise TypeError("preflight must be InventoryBuilderPreflight")
+    root = _strict_project_root(project_root)
+    verify_inventory_builder_attempt_marker(preflight, project_root=root)
+    observed = {
+        name: _raw_source_binding_for_path(
+            root,
+            binding.relative_path,
+            context=f"inventory raw source {name}",
+            official_md5=binding.official_md5,
+        )
+        for name, binding in preflight.raw_source_bindings.items()
+    }
+    if observed != dict(preflight.raw_source_bindings):
+        raise OODExternalV2IntegrityError(
+            "inventory raw-source bytes differ from the frozen parent"
+        )
 
 
 def verify_inventory_builder_postflight(
@@ -5394,6 +6136,7 @@ def verify_inventory_builder_postflight(
         raise OODExternalV2IntegrityError(
             "inventory builder control boundary changed after output creation"
         )
+    verify_inventory_builder_attempt_marker(preflight, project_root=project_root)
     root = _strict_project_root(project_root)
     private = _require_project_file(
         root,
@@ -5436,11 +6179,30 @@ def verify_inventory_builder_postflight(
     zzu_records = sum(
         record.dataset == ZZU_PEDIATRIC_DATASET for record in inventory.records
     )
+    zzu_patients = len(
+        {
+            record.patient_key
+            for record in inventory.records
+            if record.dataset == ZZU_PEDIATRIC_DATASET
+            and record.patient_key is not None
+        }
+    )
+    counts = preflight.inventory_counts
+    if (
+        challenge_records != counts.challenge_records
+        or zzu_records != counts.zzu_records
+        or zzu_patients != counts.zzu_patients
+        or len(inventory.records) != counts.total_records
+    ):
+        raise OODExternalV2IntegrityError(
+            "inventory output counts differ from the frozen parent"
+        )
     projection_artifact_sha256 = _verify_public_projection_file(
         public,
         inventory=inventory,
         challenge_records=challenge_records,
         zzu_records=zzu_records,
+        expected_counts=counts,
     )
     if (
         inventory_file_sha256 != expected_inventory_file_sha256
@@ -5537,6 +6299,28 @@ def freeze_external_v2_child_contract(
     if commit_check.returncode != 0:
         raise OODExternalV2IntegrityError("implementation revision is not a Git commit")
 
+    builder_preflight = verify_inventory_builder_preflight(
+        parent.path,
+        root,
+        revision,
+    )
+    if (
+        builder_preflight.parent_config_file_sha256 != parent.file_sha256
+        or builder_preflight.project_source_tree_sha256
+        != project_source_tree.tree_sha256
+    ):
+        raise OODExternalV2IntegrityError(
+            "inventory builder controls differ before child freeze"
+        )
+    builder_attempt_file_sha256 = verify_inventory_builder_attempt_marker(
+        builder_preflight,
+        project_root=root,
+    )
+    builder_attempt_artifact_sha256 = _digest(
+        _inventory_builder_attempt_body(builder_preflight).get("artifact_sha256"),
+        "inventory builder attempt artifact",
+    )
+
     inventory_file = _require_project_file(
         root,
         Path(os.path.abspath(os.fspath(inventory_path))),
@@ -5575,13 +6359,13 @@ def freeze_external_v2_child_contract(
             if record.dataset == ZZU_PEDIATRIC_DATASET and record.patient_key is not None
         }
     )
-    expected_counts = (
+    declared_counts = (
         _positive_integer(challenge_records, "Challenge records"),
         _positive_integer(zzu_records, "ZZU records"),
         _positive_integer(zzu_patients, "ZZU patients"),
         _positive_integer(selected_records_total, "selected records"),
     )
-    if expected_counts != (
+    if declared_counts != (
         observed_challenge,
         observed_zzu,
         observed_patients,
@@ -5589,6 +6373,21 @@ def freeze_external_v2_child_contract(
     ):
         raise OODExternalV2IntegrityError(
             "declared child counts differ from the private inventory"
+        )
+    frozen_counts = parent.inventory_counts
+    if frozen_counts is None or (
+        observed_challenge,
+        observed_zzu,
+        observed_patients,
+        len(inventory.records),
+    ) != (
+        frozen_counts.challenge_records,
+        frozen_counts.zzu_records,
+        frozen_counts.zzu_patients,
+        frozen_counts.total_records,
+    ):
+        raise OODExternalV2IntegrityError(
+            "private inventory counts differ from the frozen successor parent"
         )
     if observed_challenge != parent.challenge_expected_records:
         raise OODExternalV2IntegrityError("private inventory is not complete Challenge Set A")
@@ -5635,6 +6434,7 @@ def freeze_external_v2_child_contract(
         inventory=inventory,
         challenge_records=observed_challenge,
         zzu_records=observed_zzu,
+        expected_counts=frozen_counts,
     )
     runtime_environment = _current_runtime_environment()
     runtime_bindings = {
@@ -5732,6 +6532,11 @@ def freeze_external_v2_child_contract(
             "zzu_patients": observed_patients,
             "zzu_records": observed_zzu,
         },
+        "inventory_builder_attempt": {
+            "artifact_sha256": builder_attempt_artifact_sha256,
+            "file_sha256": builder_attempt_file_sha256,
+            "relative_path": SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+        },
         "output_root": parent.output_root,
         "parent_config_file_sha256": parent.file_sha256,
         "project_source_tree": _project_source_tree_dict(project_source_tree),
@@ -5786,6 +6591,16 @@ def freeze_external_v2_child_contract(
         )
     _verify_git_remote_state(root, expected_revision=revision)
     _verify_private_history_absent(root)
+    if (
+        verify_inventory_builder_attempt_marker(
+            builder_preflight,
+            project_root=root,
+        )
+        != builder_attempt_file_sha256
+    ):
+        raise OODExternalV2IntegrityError(
+            "inventory builder attempt changed during child freeze"
+        )
     _atomic_write_new(destination, child_contract_bytes(child_body))
     return load_child_contract(destination)
 
@@ -5933,6 +6748,11 @@ def _verify_immediate_execution_controls(
         raise OODExternalV2IntegrityError(
             "successor/predecessor boundary changed before the one-shot claim"
         )
+    _verify_child_inventory_builder_attempt(
+        inputs.parent,
+        inputs.child,
+        project_root=root,
+    )
 
 
 def prepare_ood_external_v2(
@@ -7969,13 +8789,13 @@ def _read_bounded(path: Path, maximum_bytes: int, context: str) -> bytes:
 
 
 def _git_executable_paths() -> tuple[Path, Path, Path]:
-    located = shutil.which("git")
-    if located is None:
-        raise OODExternalV2IntegrityError("frozen Git launcher is unavailable")
-    launcher = _assert_direct_ancestry(Path(located), context="Git launcher")
     install_root = _assert_direct_ancestry(
-        launcher.parent.parent,
+        Path(EXPECTED_GIT_INSTALL_ROOT),
         context="Git installation root",
+    )
+    launcher = _assert_direct_ancestry(
+        install_root / "cmd" / EXPECTED_GIT_LAUNCHER_NAME,
+        context="Git launcher",
     )
     executable = _assert_direct_ancestry(
         install_root / "mingw64" / "bin" / "git.exe",
@@ -9375,6 +10195,7 @@ def _verify_public_projection_file(
     inventory: ExternalWaveformInventory,
     challenge_records: int,
     zzu_records: int,
+    expected_counts: SuccessorInventoryCountBinding,
 ) -> str:
     raw = _read_bounded(path, _CHILD_MAX_BYTES, "public inventory projection")
     try:
@@ -9417,6 +10238,24 @@ def _verify_public_projection_file(
     if (
         summary.get("dataset") != ZZU_PEDIATRIC_DATASET
         or summary.get("selected_record_count") != zzu_records
+        or summary.get("candidate_record_count")
+        != expected_counts.zzu_candidate_records
+        or summary.get("exclusion_counts")
+        != dict(expected_counts.zzu_exclusion_counts)
+        or payload.get("zzu_candidate_patient_count")
+        != expected_counts.zzu_candidate_patients
+        or challenge_records != expected_counts.challenge_records
+        or zzu_records != expected_counts.zzu_records
+        or len(inventory.records) != expected_counts.total_records
+        or len(
+            {
+                record.patient_key
+                for record in inventory.records
+                if record.dataset == ZZU_PEDIATRIC_DATASET
+                and record.patient_key is not None
+            }
+        )
+        != expected_counts.zzu_patients
     ):
         raise OODExternalV2IntegrityError("public ZZU inventory summary differs")
     body = dict(payload)

@@ -10,6 +10,7 @@ import threading
 import time
 from copy import deepcopy
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -332,6 +333,57 @@ def test_successor_preflight_rejects_hash_identical_parent_copy(
             ),
             8_192,
             "successor remote declaration differs",
+        ),
+        (
+            (
+                "design_history",
+                "x3_inventory_builder_preflight",
+                "predecessor_private_auth_implementation_revision",
+            ),
+            "0" * 40,
+            "successor inventory-builder amendment declaration differs",
+        ),
+        (
+            ("revision_boundary", "git_execution", "install_root_windows"),
+            r"C:\Alternate Git",
+            "successor Git execution declaration differs",
+        ),
+        (
+            (
+                "successor_inventory_contract",
+                "exact_zzu_exclusion_counts",
+                "duration_under_10_seconds",
+            ),
+            5,
+            "successor inventory counts differ from the frozen metadata contract",
+        ),
+        (
+            (
+                "runtime",
+                "split_archive_tool",
+                "windows_slt_member_path_normalization",
+                "mixed_separators",
+            ),
+            "allowed",
+            "successor 7-Zip SLT normalization declaration differs",
+        ),
+        (
+            (
+                "one_shot_external_access",
+                "inventory_build_authorization",
+                "maximum_consumptions",
+            ),
+            2,
+            "successor inventory build authorization differs",
+        ),
+        (
+            (
+                "one_shot_external_access",
+                "postclaim_no_retry",
+                "absolute_without_operator_or_failure_exception",
+            ),
+            False,
+            "successor postclaim or prerequisite declaration differs",
         ),
     ),
 )
@@ -1587,6 +1639,112 @@ def test_private_remote_command_rejects_userinfo_and_ambient_secret_carriers(
     assert "github_pat_synthetic" not in str(captured.value)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="exact frozen Windows Git contract")
+def test_git_executable_paths_resolves_exact_git_with_system32_only_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PATH", r"C:\Windows\System32")
+
+    def ambient_lookup_must_not_run(*_args: object, **_kwargs: object) -> str:
+        pytest.fail("frozen Git resolution consulted ambient PATH")
+
+    monkeypatch.setattr(shutil, "which", ambient_lookup_must_not_run)
+
+    launcher, executable, install_root = pipeline._git_executable_paths()  # noqa: SLF001
+
+    expected_root = Path(pipeline.EXPECTED_GIT_INSTALL_ROOT)
+    assert install_root == expected_root
+    assert launcher == expected_root / "cmd" / pipeline.EXPECTED_GIT_LAUNCHER_NAME
+    assert executable == (
+        expected_root / "mingw64" / "bin" / pipeline.EXPECTED_GIT_EXECUTABLE_NAME
+    )
+
+
+def test_git_executable_paths_rejects_missing_launcher_without_relocated_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    expected_root = tmp_path / "expected-git"
+    (expected_root / "cmd").mkdir(parents=True)
+    executable = expected_root / "mingw64" / "bin" / "git.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"synthetic executable")
+
+    relocated_launcher = tmp_path / "relocated-git" / "cmd" / "git.exe"
+    relocated_launcher.parent.mkdir(parents=True)
+    relocated_launcher.write_bytes(b"synthetic relocated launcher")
+    monkeypatch.setenv("PATH", os.fspath(relocated_launcher.parent))
+    monkeypatch.setattr(
+        pipeline,
+        "EXPECTED_GIT_INSTALL_ROOT",
+        os.fspath(expected_root),
+    )
+    ambient_calls = 0
+
+    def relocated_ambient_lookup(*_args: object, **_kwargs: object) -> str:
+        nonlocal ambient_calls
+        ambient_calls += 1
+        return os.fspath(relocated_launcher)
+
+    monkeypatch.setattr(shutil, "which", relocated_ambient_lookup)
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="Git launcher is unavailable",
+    ):
+        pipeline._git_executable_paths()  # noqa: SLF001
+    assert ambient_calls == 0
+
+
+def test_git_executable_paths_rejects_tampered_launcher_without_path_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    expected_root = tmp_path / "expected-git"
+    launcher = expected_root / "cmd" / "git.exe"
+    executable = expected_root / "mingw64" / "bin" / "git.exe"
+    launcher.parent.mkdir(parents=True)
+    executable.parent.mkdir(parents=True)
+    launcher.write_bytes(b"tampered frozen launcher")
+    executable.write_bytes(b"synthetic executable")
+
+    relocated_launcher = tmp_path / "relocated-git" / "cmd" / "git.exe"
+    relocated_launcher.parent.mkdir(parents=True)
+    relocated_launcher.write_bytes(b"synthetic relocated launcher")
+    monkeypatch.setenv("PATH", os.fspath(relocated_launcher.parent))
+    monkeypatch.setattr(
+        pipeline,
+        "EXPECTED_GIT_INSTALL_ROOT",
+        os.fspath(expected_root),
+    )
+    original_stable_entry = pipeline._stable_runtime_file_entry  # noqa: SLF001
+
+    def stable_entry(path: Path, *, context: str) -> dict[str, object]:
+        if path == executable:
+            return {
+                "sha256": pipeline.EXPECTED_GIT_EXECUTABLE_SHA256,
+                "size_bytes": pipeline.EXPECTED_GIT_EXECUTABLE_SIZE_BYTES,
+            }
+        return original_stable_entry(path, context=context)
+
+    monkeypatch.setattr(pipeline, "_stable_runtime_file_entry", stable_entry)
+    ambient_calls = 0
+
+    def relocated_ambient_lookup(*_args: object, **_kwargs: object) -> str:
+        nonlocal ambient_calls
+        ambient_calls += 1
+        return os.fspath(relocated_launcher)
+
+    monkeypatch.setattr(shutil, "which", relocated_ambient_lookup)
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="differs from frozen bytes",
+    ):
+        pipeline._git_executable_paths()  # noqa: SLF001
+    assert ambient_calls == 0
+
+
 def test_git_credential_manager_rejects_missing_or_wrong_bytes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1921,6 +2079,9 @@ def _amendment_git_runner(
     first_revision_line: str | None = None,
     first_commit_count: str = "1",
     first_diff_stdout: str | None = None,
+    second_revision_line: str | None = None,
+    second_commit_count: str = "1",
+    second_diff_stdout: str | None = None,
     revision_line: str | None = None,
     commit_count: str = "1",
     diff_stdout: str | None = None,
@@ -1929,12 +2090,18 @@ def _amendment_git_runner(
     if resolved_diff is None:
         resolved_diff = "".join(
             f"M\t{path}\n"
-            for path in pipeline.SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS
+            for path in pipeline.SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS
         )
     first_diff = first_diff_stdout
     if first_diff is None:
         first_diff = "".join(
             f"M\t{path}\n" for path in pipeline.SUCCESSOR_AMENDMENT_MODIFIED_PATHS
+        )
+    second_diff = second_diff_stdout
+    if second_diff is None:
+        second_diff = "".join(
+            f"M\t{path}\n"
+            for path in pipeline.SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS
         )
     responses = {
         (
@@ -1967,23 +2134,48 @@ def _amendment_git_runner(
             "--parents",
             "-n",
             "1",
-            implementation_revision,
-        ): revision_line
+            pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        ): second_revision_line
         or (
-            f"{implementation_revision} "
+            f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
             f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
         ),
         (
             "rev-list",
             "--count",
             f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+        ): f"{second_commit_count}\n",
+        (
+            "diff",
+            "--name-status",
+            "--no-renames",
+            f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+            "--",
+        ): second_diff,
+        (
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            implementation_revision,
+        ): revision_line
+        or (
+            f"{implementation_revision} "
+            f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
+        ),
+        (
+            "rev-list",
+            "--count",
+            f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
         ): f"{commit_count}\n",
         (
             "diff",
             "--name-status",
             "--no-renames",
-            f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
             "--",
         ): resolved_diff,
@@ -2038,6 +2230,14 @@ def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
             "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
             "revision": pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         },
+        {
+            "context": "third frozen successor parent",
+            "expected_file_sha256": (
+                pipeline.THIRD_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+            ),
+            "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
+            "revision": pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        },
     ]
 
 
@@ -2082,6 +2282,46 @@ def test_successor_amendment_revision_rejects_x1_to_x2_drift(
 
 
 @pytest.mark.parametrize(
+    "runner_kwargs",
+    (
+        {
+            "second_revision_line": (
+                f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
+                f"{'e' * 40}\n"
+            )
+        },
+        {"second_commit_count": "2"},
+        {"second_diff_stdout": "A\tunexpected.txt\n"},
+    ),
+)
+def test_successor_amendment_revision_rejects_x2_to_x3_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runner_kwargs: dict[str, str],
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        _amendment_git_runner(revision, **runner_kwargs),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="private-remote successor amendment",
+    ):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+@pytest.mark.parametrize(
     ("runner_kwargs", "message"),
     (
         (
@@ -2095,7 +2335,9 @@ def test_successor_amendment_revision_rejects_x1_to_x2_drift(
                 "diff_stdout": "".join(
                     f"M\t{path}\n"
                     for path in (
-                        pipeline.SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS[:-1]
+                        pipeline.SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS[
+                            :-1
+                        ]
                     )
                 )
             },
@@ -2105,7 +2347,9 @@ def test_successor_amendment_revision_rejects_x1_to_x2_drift(
             {
                 "diff_stdout": "".join(
                     f"M\t{path}\n"
-                    for path in pipeline.SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS
+                    for path in (
+                        pipeline.SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS
+                    )
                 )
                 + "M\textra.txt\n"
             },
@@ -2114,7 +2358,7 @@ def test_successor_amendment_revision_rejects_x1_to_x2_drift(
         ({"diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
     ),
 )
-def test_successor_amendment_revision_rejects_lineage_or_diff_drift(
+def test_successor_amendment_revision_rejects_x3_to_x4_lineage_or_diff_drift(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     runner_kwargs: dict[str, str],
@@ -2182,6 +2426,35 @@ def test_successor_amendment_revision_rejects_x2_parent_blob_drift(
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
         match="X2 parent blob differs",
+    ):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+def test_successor_amendment_revision_rejects_x3_parent_blob_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(pipeline, "_run_git", _amendment_git_runner(revision))
+
+    def reject_third_parent(
+        _root: Path,
+        **kwargs: object,
+    ) -> None:
+        if kwargs.get("context") == "third frozen successor parent":
+            raise pipeline.OODExternalV2IntegrityError("X3 parent blob differs")
+
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        reject_third_parent,
+    )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="X3 parent blob differs",
     ):
         pipeline._verify_successor_amendment_revision(  # noqa: SLF001
             tmp_path,
@@ -2737,6 +3010,9 @@ def test_inventory_builder_preflight_binds_frozen_runtime_and_source(
         file_sha256=parent_hash,
         output_root="artifacts/trust_sentinel/ood_external_v2_1",
         claim_path="artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json",
+        raw_source_bindings={},
+        seven_zip_tool_binding=object(),
+        inventory_counts=object(),
     )
     monkeypatch.setattr(
         pipeline,
@@ -2783,6 +3059,391 @@ def test_inventory_builder_preflight_binds_frozen_runtime_and_source(
         match="output root must be absent",
     ):
         pipeline.verify_inventory_builder_preflight(parent_path, root, revision)
+
+
+def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    (root / "artifacts" / "trust_sentinel").mkdir(parents=True)
+    revision = "a" * 40
+    preflight = pipeline.InventoryBuilderPreflight(
+        status="INVENTORY_BUILDER_PREFLIGHT_VERIFIED",
+        parent_config_file_sha256="sha256:" + "b" * 64,
+        implementation_revision=revision,
+        project_source_tree_sha256="sha256:" + "c" * 64,
+        python_environment_sha256="sha256:" + "d" * 64,
+        git_runtime_tree_sha256="sha256:" + "e" * 64,
+        raw_source_bindings={},
+        seven_zip_tool_binding=cast(Any, object()),
+        inventory_counts=cast(Any, object()),
+    )
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_clean_git_revision",
+        lambda _root: revision,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+
+    marker_sha256 = pipeline.consume_inventory_builder_authorization(
+        preflight,
+        project_root=root,
+    )
+    marker = root / pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH
+    assert marker_sha256 == sha256_file(marker)
+    assert marker != root / pipeline.SUCCESSOR_CLAIM_PATH
+    marker_payload = json.loads(marker.read_bytes())
+    assert marker_payload["consumption_ordinal"] == 1
+    assert marker_payload["maximum_consumptions"] == 1
+    assert (
+        marker_payload["external_one_shot_claim_consumed_at_marker_creation"]
+        is False
+    )
+    assert marker_payload["state"] == (
+        "PRECLAIM_INVENTORY_BUILD_AUTHORIZATION_CONSUMED"
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="authorization is already consumed",
+    ):
+        pipeline.consume_inventory_builder_authorization(
+            preflight,
+            project_root=root,
+        )
+
+    marker.write_bytes(b"{}\n")
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="marker differs from its authorization",
+    ):
+        pipeline.verify_inventory_builder_attempt_marker(
+            preflight,
+            project_root=root,
+        )
+
+
+def test_child_attempt_verification_reconstructs_x_identity_without_x_head_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    parent = replace(
+        pipeline.load_parent_config(PARENT_PATH),
+        raw_source_bindings={},
+        seven_zip_tool_binding=cast(Any, object()),
+        inventory_counts=cast(Any, object()),
+    )
+    project_source_tree = pipeline.ProjectSourceTreeBinding(  # noqa: SLF001
+        files=(),
+        file_count=0,
+        total_bytes=0,
+        tree_sha256="sha256:" + "c" * 64,
+    )
+    runtime_environment = SimpleNamespace(
+        python_environment_sha256="sha256:" + "d" * 64,
+        git_tool=SimpleNamespace(
+            runtime_tree=SimpleNamespace(tree_sha256="sha256:" + "e" * 64)
+        ),
+    )
+    child = pipeline.OODExternalV2ChildContract(
+        path=tmp_path / "child.json",
+        file_sha256="sha256:" + "1" * 64,
+        artifact_sha256="sha256:" + "2" * 64,
+        frozen_at_utc=datetime(2026, 8, 30, tzinfo=UTC),
+        parent_config_file_sha256=parent.file_sha256,
+        implementation_revision="a" * 40,
+        inventory=cast(Any, object()),
+        dataset_roots={},
+        decision_bindings={},
+        raw_source_bindings={},
+        inventory_builder_attempt=pipeline.BoundFile(
+            relative_path=pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+            file_sha256="sha256:" + "3" * 64,
+            artifact_sha256="sha256:" + "4" * 64,
+        ),
+        runtime_environment=cast(Any, runtime_environment),
+        runtime_bindings={},
+        project_source_tree=project_source_tree,
+        public_inventory_projection=None,
+        output_root=pipeline.SUCCESSOR_OUTPUT_PATH,
+    )
+    reconstructed = pipeline._inventory_builder_preflight_from_contract(  # noqa: SLF001
+        parent,
+        child,
+    )
+    attempt_body = pipeline._inventory_builder_attempt_body(  # noqa: SLF001
+        reconstructed
+    )
+    marker_bytes = pipeline._inventory_builder_attempt_bytes(  # noqa: SLF001
+        reconstructed
+    )
+    marker = tmp_path / pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH
+    marker.parent.mkdir(parents=True)
+    marker.write_bytes(marker_bytes)
+    child = replace(
+        child,
+        inventory_builder_attempt=pipeline.BoundFile(
+            relative_path=pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+            file_sha256=sha256_bytes(marker_bytes),
+            artifact_sha256=cast(str, attempt_body["artifact_sha256"]),
+        ),
+    )
+
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: tmp_path)
+    monkeypatch.setattr(
+        pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "verify_inventory_builder_preflight",
+        lambda *_args, **_kwargs: pytest.fail("Y attempted to re-enter X preflight"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_clean_git_revision",
+        lambda *_args, **_kwargs: pytest.fail("Y required clean X HEAD"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_remote_state",
+        lambda *_args, **_kwargs: pytest.fail("Y required the X remote revision"),
+    )
+    pipeline._verify_child_inventory_builder_attempt(  # noqa: SLF001
+        parent,
+        child,
+        project_root=tmp_path,
+    )
+
+    changed_parent = replace(parent, file_sha256="sha256:" + "9" * 64)
+    changed_runtime = SimpleNamespace(
+        python_environment_sha256="sha256:" + "8" * 64,
+        git_tool=runtime_environment.git_tool,
+    )
+    changed_git_runtime = SimpleNamespace(
+        python_environment_sha256=runtime_environment.python_environment_sha256,
+        git_tool=SimpleNamespace(
+            runtime_tree=SimpleNamespace(tree_sha256="sha256:" + "5" * 64)
+        ),
+    )
+    identity_mutations = (
+        (parent, replace(child, implementation_revision="7" * 40)),
+        (
+            parent,
+            replace(
+                child,
+                project_source_tree=replace(
+                    project_source_tree,
+                    tree_sha256="sha256:" + "6" * 64,
+                ),
+            ),
+        ),
+        (
+            parent,
+            replace(child, runtime_environment=cast(Any, changed_runtime)),
+        ),
+        (
+            parent,
+            replace(child, runtime_environment=cast(Any, changed_git_runtime)),
+        ),
+        (
+            changed_parent,
+            replace(
+                child,
+                parent_config_file_sha256=changed_parent.file_sha256,
+            ),
+        ),
+    )
+    for changed_parent_value, changed_child_value in identity_mutations:
+        with pytest.raises(
+            pipeline.OODExternalV2IntegrityError,
+            match="marker differs from its authorization",
+        ):
+            pipeline._verify_child_inventory_builder_attempt(  # noqa: SLF001
+                changed_parent_value,
+                changed_child_value,
+                project_root=tmp_path,
+            )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="child inventory builder attempt binding differs",
+    ):
+        pipeline._verify_child_inventory_builder_attempt(  # noqa: SLF001
+            parent,
+            replace(
+                child,
+                inventory_builder_attempt=replace(
+                    child.inventory_builder_attempt,
+                    artifact_sha256="sha256:" + "f" * 64,
+                ),
+            ),
+            project_root=tmp_path,
+        )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="child inventory builder attempt binding differs",
+    ):
+        pipeline._verify_child_inventory_builder_attempt(  # noqa: SLF001
+            parent,
+            replace(
+                child,
+                inventory_builder_attempt=replace(
+                    child.inventory_builder_attempt,
+                    file_sha256="sha256:" + "f" * 64,
+                ),
+            ),
+            project_root=tmp_path,
+        )
+
+
+def test_inventory_builder_marker_visibility_blocks_retry_after_directory_fsync_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    (root / "artifacts" / "trust_sentinel").mkdir(parents=True)
+    revision = "a" * 40
+    preflight = pipeline.InventoryBuilderPreflight(
+        status="INVENTORY_BUILDER_PREFLIGHT_VERIFIED",
+        parent_config_file_sha256="sha256:" + "b" * 64,
+        implementation_revision=revision,
+        project_source_tree_sha256="sha256:" + "c" * 64,
+        python_environment_sha256="sha256:" + "d" * 64,
+        git_runtime_tree_sha256="sha256:" + "e" * 64,
+        raw_source_bindings={},
+        seven_zip_tool_binding=cast(Any, object()),
+        inventory_counts=cast(Any, object()),
+    )
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_clean_git_revision",
+        lambda _root: revision,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_fsync_directory",
+        lambda _path: (_ for _ in ()).throw(OSError("injected directory fsync failure")),
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2ExecutionError,
+        match="atomic artifact commit failed",
+    ):
+        pipeline.consume_inventory_builder_authorization(
+            preflight,
+            project_root=root,
+        )
+
+    marker = root / pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH
+    assert marker.is_file()
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="authorization is already consumed",
+    ):
+        pipeline.consume_inventory_builder_authorization(
+            preflight,
+            project_root=root,
+        )
+
+
+def _skeletal_child_contract_body() -> dict[str, object]:
+    return {
+        "artifact_type": pipeline.CHILD_CONTRACT_ARTIFACT_TYPE,
+        "dataset_roots": {},
+        "decision_bindings": {},
+        "frozen_at_utc": "2026-08-30T00:00:00Z",
+        "implementation_revision": "a" * 40,
+        "inventory": {},
+        "inventory_builder_attempt": {
+            "artifact_sha256": "sha256:" + "2" * 64,
+            "file_sha256": "sha256:" + "3" * 64,
+            "relative_path": pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+        },
+        "output_root": pipeline.SUCCESSOR_OUTPUT_PATH,
+        "parent_config_file_sha256": "sha256:" + "b" * 64,
+        "project_source_tree": {},
+        "protocol_id": pipeline.PROTOCOL_ID,
+        "public_inventory_projection": None,
+        "raw_source_bindings": {},
+        "runtime_bindings": {},
+        "runtime_environment": {},
+        "schema_version": 1,
+    }
+
+
+def test_child_contract_rejects_missing_inventory_builder_attempt_field(
+    tmp_path: Path,
+) -> None:
+    body = _skeletal_child_contract_body()
+    del body["inventory_builder_attempt"]
+    path = tmp_path / "child.json"
+    path.write_bytes(pipeline.child_contract_bytes(body))
+
+    with pytest.raises(
+        pipeline.OODExternalV2ConfigError,
+        match="child contract fields differ from protocol",
+    ):
+        pipeline.load_child_contract(path)
+
+
+@pytest.mark.parametrize(
+    ("marker", "message"),
+    (
+        (
+            {
+                "artifact_sha256": "sha256:" + "2" * 64,
+                "extra": False,
+                "file_sha256": "sha256:" + "3" * 64,
+                "relative_path": pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+            },
+            "child inventory builder attempt fields differ from protocol",
+        ),
+        (
+            {
+                "file_sha256": "sha256:" + "3" * 64,
+                "relative_path": pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+            },
+            "child inventory builder attempt fields differ from protocol",
+        ),
+        (
+            {
+                "artifact_sha256": "sha256:" + "2" * 64,
+                "file_sha256": "invalid",
+                "relative_path": pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+            },
+            "child inventory builder attempt file must be a prefixed SHA-256 digest",
+        ),
+        (
+            {
+                "artifact_sha256": "sha256:" + "2" * 64,
+                "file_sha256": "sha256:" + "3" * 64,
+                "relative_path": "artifacts/trust_sentinel/alternate-marker.json",
+            },
+            "child inventory builder attempt path differs from protocol",
+        ),
+    ),
+)
+def test_child_contract_rejects_invalid_inventory_builder_attempt_binding(
+    tmp_path: Path,
+    marker: dict[str, object],
+    message: str,
+) -> None:
+    body = _skeletal_child_contract_body()
+    body["inventory_builder_attempt"] = marker
+    path = tmp_path / "child.json"
+    path.write_bytes(pipeline.child_contract_bytes(body))
+
+    with pytest.raises(pipeline.OODExternalV2ConfigError, match=message):
+        pipeline.load_child_contract(path)
 
 
 def test_claim_publication_witness_does_not_fire_when_directory_fsync_fails(

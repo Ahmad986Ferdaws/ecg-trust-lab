@@ -66,6 +66,21 @@ evidence, or artifacts.
 Credential contents and authorization scope are operator-managed and
 intentionally unbound; the code cannot prove least-privilege token scope.
 
+The resulting private-auth revision
+`6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6`, whose parent YAML hash is
+`sha256:9b0358be1d4a12ca1771c57d8387c1b332bbef5698e01d3da2707f59157a586c`
+and whose parent was frozen at `2026-08-30T00:50:40Z`, then made one official
+inventory-builder attempt. It refused before reading even the successor parent
+protocol or any official external-source byte: the isolated runtime exposed
+only `C:\Windows\System32` on `PATH`, while Git discovery still used
+`shutil.which("git")`. No inventory, inventory-build authorization marker,
+external-access armed marker, external one-shot claim, or successor output root
+was created, and no trained checkpoint, waveform, inference, or scientific
+result was accessed. X4 is a sole-parent operational amendment of that revision.
+It fixes the exact Git resolver and strengthens the inventory-build boundary;
+it does not change any cohort, preprocessing rule, model, threshold, endpoint,
+gate, or scientific claim.
+
 ## Evidence boundary and v1 history
 
 The aggregate v1 source-support result was already known when both external
@@ -115,9 +130,13 @@ role; the inventory cannot self-assert its labels.
 The release contains 14,190 ECGs from 11,643 hospitalized children. Header and
 role metadata select all and only records with 12 admitted source-specific
 lead names, 500 Hz sampling, and at least 5,000 samples/ten seconds. The frozen
-metadata result is 12,328 selected records from 10,350 patients. Exclusions are
-exactly 1,856 non-12-lead records and 6 recordings under ten seconds, with no
-other exclusion reason.
+metadata result is 12,328 selected records from 10,350 patients. The exact,
+ordered, mutually exclusive exclusion vector is: 1,856 with the upstream
+`pediatric_12_lead` flag false, 6 under ten seconds, 0 with a non-500 Hz rate,
+0 with a header lead count other than 12 after the flag check, and 0 with a
+noncanonical lead set. These counts sum with the selected records to all
+14,190 candidates. The flag-false records are not counted again under a later
+lead-count reason.
 
 The two split waveform archive parts and four supporting release files are
 bound by exact size, SHA-256, and expected MD5 in the YAML. Before and after
@@ -139,7 +158,13 @@ extracts it once into a fresh isolated temporary directory, and compares every
 candidate path, size, and SHA-256 with the evaluated tree. Traversal, links,
 duplicate, extra, or missing file members fail closed. The domain-separated
 closure hash and aggregate member counts are bound in the child/public
-projection; no samples are decoded.
+projection; no samples are decoded. At the Windows `7z -slt` presentation
+boundary only, an all-backslash member name is normalized to forward slashes
+before the shared canonical path validator runs. Mixed separators, absolute,
+rooted, drive, UNC, device, traversal, dot, empty, trailing, reserved-name, or
+control-character components and exact or case-folded collisions remain
+forbidden. Stored archive and evidence paths remain canonical POSIX paths; the
+normalization does not broaden any other path contract.
 
 ## Successor inventory and signal path
 
@@ -194,12 +219,29 @@ conditioned on scratch emptiness.
 
 Before the inventory builder reads any official archive, metadata, header, or
 inventory byte, a metadata-only preflight requires the exact frozen parent,
-clean pushed implementation revision X, live remote, protected-path history,
+clean pushed implementation revision X4, live remote, protected-path history,
 tracked parent and complete source blobs, isolated runtime/Git identity,
-bound `__main__`, and absent successor claim/output. Before it reports success,
-a postflight repeats that proof and strict-reloads the exact canonical private
-inventory and public projection, matching physical and logical hashes to the
-in-memory build.
+bound `__main__`, and absent successor claim/output. It also binds the exact
+parent schema, cohort and exclusion-count invariants, canonical dataset and raw
+source paths/keysets, declared raw size/SHA-256/MD5 values, and exact 7-Zip tool.
+After those checks but before the first official source byte, the builder must
+durably create, without overwrite,
+`artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json`.
+That marker authorizes exactly one X4 preclaim inventory build, remains ignored
+and untracked, contains no source identifiers or model output, and is distinct
+from the later waveform one-shot claim. Once consumed it cannot be retried,
+resumed, or reused. The first permitted raw action is to hash every official
+source against the frozen parent. Before reporting success, a postflight
+repeats the preflight and marker proof and strict-reloads the exact canonical
+private inventory and public projection, matching physical and logical hashes
+to the in-memory build.
+
+The child binds the marker's exact canonical path, file SHA-256, and logical
+self-hash. At Y, the verifier reconstructs its expected X4 bytes from the
+parent hash, child-bound X4/source/Python/Git identities, and frozen
+source-bound authorization constants without requiring HEAD to return to X4;
+it rechecks those bytes during initial input verification, immediately before
+the external claim, after evaluation, and during terminal bundle verification.
 
 The child path-neutrally binds every regular file and directory in the full
 resolved CPython 3.12.13 base tree and the full venv `site-packages` tree,
@@ -218,8 +260,11 @@ required to remain loaded.
 
 Every tracked `src/ecg_trust/**/*.py` file and all four inventory/freeze/
 evaluate/verify entrypoints are bound by exact path, size, SHA-256, worktree
-bytes, and X/Y Git blobs. Git itself is the exact 2.53.0 executable and full
-`mingw64` runtime tree, run with a sanitized environment, explicit Git/worktree
+bytes, and X4/Y Git blobs. Git resolves only from the exact direct Windows
+installation root `C:\Program Files\Git`: the `cmd\git.exe` launcher and
+`mingw64\bin\git.exe` binary are derived from that root without `PATH` lookup,
+then their bytes, direct ancestry, and the full `mingw64` runtime tree are
+verified. It is run with a sanitized environment, explicit Git/worktree
 directories, disabled replacement/config redirection, and a strict local-
 config allowlist. An anonymous query first clears every credential helper and
 must return code 128, empty stdout, and the exact 40-byte ASCII Git denial
@@ -321,18 +366,32 @@ denominator-integrity gates, not additional inferential endpoints.
 ## One-shot execution and failure semantics
 
 The parent and exact child must be committed and pushed before access. The first
-frozen successor revision `85b55d0...`, tag-amended revision `b5727c4...`, and
-final private-auth implementation revision X form two consecutive sole-parent
-amendments. Each amendment modifies exactly the same seven declared config,
-protocol, implementation, and test paths; their historical parent bytes and
-diffs are independently verified. The implementation revision X and
-child-freeze execution revision Y are also consecutive: Y has X as its sole
-parent, exactly one commit lies in `X..Y`, and that commit adds only the tracked
-child plus its aggregate public inventory projection. The private inventory
-remains ignored and untracked. The only Git remote is `origin`, its fetch and
-push URL are exactly
+frozen successor revision `85b55d0...`, tag-amended revision `b5727c4...`,
+private-auth revision `6b6ddfd...`, and X4 form three consecutive sole-parent
+amendments. The first two amendments each modify the same seven frozen paths.
+X4 has sole parent `6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6` and modifies all and
+only these eleven existing paths, each with Git status `M`:
+
+- `configs/trust_sentinel_ood_external_v2_1.yaml`;
+- `docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md`;
+- `scripts/build_trust_sentinel_ood_v2_inventory.py`;
+- `src/ecg_trust/ood_v2/inventory.py`;
+- `src/ecg_trust/ood_v2/models.py`;
+- `src/ecg_trust/ood_v2/pipeline.py`;
+- `tests/unit/test_ood_v2_inventory.py`;
+- `tests/unit/test_ood_v2_inventory_cli.py`;
+- `tests/unit/test_ood_v2_models.py`;
+- `tests/unit/test_ood_v2_pipeline.py`; and
+- `tests/unit/test_ood_v2_protocol_closure.py`.
+
+Every historical parent byte and exact diff is independently verified. X4 and
+child-freeze execution revision Y are also consecutive: Y has X4 as its sole
+parent, exactly one commit lies in `X4..Y`, and that commit adds only the
+tracked child plus its aggregate public inventory projection. The private
+inventory and durable X4 inventory-build marker remain ignored and untracked.
+The only Git remote is `origin`, its fetch and push URL are exactly
 `https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git`, and
-`refs/remotes/origin/main` must equal X at child freeze and Y immediately
+`refs/remotes/origin/main` must equal X4 at child freeze and Y immediately
 before the claim and after evaluation. A live `git ls-remote --symref` against
 the exact HTTPS URL—not a symbolic local remote—must return exactly the HEAD
 symref, HEAD and `refs/heads/main` at that revision, plus the required pinned
@@ -360,11 +419,17 @@ blob equals both the worktree bytes and the frozen SHA-256. At those same
 boundaries, `git log --full-history --all --reflog --format=%H -- <exact protected glob
 pathspecs>` must return empty output for the entire external raw-data tree,
 both protocols' complete private-preflight trees, both output/claim namespaces,
-all retained staging namespaces, and the isolated runtime-root namespace. This
+the durable X4 inventory-build marker, all retained staging namespaces, and
+the isolated runtime-root namespace. This
 proves absence of those protected pathnames from local reachable refs and
 reflogs. It does not—and Git cannot—prove the content absence of unreachable
 objects that are not named by those refs/reflogs; no stronger repository-wide
 purge claim is made.
+
+The durable X4 inventory-build authorization is not the external one-shot
+claim: it is consumed before metadata inventory source-byte access and does not
+authorize waveform decoding, quality, model, score, or endpoint access. After
+it is consumed, no X4 inventory retry, resume, or marker reuse is allowed.
 
 The implementation durably creates the armed marker, including parent-
 directory persistence, and only then atomically creates the permanent adjacent
@@ -399,9 +464,13 @@ complete exact tree and adjacent claim before deep semantic checks, then
 performs a second complete enumeration and hash afterward; any change or extra
 member fails closed.
 
-There is no retry or resume. A post-claim exception preserves all available
-evidence and produces a sanitized failure receipt when possible; a later run
-would need another protocol and namespace. On success, the complete
+After the external claim first becomes visible, the no-retry rule is absolute:
+there is no operator, failure-mode, resume, reuse, or second-scientific-pass
+exception. A post-claim exception preserves all available evidence and
+produces a sanitized failure receipt when possible; a later run would need
+another protocol and namespace. The preregistered deterministic integrity
+replays remain verification inside that same consumed claim, not retries. On
+success, the complete
 pre-manifest tree is verified and committed to its final output root first.
 `success-manifest.json` is then atomically created as the terminal success
 write and the complete bundle is independently reverified. That verifier is

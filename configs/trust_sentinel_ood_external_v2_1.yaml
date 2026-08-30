@@ -2,7 +2,7 @@ schema_version: 1
 protocol_id: trust-sentinel-ood-external-v2-1-parent
 status: frozen_parent_preregistration_pre_waveform
 drafted_on: "2026-08-29"
-frozen_at_utc: "2026-08-30T00:50:40Z"
+frozen_at_utc: "2026-08-30T02:00:56Z"
 research_only: true
 
 purpose: >-
@@ -96,6 +96,39 @@ design_history:
         - docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md
         - src/ecg_trust/ood_v2/models.py
         - src/ecg_trust/ood_v2/pipeline.py
+        - tests/unit/test_ood_v2_models.py
+        - tests/unit/test_ood_v2_pipeline.py
+        - tests/unit/test_ood_v2_protocol_closure.py
+      status_for_every_path: modified
+  x3_inventory_builder_preflight:
+    predecessor_private_auth_implementation_revision: 6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6
+    predecessor_private_auth_parent_config_file_sha256: sha256:9b0358be1d4a12ca1771c57d8387c1b332bbef5698e01d3da2707f59157a586c
+    predecessor_private_auth_frozen_at_utc: "2026-08-30T00:50:40Z"
+    outcome: refused_before_successor_parent_or_external_source_access
+    root_cause: isolated_runtime_PATH_was_System32_only_while_Git_resolution_used_shutil_which_git
+    successor_parent_protocol_byte_read: false
+    new_successor_external_source_archive_header_record_metadata_or_waveform_byte_read: false
+    new_successor_trained_checkpoint_or_inference_access_occurred: false
+    successor_inventory_created: false
+    successor_inventory_build_authorization_marker_created: false
+    successor_external_one_shot_claim_created: false
+    successor_external_access_armed_marker_created: false
+    successor_output_root_created: false
+    operational_amendment_only: true
+    scientific_protocol_change: false
+    amendment: pin_exact_Git_install_root_add_single_durable_inventory_build_authorization_and_harden_inventory_contracts
+    amendment_revision_contract:
+      commit_count_after_predecessor_private_auth_revision: 1
+      sole_parent: 6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6
+      exact_modified_paths:
+        - configs/trust_sentinel_ood_external_v2_1.yaml
+        - docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md
+        - scripts/build_trust_sentinel_ood_v2_inventory.py
+        - src/ecg_trust/ood_v2/inventory.py
+        - src/ecg_trust/ood_v2/models.py
+        - src/ecg_trust/ood_v2/pipeline.py
+        - tests/unit/test_ood_v2_inventory.py
+        - tests/unit/test_ood_v2_inventory_cli.py
         - tests/unit/test_ood_v2_models.py
         - tests/unit/test_ood_v2_pipeline.py
         - tests/unit/test_ood_v2_protocol_closure.py
@@ -267,6 +300,8 @@ revision_boundary:
     execution_child_and_public_projection_Y_blobs_must_equal_loaded_bytes: true
     timing: [child_freeze, immediately_preclaim, post_evaluation]
   git_execution:
+    install_root_windows: 'C:\Program Files\Git'
+    executable_resolution: exact_install_root_cmd_launcher_and_mingw64_binary_without_PATH_lookup
     executable: exact_bound_mingw64_bin_git_exe
     version: git_version_2.53.0.windows.2
     full_mingw64_tree_path_free_hash_bound: true
@@ -292,6 +327,7 @@ revision_boundary:
       - artifacts/trust_sentinel/ood_external_v2_1
       - artifacts/trust_sentinel/.ood_external_v2.one-shot-claim.json
       - artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json
+      - artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json
       - :(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**
       - :(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**
       - :(glob)artifacts/trust_sentinel/.ood_external_v2_1.runtime-*/**
@@ -632,6 +668,19 @@ successor_inventory_contract:
     zzu_records: 12328
     zzu_patients: 10350
     total_records: 13328
+  exact_zzu_exclusion_counts:
+    duration_under_10_seconds: 6
+    lead_count_not_12: 0
+    noncanonical_lead_set: 0
+    pediatric_12_lead_flag_false: 1856
+    sampling_frequency_not_500_hz: 0
+  count_invariants:
+    challenge_plus_zzu_selected_equals_total_records: true
+    zzu_selected_plus_exclusions_equals_candidate_records: true
+    zzu_twelve_lead_plus_nine_lead_equals_candidate_records: true
+    pediatric_12_lead_flag_false_equals_nine_lead_records: true
+    zzu_selected_plus_nonflag_exclusions_equals_twelve_lead_records: true
+    zzu_selected_patients_not_greater_than_zzu_selected_records: true
   per_record_private_bindings:
     - exact_dataset_and_record_reference
     - exact_patient_role_or_null
@@ -872,6 +921,18 @@ runtime:
       PATH: replica_tool_directory_then_System32_only
       caller_cwd_and_environment: forbidden
       replica_and_original_hashes_rechecked_before_and_after_each_call: true
+    windows_slt_member_path_normalization:
+      scope: bound_windows_7zip_slt_presentation_only
+      accepted_separator_conventions: [forward_slash_only, backslash_only]
+      mixed_separators: forbidden
+      backslash_to_forward_slash_before_shared_canonical_validation: true
+      shared_canonical_path_validation_after_normalization: required
+      rejected_after_normalization:
+        - absolute_rooted_drive_UNC_or_device_paths
+        - traversal_dot_empty_or_trailing_components
+        - Windows_reserved_names_or_control_characters
+        - exact_or_casefolded_collisions
+      stored_archive_and_evidence_paths_remain_posix_forward_slash_only: true
 
 evaluation:
   primary_endpoints:
@@ -982,6 +1043,30 @@ one_shot_external_access:
     - distribution_scoring
     - model_logits_or_probabilities
     - endpoint_or_subgroup_metrics
+  inventory_build_authorization:
+    authorization_id: x4_inventory_build_attempt_1
+    artifact_type: ecg_trust.ood_external_v2_1_inventory_builder_attempt
+    path: artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json
+    scope: sole_x4_preclaim_inventory_build_attempt
+    creation: atomic_create_new_no_overwrite
+    durability: exact_file_flush_and_parent_directory_durability_or_fail_closed
+    timing: after_exact_preflight_path_schema_and_tool_binding_before_first_official_source_byte
+    preconsumption_requirements:
+      - exact_frozen_parent_schema_and_count_invariants_verified
+      - exact_canonical_dataset_root_and_raw_source_path_keysets_verified
+      - exact_bound_7zip_tool_identity_verified
+      - raw_source_declared_path_size_sha256_and_md5_bindings_loaded_from_parent
+    first_official_source_byte_requires_durable_marker: true
+    postconsumption_first_raw_action: hash_every_official_source_against_exact_parent_size_sha256_and_md5
+    maximum_consumptions: 1
+    contains_external_source_bytes_or_identifiers: false
+    contains_model_outputs_embeddings_or_scores: false
+    distinct_from_external_waveform_one_shot_claim: true
+    external_one_shot_claim_consumed_at_marker_creation: false
+    git_ignored_and_untracked: true
+    retention: permanent
+    retry_resume_or_reuse: forbidden
+    failure_after_consumption_requires_new_frozen_amendment_and_new_authorization_id: true
   prerequisites:
     - parent_protocol_frozen_and_committed
     - child_execution_contract_with_exact_input_hashes_frozen_and_committed
@@ -989,6 +1074,7 @@ one_shot_external_access:
     - exact_raw_source_hashes_and_semantic_roles_rederived
     - exact_python_scientific_package_tree_and_7zip_identities_verified
     - quality_implementation_hash_verified
+    - durable_x4_inventory_build_authorization_marker_verified
     - output_root_absent
     - clean_committed_revision
   output_root: artifacts/trust_sentinel/ood_external_v2_1
@@ -1005,7 +1091,12 @@ one_shot_external_access:
     visibility_consumes_one_shot_before_durability_completion: true
     scope: both_selected_external_sources_in_one_claim
     retention: permanent
-  retry_resume_or_second_inference: forbidden
+  postclaim_no_retry:
+    scope: after_external_one_shot_claim_entry_first_becomes_visible
+    retry_resume_reuse_or_second_scientific_inference: forbidden
+    integrity_replays_declared_by_this_protocol_are_same_claim_verification_not_retries: true
+    failure_requires_new_protocol_and_new_output_root: true
+    absolute_without_operator_or_failure_exception: true
   postclaim_failure:
     preserve_existing_evidence: true
     emit_sanitized_failure_receipt: required_when_claim_entry_became_visible

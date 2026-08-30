@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import copy
 import hashlib
 import json
@@ -14,6 +15,8 @@ import scripts.build_trust_sentinel_ood_v2_inventory as cli
 from ecg_trust.constants import LEADS
 from ecg_trust.ood_v2 import inventory as inventory_module
 from ecg_trust.ood_v2.inventory import (
+    CHALLENGE_2011_DATASET,
+    ZZU_PEDIATRIC_DATASET,
     ExternalInventoryError,
     load_external_inventory,
 )
@@ -121,6 +124,56 @@ def _expectations() -> cli.InventoryExpectations:
         zzu_patients=3,
         zzu_twelve_lead_records=2,
         zzu_nine_lead_records=1,
+        zzu_selected_records=1,
+        zzu_selected_patients=1,
+        total_selected_records=3,
+        zzu_duration_under_10_seconds=1,
+        zzu_lead_count_not_12=0,
+        zzu_noncanonical_lead_set=0,
+        zzu_pediatric_12_lead_flag_false=1,
+        zzu_sampling_frequency_not_500_hz=0,
+    )
+
+
+def _builder_preflight() -> SimpleNamespace:
+    expectations = _expectations()
+    return SimpleNamespace(
+        inventory_counts=SimpleNamespace(
+            challenge_records=expectations.challenge_records,
+            zzu_candidate_records=expectations.zzu_records,
+            zzu_candidate_patients=expectations.zzu_patients,
+            zzu_twelve_lead_records=expectations.zzu_twelve_lead_records,
+            zzu_nine_lead_records=expectations.zzu_nine_lead_records,
+            zzu_records=expectations.zzu_selected_records,
+            zzu_patients=expectations.zzu_selected_patients,
+            total_records=expectations.total_selected_records,
+            zzu_exclusion_counts=expectations.zzu_exclusion_counts,
+        )
+    )
+
+
+def _builder_arguments(tmp_path: Path) -> argparse.Namespace:
+    return argparse.Namespace(
+        parent=Path("configs/parent.yaml"),
+        implementation_revision="a" * 40,
+        challenge_root=tmp_path / "challenge",
+        challenge_archive=tmp_path / "challenge.tar.gz",
+        challenge_records=tmp_path / "RECORDS",
+        challenge_acceptable=tmp_path / "RECORDS-acceptable",
+        challenge_unacceptable=tmp_path / "RECORDS-unacceptable",
+        zzu_root=tmp_path / "zzu",
+        zzu_archive_z01=tmp_path / "zzu.z01",
+        zzu_archive_zip=tmp_path / "zzu.zip",
+        seven_zip_executable=tmp_path / "7z.exe",
+        zzu_metadata=tmp_path / "attributes.csv",
+        zzu_record_column="Filename",
+        zzu_ecg_id_column="ECG_ID",
+        zzu_patient_column="Patient_ID",
+        zzu_lead_count_column="Lead",
+        zzu_sampling_point_column="Sampling_point",
+        zzu_delimiter="comma",
+        private_output=tmp_path / "private.json",
+        public_output=tmp_path / "public.json",
     )
 
 
@@ -582,7 +635,7 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
-    preflight = object()
+    preflight = _builder_preflight()
     private_artifact_sha256 = "sha256:" + "1" * 64
     public_artifact_sha256 = "sha256:" + "2" * 64
     private_bytes = b"private-canonical\n"
@@ -613,26 +666,55 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
             tmp_path / "src",
         ),
     )
-    monkeypatch.setattr(
-        cli,
-        "verify_inventory_builder_preflight",
-        lambda *_args: calls.append("preflight") or preflight,
-    )
+    def builder_preflight(*_args: object) -> SimpleNamespace:
+        calls.append("preflight")
+        return preflight
+
+    monkeypatch.setattr(cli, "verify_inventory_builder_preflight", builder_preflight)
     monkeypatch.setattr(
         cli,
         "_verify_production_output_destinations",
         lambda *_args: calls.append("destinations"),
     )
+    observed_contract: dict[str, object] = {}
+
+    def input_contract(boundary: object, **kwargs: object) -> None:
+        calls.append("input_contract")
+        observed_contract.update(boundary=boundary, **kwargs)
+
+    monkeypatch.setattr(cli, "verify_inventory_builder_input_contract", input_contract)
+    observed_authorization: dict[str, object] = {}
+
+    def authorize(boundary: object, **kwargs: object) -> str:
+        calls.append("authorization")
+        observed_authorization.update(boundary=boundary, **kwargs)
+        return "marker"
+
+    observed_raw_bindings: dict[str, object] = {}
+
+    def verify_raw_bindings(boundary: object, **kwargs: object) -> None:
+        calls.append("raw_bindings")
+        observed_raw_bindings.update(boundary=boundary, **kwargs)
+
+    monkeypatch.setattr(cli, "consume_inventory_builder_authorization", authorize)
     monkeypatch.setattr(
         cli,
-        "build_inventory_artifacts",
-        lambda *_args, **_kwargs: calls.append("build") or artifacts,
+        "verify_inventory_builder_raw_source_bindings",
+        verify_raw_bindings,
     )
-    monkeypatch.setattr(
-        cli,
-        "write_inventory_artifacts",
-        lambda *_args, **_kwargs: calls.append("write") or result,
-    )
+    observed_build: dict[str, object] = {}
+
+    def build(inputs: cli.InventoryInputPaths, **kwargs: object) -> object:
+        calls.append("build")
+        observed_build.update(inputs=inputs, **kwargs)
+        return artifacts
+
+    monkeypatch.setattr(cli, "build_inventory_artifacts", build)
+    def write(*_args: object, **_kwargs: object) -> cli.InventoryCLIResult:
+        calls.append("write")
+        return result
+
+    monkeypatch.setattr(cli, "write_inventory_artifacts", write)
     observed_postflight: dict[str, object] = {}
 
     def postflight(boundary: object, **kwargs: object) -> None:
@@ -640,31 +722,48 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
         observed_postflight.update(boundary=boundary, **kwargs)
 
     monkeypatch.setattr(cli, "verify_inventory_builder_postflight", postflight)
-    arguments = SimpleNamespace(
-        parent=Path("configs/parent.yaml"),
-        implementation_revision="a" * 40,
-        challenge_root=tmp_path / "challenge",
-        challenge_archive=tmp_path / "challenge.tar.gz",
-        challenge_records=tmp_path / "RECORDS",
-        challenge_acceptable=tmp_path / "RECORDS-acceptable",
-        challenge_unacceptable=tmp_path / "RECORDS-unacceptable",
-        zzu_root=tmp_path / "zzu",
-        zzu_archive_z01=tmp_path / "zzu.z01",
-        zzu_archive_zip=tmp_path / "zzu.zip",
-        seven_zip_executable=tmp_path / "7z.exe",
-        zzu_metadata=tmp_path / "attributes.csv",
-        zzu_record_column="Filename",
-        zzu_ecg_id_column="ECG_ID",
-        zzu_patient_column="Patient_ID",
-        zzu_lead_count_column="Lead",
-        zzu_sampling_point_column="Sampling_point",
-        zzu_delimiter="comma",
-        private_output=tmp_path / "private.json",
-        public_output=tmp_path / "public.json",
-    )
+    arguments = _builder_arguments(tmp_path)
 
     assert cli.run_inventory_build(arguments) is result
-    assert calls == ["preflight", "destinations", "build", "write", "postflight"]
+    assert calls == [
+        "preflight",
+        "destinations",
+        "input_contract",
+        "authorization",
+        "raw_bindings",
+        "build",
+        "write",
+        "postflight",
+    ]
+    assert observed_contract == {
+        "boundary": preflight,
+        "project_root": tmp_path,
+        "dataset_roots": {
+            CHALLENGE_2011_DATASET: arguments.challenge_root,
+            ZZU_PEDIATRIC_DATASET: arguments.zzu_root,
+        },
+        "raw_source_paths": {
+            "challenge_archive": arguments.challenge_archive,
+            "challenge_records": arguments.challenge_records,
+            "challenge_records_acceptable": arguments.challenge_acceptable,
+            "challenge_records_unacceptable": arguments.challenge_unacceptable,
+            "zzu_archive_z01": arguments.zzu_archive_z01,
+            "zzu_archive_zip": arguments.zzu_archive_zip,
+            "zzu_attributes_dictionary": arguments.zzu_metadata,
+        },
+        "seven_zip_executable": arguments.seven_zip_executable,
+    }
+    assert observed_authorization == {
+        "boundary": preflight,
+        "project_root": tmp_path,
+    }
+    assert observed_raw_bindings == {
+        "boundary": preflight,
+        "project_root": tmp_path,
+    }
+    assert isinstance(observed_build["inputs"], cli.InventoryInputPaths)
+    assert observed_build["zzu_schema"] == cli.ZZUMetadataSchema()
+    assert observed_build["expectations"] == _expectations()
     assert observed_postflight == {
         "boundary": preflight,
         "parent_path": arguments.parent,
@@ -679,6 +778,185 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
         ),
         "expected_public_projection_artifact_sha256": public_artifact_sha256,
     }
+
+
+def test_inventory_builder_rejects_altered_schema_before_contract_or_raw_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    arguments = _builder_arguments(tmp_path)
+    arguments.zzu_record_column = "AlteredFilename"
+    monkeypatch.setattr(
+        cli,
+        "_project_layout",
+        lambda: (
+            tmp_path / "scripts" / "inventory.py",
+            tmp_path,
+            tmp_path / ".venv" / "Lib" / "site-packages",
+            tmp_path / "src",
+        ),
+    )
+    def builder_preflight(*_args: object) -> SimpleNamespace:
+        calls.append("preflight")
+        return _builder_preflight()
+
+    monkeypatch.setattr(cli, "verify_inventory_builder_preflight", builder_preflight)
+    monkeypatch.setattr(
+        cli,
+        "_verify_production_output_destinations",
+        lambda *_args: calls.append("destinations"),
+    )
+    for name in (
+        "verify_inventory_builder_input_contract",
+        "consume_inventory_builder_authorization",
+        "verify_inventory_builder_raw_source_bindings",
+        "build_inventory_artifacts",
+    ):
+        monkeypatch.setattr(
+            cli,
+            name,
+            lambda *_args, _name=name, **_kwargs: pytest.fail(
+                f"{_name} ran after a non-frozen schema"
+            ),
+        )
+
+    with pytest.raises(cli.InventoryCLIError, match="schema differs from the frozen contract"):
+        cli.run_inventory_build(arguments)
+
+    assert calls == ["preflight", "destinations"]
+
+
+def test_inventory_builder_rejects_altered_path_before_authorization_or_raw_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    preflight = _builder_preflight()
+    arguments = _builder_arguments(tmp_path)
+    arguments.challenge_root = tmp_path / "altered-challenge"
+    monkeypatch.setattr(
+        cli,
+        "_project_layout",
+        lambda: (
+            tmp_path / "scripts" / "inventory.py",
+            tmp_path,
+            tmp_path / ".venv" / "Lib" / "site-packages",
+            tmp_path / "src",
+        ),
+    )
+    def builder_preflight(*_args: object) -> SimpleNamespace:
+        calls.append("preflight")
+        return preflight
+
+    monkeypatch.setattr(cli, "verify_inventory_builder_preflight", builder_preflight)
+    monkeypatch.setattr(
+        cli,
+        "_verify_production_output_destinations",
+        lambda *_args: calls.append("destinations"),
+    )
+
+    def refuse_contract(boundary: object, **kwargs: object) -> None:
+        calls.append("input_contract")
+        assert boundary is preflight
+        assert kwargs["dataset_roots"] == {
+            CHALLENGE_2011_DATASET: arguments.challenge_root,
+            ZZU_PEDIATRIC_DATASET: arguments.zzu_root,
+        }
+        raise cli.InventoryCLIError("input contract refused")
+
+    monkeypatch.setattr(cli, "verify_inventory_builder_input_contract", refuse_contract)
+    for name in (
+        "consume_inventory_builder_authorization",
+        "verify_inventory_builder_raw_source_bindings",
+        "build_inventory_artifacts",
+    ):
+        monkeypatch.setattr(
+            cli,
+            name,
+            lambda *_args, _name=name, **_kwargs: pytest.fail(
+                f"{_name} ran after input-contract refusal"
+            ),
+        )
+
+    with pytest.raises(cli.InventoryCLIError, match="input contract refused"):
+        cli.run_inventory_build(arguments)
+
+    assert calls == ["preflight", "destinations", "input_contract"]
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "expected_calls"),
+    (
+        ("authorization", ["preflight", "destinations", "input_contract", "authorization"]),
+        (
+            "raw_bindings",
+            [
+                "preflight",
+                "destinations",
+                "input_contract",
+                "authorization",
+                "raw_bindings",
+            ],
+        ),
+    ),
+)
+def test_inventory_builder_boundary_failures_prevent_inventory_build(
+    failure_stage: str,
+    expected_calls: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        cli,
+        "_project_layout",
+        lambda: (
+            tmp_path / "scripts" / "inventory.py",
+            tmp_path,
+            tmp_path / ".venv" / "Lib" / "site-packages",
+            tmp_path / "src",
+        ),
+    )
+    def builder_preflight(*_args: object) -> SimpleNamespace:
+        calls.append("preflight")
+        return _builder_preflight()
+
+    monkeypatch.setattr(cli, "verify_inventory_builder_preflight", builder_preflight)
+    monkeypatch.setattr(
+        cli,
+        "_verify_production_output_destinations",
+        lambda *_args: calls.append("destinations"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "verify_inventory_builder_input_contract",
+        lambda *_args, **_kwargs: calls.append("input_contract"),
+    )
+
+    def authorize(*_args: object, **_kwargs: object) -> str:
+        calls.append("authorization")
+        if failure_stage == "authorization":
+            raise cli.InventoryCLIError("boundary refused")
+        return "marker"
+
+    def verify_raw(*_args: object, **_kwargs: object) -> None:
+        calls.append("raw_bindings")
+        if failure_stage == "raw_bindings":
+            raise cli.InventoryCLIError("boundary refused")
+
+    monkeypatch.setattr(cli, "consume_inventory_builder_authorization", authorize)
+    monkeypatch.setattr(cli, "verify_inventory_builder_raw_source_bindings", verify_raw)
+    monkeypatch.setattr(
+        cli,
+        "build_inventory_artifacts",
+        lambda *_args, **_kwargs: pytest.fail("inventory build ran after boundary refusal"),
+    )
+
+    with pytest.raises(cli.InventoryCLIError, match="boundary refused"):
+        cli.run_inventory_build(_builder_arguments(tmp_path))
+
+    assert calls == expected_calls
 
 
 def test_cli_archive_closure_requires_exact_full_release_role_counts(
