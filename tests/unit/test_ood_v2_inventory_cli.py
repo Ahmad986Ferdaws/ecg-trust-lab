@@ -732,7 +732,11 @@ def test_preflight_only_reuses_controls_and_never_reaches_capabilities(
         arguments.private_output,
         arguments.public_output,
         tmp_path
+        / "artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json",
+        tmp_path
         / "artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json",
+        tmp_path
+        / "artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json",
         tmp_path / "artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json",
         tmp_path / "artifacts/trust_sentinel/ood_external_v2_1",
     )

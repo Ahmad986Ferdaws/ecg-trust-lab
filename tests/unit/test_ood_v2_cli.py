@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import inspect
 import json
 import os
 import subprocess
@@ -18,9 +20,28 @@ import scripts.verify_trust_sentinel_ood_external_v2 as verify_cli
 
 class _LauncherModule(Protocol):
     __file__: str
+    _GCM_COMMANDLINE_SENTINEL_DIRECTORY: str
     _ISOLATED_CHILD_FLAG: str
     _HANDOFF_FILENAME: str
     _RUNTIME_ROOT_PREFIX: str
+    _WINDOWS_CLOSE_HANDLE: object
+    _WINDOWS_CREATE_FILE_W: object
+    _WINDOWS_FILE_ATTRIBUTE_DIRECTORY: int
+    _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT: int
+    _WINDOWS_FILE_ATTRIBUTE_TAG_INFO_CLASS: int
+    _WINDOWS_FILE_DISPOSITION_INFO_CLASS: int
+    _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS: int
+    _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT: int
+    _WINDOWS_FILE_ID_INFO_CLASS: int
+    _WINDOWS_FILE_LIST_DIRECTORY: int
+    _WINDOWS_FILE_READ_ATTRIBUTES: int
+    _WINDOWS_FILE_SHARE_DELETE: int
+    _WINDOWS_FILE_SHARE_READ: int
+    _WINDOWS_FILE_SHARE_WRITE: int
+    _WINDOWS_GET_FILE_INFORMATION_BY_HANDLE_EX: object
+    _WINDOWS_INVALID_HANDLE_VALUE: int
+    _WINDOWS_OPEN_EXISTING: int
+    _WINDOWS_SET_FILE_INFORMATION_BY_HANDLE: object
     secrets: ModuleType
     subprocess: ModuleType
 
@@ -28,7 +49,14 @@ class _LauncherModule(Protocol):
 
     def _relaunch_isolated(self, arguments: tuple[str, ...]) -> int: ...
 
+    def _remove_empty_gcm_commandline_sentinel(self, temporary: Path) -> None: ...
+
     def _remove_empty_runtime_root(self, runtime_root: Path) -> None: ...
+
+    def _windows_directory_handle_state(
+        self,
+        handle: int,
+    ) -> tuple[int, int, int, bytes]: ...
 
 
 def _make_runtime_root(parent: Path, *, name: str) -> Path:
@@ -170,6 +198,498 @@ def test_runtime_launcher_constructs_exact_isolated_child_and_cleans_cache(
     assert not (cache_parent / f"{module._RUNTIME_ROOT_PREFIX}{marker}").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle deletion contract")
+@pytest.mark.parametrize(
+    "module",
+    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+)
+def test_runtime_launcher_accepts_exact_empty_gcm_sentinel_after_child_success(
+    module: _LauncherModule,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "project"
+    cache_parent = root / "artifacts" / "trust_sentinel"
+    site_packages = root / ".venv" / "Lib" / "site-packages"
+    project_src = root / "src"
+    script = root / "scripts" / "entry.py"
+    cache_parent.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    project_src.mkdir()
+    script.parent.mkdir()
+    script.write_text("# bound\n", encoding="utf-8")
+    marker = "d" * 64
+    runtime_root = cache_parent / f"{module._RUNTIME_ROOT_PREFIX}{marker}"
+    protected_paths = (
+        root / "data" / "raw" / "external-ood",
+        cache_parent / ".ood_external_v2_1.x4-inventory-build-attempt.json",
+        cache_parent / ".ood_external_v2_1.x5-inventory-build-attempt.json",
+        cache_parent / ".ood_external_v2_1.x6-inventory-build-attempt.json",
+        cache_parent / ".ood_external_v2_1.one-shot-claim.json",
+        cache_parent / "ood_external_v2_1",
+        cache_parent / "ood_external_v2_1_preflight/private/external-waveform-inventory.json",
+        cache_parent / "ood_external_v2_1_preflight/public/external-inventory-summary.json",
+        root / "configs" / "trust_sentinel_ood_external_v2_1_execution.json",
+    )
+    sibling_canary = cache_parent / "launcher-cleanup-canary.txt"
+    sibling_canary.write_bytes(b"must remain")
+    assert all(not path.exists() for path in protected_paths)
+
+    monkeypatch.setattr(
+        module,
+        "_project_layout",
+        lambda: (script, root, site_packages, project_src),
+    )
+    monkeypatch.setattr(module.secrets, "token_hex", lambda _: marker)
+
+    def fake_run(
+        arguments: list[str],
+        *,
+        check: bool,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> SimpleNamespace:
+        del arguments
+        assert check is False
+        assert cwd == root
+        assert env["TEMP"] == os.fspath(runtime_root / "temp")
+        assert env["TMP"] == env["TEMP"]
+        (runtime_root / module._HANDOFF_FILENAME).unlink()
+        sentinel = runtime_root / "temp" / module._GCM_COMMANDLINE_SENTINEL_DIRECTORY
+        sentinel.mkdir()
+        assert tuple(sentinel.iterdir()) == ()
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    assert module._relaunch_isolated(("--help",)) == 0
+    assert not runtime_root.exists()
+    assert sibling_canary.read_bytes() == b"must remain"
+    assert all(not path.exists() for path in protected_paths)
+    assert not tuple(cache_parent.glob(".*-inventory-build-attempt.json"))
+
+
+@pytest.mark.parametrize(
+    "module",
+    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+)
+@pytest.mark.parametrize(
+    "invalid_state",
+    (
+        "exact_name_file",
+        "nonempty_file",
+        "nonempty_directory",
+        "alternate_name",
+        "case_variant",
+        "sibling_entry",
+    ),
+)
+def test_runtime_cleanup_rejects_every_nonexact_gcm_temp_state(
+    module: _LauncherModule,
+    invalid_state: str,
+    tmp_path: Path,
+) -> None:
+    runtime_root = _make_runtime_root(tmp_path, name="runtime")
+    temporary = runtime_root / "temp"
+    sentinel = temporary / module._GCM_COMMANDLINE_SENTINEL_DIRECTORY
+    if invalid_state == "exact_name_file":
+        sentinel.write_bytes(b"")
+    elif invalid_state == "nonempty_file":
+        sentinel.mkdir()
+        (sentinel / "unexpected.txt").write_text("unexpected", encoding="utf-8")
+    elif invalid_state == "nonempty_directory":
+        (sentinel / "unexpected").mkdir(parents=True)
+    elif invalid_state == "alternate_name":
+        (temporary / "system-commandline-sentinel-file").mkdir()
+    elif invalid_state == "case_variant":
+        (temporary / "System-Commandline-Sentinel-Files").mkdir()
+    else:
+        sentinel.mkdir()
+        (temporary / "unexpected.txt").write_text("unexpected", encoding="utf-8")
+
+    with pytest.raises(RuntimeError):
+        module._remove_empty_runtime_root(runtime_root)
+
+    assert runtime_root.is_dir()
+    assert any(temporary.iterdir())
+
+
+@pytest.mark.parametrize(
+    "module",
+    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+)
+def test_runtime_cleanup_rejects_gcm_sentinel_symlink_without_touching_target(
+    module: _LauncherModule,
+    tmp_path: Path,
+) -> None:
+    runtime_root = _make_runtime_root(tmp_path / "owned", name="runtime")
+    target = tmp_path / "external-target"
+    target.mkdir()
+    sentinel = runtime_root / "temp" / module._GCM_COMMANDLINE_SENTINEL_DIRECTORY
+    try:
+        sentinel.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlink creation is unavailable")
+
+    with pytest.raises(RuntimeError, match="indirect"):
+        module._remove_empty_runtime_root(runtime_root)
+
+    assert sentinel.is_symlink()
+    assert target.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+@pytest.mark.parametrize(
+    "module",
+    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+)
+def test_runtime_cleanup_rejects_gcm_sentinel_junction_without_touching_target(
+    module: _LauncherModule,
+    tmp_path: Path,
+) -> None:
+    runtime_root = _make_runtime_root(tmp_path / "owned", name="runtime")
+    target = tmp_path / "external-target"
+    target.mkdir()
+    sentinel = runtime_root / "temp" / module._GCM_COMMANDLINE_SENTINEL_DIRECTORY
+    completed = subprocess.run(
+        [
+            r"C:\Windows\System32\cmd.exe",
+            "/d",
+            "/c",
+            "mklink",
+            "/J",
+            os.fspath(sentinel),
+            os.fspath(target),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert sentinel.is_junction()
+    try:
+        with pytest.raises(RuntimeError, match="indirect"):
+            module._remove_empty_runtime_root(runtime_root)
+        assert sentinel.is_junction()
+        assert target.is_dir()
+    finally:
+        if sentinel.is_junction():
+            os.rmdir(sentinel)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-sharing contract")
+@pytest.mark.parametrize(
+    "module",
+    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+)
+@pytest.mark.parametrize("replacement_kind", ("direct_directory", "junction"))
+def test_runtime_cleanup_blocks_final_gap_directory_and_junction_swaps(
+    module: _LauncherModule,
+    replacement_kind: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root = _make_runtime_root(tmp_path / "owned", name="runtime")
+    temporary = runtime_root / "temp"
+    sentinel = temporary / module._GCM_COMMANDLINE_SENTINEL_DIRECTORY
+    sentinel.mkdir()
+    replacement = tmp_path / f"replacement-{replacement_kind}"
+    target = tmp_path / "external-target"
+    target.mkdir()
+    canary = target / "canary.txt"
+    canary.write_bytes(b"must remain")
+    if replacement_kind == "direct_directory":
+        replacement.mkdir()
+    else:
+        completed = subprocess.run(
+            [
+                r"C:\Windows\System32\cmd.exe",
+                "/d",
+                "/c",
+                "mklink",
+                "/J",
+                os.fspath(replacement),
+                os.fspath(target),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert replacement.is_junction()
+    displaced = tmp_path / f"displaced-{replacement_kind}"
+    original_set_information = module._WINDOWS_SET_FILE_INFORMATION_BY_HANDLE
+    assert callable(original_set_information)
+    blocked_renames: list[OSError] = []
+
+    def race_at_disposition(*arguments: object) -> object:
+        try:
+            sentinel.rename(displaced)
+        except OSError as error:
+            blocked_renames.append(error)
+        else:
+            replacement.rename(sentinel)
+        return original_set_information(*arguments)
+
+    monkeypatch.setattr(
+        module,
+        "_WINDOWS_SET_FILE_INFORMATION_BY_HANDLE",
+        race_at_disposition,
+    )
+    try:
+        module._remove_empty_gcm_commandline_sentinel(temporary)
+
+        assert blocked_renames
+        assert not sentinel.exists()
+        assert not displaced.exists()
+        assert replacement.is_dir()
+        assert canary.read_bytes() == b"must remain"
+    finally:
+        for candidate in (replacement, sentinel):
+            if candidate.is_junction():
+                os.rmdir(candidate)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-bound emptiness contract")
+@pytest.mark.parametrize(
+    "module",
+    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+)
+def test_runtime_cleanup_fails_closed_if_sentinel_gains_content_at_disposition(
+    module: _LauncherModule,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root = _make_runtime_root(tmp_path, name="runtime")
+    sentinel = runtime_root / "temp" / module._GCM_COMMANDLINE_SENTINEL_DIRECTORY
+    sentinel.mkdir()
+    late = sentinel / "late.txt"
+    original_set_information = module._WINDOWS_SET_FILE_INFORMATION_BY_HANDLE
+    assert callable(original_set_information)
+
+    def add_content_at_disposition(*arguments: object) -> object:
+        late.write_text("late", encoding="utf-8")
+        return original_set_information(*arguments)
+
+    monkeypatch.setattr(
+        module,
+        "_WINDOWS_SET_FILE_INFORMATION_BY_HANDLE",
+        add_content_at_disposition,
+    )
+
+    with pytest.raises(RuntimeError, match="handle deletion failed"):
+        module._remove_empty_runtime_root(runtime_root)
+
+    assert late.read_text(encoding="utf-8") == "late"
+    assert runtime_root.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle identity contract")
+@pytest.mark.parametrize(
+    "module",
+    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+)
+@pytest.mark.parametrize(
+    ("changed_query", "message"),
+    ((2, "pathname identity changed"), (3, "handle identity changed")),
+)
+def test_runtime_cleanup_rejects_witness_and_final_main_identity_changes(
+    module: _LauncherModule,
+    changed_query: int,
+    message: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root = _make_runtime_root(tmp_path, name="runtime")
+    sentinel = runtime_root / "temp" / module._GCM_COMMANDLINE_SENTINEL_DIRECTORY
+    sentinel.mkdir()
+    original_state = module._windows_directory_handle_state
+    query_count = 0
+
+    def drifting_state(handle: int) -> tuple[int, int, int, bytes]:
+        nonlocal query_count
+        state = original_state(handle)
+        query_count += 1
+        if query_count != changed_query:
+            return state
+        changed_identifier = bytes((state[3][0] ^ 1,)) + state[3][1:]
+        return state[0], state[1], state[2], changed_identifier
+
+    monkeypatch.setattr(module, "_windows_directory_handle_state", drifting_state)
+
+    with pytest.raises(RuntimeError, match=message):
+        module._remove_empty_runtime_root(runtime_root)
+
+    assert sentinel.is_dir()
+    assert runtime_root.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle API contract")
+@pytest.mark.parametrize(
+    "failed_api",
+    ("CreateFileW", "GetFileInformationByHandleEx", "SetFileInformationByHandle", "CloseHandle"),
+)
+def test_runtime_cleanup_fails_closed_on_each_windows_api_failure(
+    failed_api: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = evaluate_cli
+    runtime_root = _make_runtime_root(tmp_path, name="runtime")
+    sentinel = runtime_root / "temp" / module._GCM_COMMANDLINE_SENTINEL_DIRECTORY
+    sentinel.mkdir()
+
+    if failed_api == "CreateFileW":
+
+        def fail_create_file(*arguments: object) -> int:
+            del arguments
+            ctypes.set_last_error(5)
+            return module._WINDOWS_INVALID_HANDLE_VALUE
+
+        monkeypatch.setattr(module, "_WINDOWS_CREATE_FILE_W", fail_create_file)
+        message = "main handle open failed"
+    elif failed_api == "GetFileInformationByHandleEx":
+
+        def fail_information_query(*arguments: object) -> int:
+            del arguments
+            ctypes.set_last_error(5)
+            return 0
+
+        monkeypatch.setattr(
+            module,
+            "_WINDOWS_GET_FILE_INFORMATION_BY_HANDLE_EX",
+            fail_information_query,
+        )
+        message = "handle attribute query failed"
+    elif failed_api == "SetFileInformationByHandle":
+
+        def fail_disposition(*arguments: object) -> int:
+            del arguments
+            ctypes.set_last_error(5)
+            return 0
+
+        monkeypatch.setattr(
+            module,
+            "_WINDOWS_SET_FILE_INFORMATION_BY_HANDLE",
+            fail_disposition,
+        )
+        message = "handle deletion failed"
+    else:
+        original_close = module._WINDOWS_CLOSE_HANDLE
+        assert callable(original_close)
+        close_count = 0
+
+        def fail_witness_close(handle: int) -> object:
+            nonlocal close_count
+            result = original_close(handle)
+            close_count += 1
+            if close_count == 1:
+                ctypes.set_last_error(5)
+                return 0
+            return result
+
+        monkeypatch.setattr(module, "_WINDOWS_CLOSE_HANDLE", fail_witness_close)
+        message = "witness handle close failed"
+
+    with pytest.raises(RuntimeError, match=message):
+        module._remove_empty_runtime_root(runtime_root)
+
+    assert sentinel.is_dir()
+    assert runtime_root.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows post-close contract")
+@pytest.mark.parametrize(
+    "module",
+    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+)
+def test_runtime_cleanup_requires_temp_empty_after_main_handle_close(
+    module: _LauncherModule,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root = _make_runtime_root(tmp_path, name="runtime")
+    temporary = runtime_root / "temp"
+    sentinel = temporary / module._GCM_COMMANDLINE_SENTINEL_DIRECTORY
+    sentinel.mkdir()
+    late = temporary / "late-sibling.txt"
+    original_close = module._WINDOWS_CLOSE_HANDLE
+    assert callable(original_close)
+    close_count = 0
+
+    def inject_after_main_close(handle: int) -> object:
+        nonlocal close_count
+        result = original_close(handle)
+        close_count += 1
+        if close_count == 2:
+            late.write_text("late", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(module, "_WINDOWS_CLOSE_HANDLE", inject_after_main_close)
+
+    with pytest.raises(RuntimeError, match="temp changed"):
+        module._remove_empty_runtime_root(runtime_root)
+
+    assert late.read_text(encoding="utf-8") == "late"
+    assert runtime_root.is_dir()
+
+
+def test_all_runtime_launchers_share_handle_bound_nonrecursive_gcm_cleanup() -> None:
+    modules: tuple[_LauncherModule, ...] = (
+        inventory_cli,
+        freeze_cli,
+        evaluate_cli,
+        verify_cli,
+    )
+    state_sources = {
+        inspect.getsource(module._windows_directory_handle_state) for module in modules
+    }
+    assert state_sources and len(state_sources) == 1
+    helper_sources = {
+        inspect.getsource(module._remove_empty_gcm_commandline_sentinel) for module in modules
+    }
+    assert helper_sources and len(helper_sources) == 1
+    helper_source = next(iter(helper_sources))
+    for required in (
+        "_WINDOWS_CREATE_FILE_W(",
+        "_WINDOWS_GET_FILE_INFORMATION_BY_HANDLE_EX",
+        "_WINDOWS_SET_FILE_INFORMATION_BY_HANDLE(",
+        "_WindowsFileDispositionInfo(delete_file=True)",
+        "_WINDOWS_CLOSE_HANDLE(",
+        "expected.lstat()",
+    ):
+        assert required in helper_source or required in next(iter(state_sources))
+    for forbidden in (
+        "rmdir(",
+        "rmtree",
+        ".unlink(",
+        "os.remove",
+        ".glob(",
+        "os.walk",
+    ):
+        assert forbidden not in helper_source
+    for module in modules:
+        assert module._GCM_COMMANDLINE_SENTINEL_DIRECTORY == "system-commandline-sentinel-files"
+        assert module._WINDOWS_FILE_ATTRIBUTE_TAG_INFO_CLASS == 9
+        assert module._WINDOWS_FILE_ID_INFO_CLASS == 18
+        assert module._WINDOWS_FILE_DISPOSITION_INFO_CLASS == 4
+        assert ctypes.sizeof(module._WindowsFileDispositionInfo) == 1
+        assert module._WINDOWS_FILE_SHARE_READ == 1
+        assert module._WINDOWS_FILE_SHARE_WRITE == 2
+        assert module._WINDOWS_FILE_SHARE_DELETE == 4
+        assert module._WINDOWS_OPEN_EXISTING == 3
+        assert (
+            module._WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
+            | module._WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT
+        ) == 0x02200000
+        assert module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY == 0x10
+        assert module._WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT == 0x400
+        child_source = inspect.getsource(module._consume_parent_handoff)
+        assert "for directory in (cache, temporary, roaming, local)" in child_source
+        assert "any(directory.iterdir())" in child_source
+        assert "_remove_empty_gcm_commandline_sentinel" not in child_source
+
+
 @pytest.mark.parametrize(
     "module",
     [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
@@ -213,11 +733,72 @@ def test_runtime_launcher_refuses_nonempty_scratch_after_child(
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
 
-    with pytest.raises(RuntimeError, match="unexpected files"):
+    with pytest.raises(RuntimeError, match="unexpected contents"):
         module._relaunch_isolated(("--help",))
 
     (runtime_root / "temp" / "unexpected.txt").unlink()
     module._remove_empty_runtime_root(runtime_root)
+
+
+@pytest.mark.parametrize(
+    "module",
+    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+)
+def test_runtime_launcher_never_retries_failed_post_child_cleanup(
+    module: _LauncherModule,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "project"
+    cache_parent = root / "artifacts" / "trust_sentinel"
+    site_packages = root / ".venv" / "Lib" / "site-packages"
+    project_src = root / "src"
+    script = root / "scripts" / "entry.py"
+    cache_parent.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    project_src.mkdir()
+    script.parent.mkdir()
+    script.write_text("# bound\n", encoding="utf-8")
+    marker = "e" * 64
+    runtime_root = cache_parent / f"{module._RUNTIME_ROOT_PREFIX}{marker}"
+
+    monkeypatch.setattr(
+        module,
+        "_project_layout",
+        lambda: (script, root, site_packages, project_src),
+    )
+    monkeypatch.setattr(module.secrets, "token_hex", lambda _: marker)
+
+    def fake_run(
+        arguments: list[str],
+        *,
+        check: bool,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> SimpleNamespace:
+        del arguments, check, cwd, env
+        (runtime_root / module._HANDOFF_FILENAME).unlink()
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    original_cleanup = module._remove_empty_runtime_root
+    cleanup_calls = 0
+
+    def fail_once(path: Path) -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+        if cleanup_calls == 1:
+            raise RuntimeError("one-shot cleanup failure")
+        original_cleanup(path)
+
+    monkeypatch.setattr(module, "_remove_empty_runtime_root", fail_once)
+
+    with pytest.raises(RuntimeError, match="one-shot cleanup failure"):
+        module._relaunch_isolated(("--help",))
+
+    assert cleanup_calls == 1
+    assert runtime_root.is_dir()
+    original_cleanup(runtime_root)
 
 
 @pytest.mark.parametrize(

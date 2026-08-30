@@ -496,8 +496,8 @@ def test_x5_amendment_retires_unconsumed_x4_and_closes_runtime_provenance() -> N
             "exact_shared_preconsumption_path_repeatable_no_marker_raw_content_"
             "or_output_write"
         ),
-        "historical_x4_and_current_x5_authorization_paths_checked_before_"
-        "authorization": True,
+        "historical_x4_and_x5_and_current_x6_authorization_paths_checked_"
+        "before_authorization": True,
         "postflight_before_success_report": (
             "exact_same_preflight_plus_strict_private_public_output_hashes"
         ),
@@ -523,10 +523,204 @@ def test_x5_amendment_retires_unconsumed_x4_and_closes_runtime_provenance() -> N
         ],
     )["paths"]
     assert pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH in protected
     assert pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH in protected
 
 
-def test_x5_inventory_authorization_counts_and_seven_zip_contract_are_exact() -> None:
+def test_x6_amendment_retires_unconsumed_x5_and_closes_gcm_scratch() -> None:
+    modified_paths = [
+        "configs/trust_sentinel_ood_external_v2_1.yaml",
+        "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+        "scripts/build_trust_sentinel_ood_v2_inventory.py",
+        "scripts/evaluate_trust_sentinel_ood_external_v2.py",
+        "scripts/freeze_trust_sentinel_ood_external_v2.py",
+        "scripts/verify_trust_sentinel_ood_external_v2.py",
+        "src/ecg_trust/ood_v2/models.py",
+        "src/ecg_trust/ood_v2/pipeline.py",
+        "tests/unit/test_ood_v2_cli.py",
+        "tests/unit/test_ood_v2_inventory_cli.py",
+        "tests/unit/test_ood_v2_models.py",
+        "tests/unit/test_ood_v2_pipeline.py",
+        "tests/unit/test_ood_v2_protocol_closure.py",
+    ]
+    payload = _successor_parent_yaml()
+    design = cast(dict[str, Any], payload["design_history"])
+    assert modified_paths == list(
+        pipeline.SUCCESSOR_GCM_SCRATCH_AMENDMENT_MODIFIED_PATHS
+    )
+    assert design["x5_gcm_scratch_cleanup_preflight"] == {
+        "amendment": (
+            "handle_bind_verify_and_delete_exact_empty_gcm_system_commandline_"
+            "sentinel_after_each_bound_process_and_in_all_four_launchers_then_"
+            "issue_unconsumed_x6_authorization"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_predecessor_runtime_preflight_revision": 1,
+            "exact_modified_paths": modified_paths,
+            "sole_parent": "ff7c821e8b01e48e7e96fc29ddcec6e515286ddb",
+            "status_for_every_path": "modified",
+        },
+        "inner_outcome": "INVENTORY_BUILDER_PREFLIGHT_VERIFIED",
+        "inner_report": {
+            "authorization_consumed": False,
+            "official_source_content_accessed": False,
+            "protocol_artifact_written": False,
+            "stage": "complete",
+            "status": "OOD_V2_INVENTORY_PREFLIGHT_VERIFIED",
+        },
+        "invocation_mode": "controls_only_preflight",
+        "new_successor_external_source_archive_header_record_metadata_or_"
+        "waveform_byte_read": False,
+        "new_successor_trained_checkpoint_or_inference_access_occurred": False,
+        "new_x6_inventory_build_authorization_id": "x6_inventory_build_attempt_1",
+        "observed_failure": (
+            "exact_empty_gcm_system_commandline_sentinel_directory_remained"
+        ),
+        "observed_runtime_residue": {
+            "entry_count": 0,
+            "entry_kind": "direct_directory",
+            "gcm_version": (
+                "2.7.3+5fa7116896c82164996a609accd1c5ad90fe730a"
+            ),
+            "relative_path": "temp/system-commandline-sentinel-files",
+        },
+        "operational_amendment_only": True,
+        "outer_outcome": "refused_during_isolated_runtime_root_cleanup",
+        "overall_controls_only_preflight_succeeded": False,
+        "predecessor_runtime_preflight_frozen_at_utc": "2026-08-30T03:08:59Z",
+        "predecessor_runtime_preflight_implementation_revision": (
+            "ff7c821e8b01e48e7e96fc29ddcec6e515286ddb"
+        ),
+        "predecessor_runtime_preflight_parent_config_file_sha256": (
+            "sha256:d4c3145985219fd65c9a5a4800773427cecd1f099b9e7ab75958596b7a995c61"
+        ),
+        "scientific_protocol_change": False,
+        "successor_child_execution_contract_created": False,
+        "successor_external_access_armed_marker_created": False,
+        "successor_external_one_shot_claim_created": False,
+        "successor_inventory_created": False,
+        "successor_output_root_created": False,
+        "successor_parent_protocol_byte_read": True,
+        "successor_public_projection_created": False,
+        "x5_inventory_build_authorization_consumed": False,
+        "x5_inventory_build_authorization_id": "x5_inventory_build_attempt_1",
+        "x5_inventory_build_authorization_marker_created": False,
+        "x5_inventory_build_authorization_path": (
+            "artifacts/trust_sentinel/"
+            ".ood_external_v2_1.x5-inventory-build-attempt.json"
+        ),
+        "x5_inventory_build_authorization_state": "RETIRED_UNCONSUMED",
+    }
+
+    runtime = cast(dict[str, Any], payload["runtime"])
+    isolated = cast(dict[str, Any], runtime["isolated_launcher"])
+    assert isolated[
+        "pycache_temp_and_application_cache_leaves_must_be_empty_before_"
+        "terminal_success_and_before_success_return"
+    ] is True
+    assert isolated["gcm_system_commandline_sentinel_cleanup"] == {
+        "accepted_precleanup_state": (
+            "absent_or_exact_case_sensitive_non_reparse_empty_directory"
+        ),
+        "bounded_runner_exception_cleanup": (
+            "deferred_to_outer_launcher_after_isolated_child_exit"
+        ),
+        "handle_binding": {
+            "creation_disposition": "OPEN_EXISTING",
+            "desired_access": [
+                "DELETE",
+                "FILE_LIST_DIRECTORY",
+                "FILE_READ_ATTRIBUTES",
+            ],
+            "flags": [
+                "FILE_FLAG_BACKUP_SEMANTICS",
+                "FILE_FLAG_OPEN_REPARSE_POINT",
+            ],
+            "open_api": "CreateFileW",
+            "share_mode": ["FILE_SHARE_READ"],
+        },
+        "nonempty_indirect_extra_or_raced_content": (
+            "fail_closed_and_retain_runtime_root"
+        ),
+        "outer_launcher_fallback": (
+            "after_isolated_child_exit_in_all_four_operational_entrypoints"
+        ),
+        "outer_launcher_fallback_scope": (
+            "only_when_no_prior_outer_cleanup_attempt"
+        ),
+        "outer_launcher_cleanup_retry_after_attempt": "forbidden",
+        "overall_success_requires_child_exit_zero_and_runtime_root_absent": True,
+        "process_boundaries": [
+            "after_bound_gcm_version_job_runner_returns_and_reports_zero_"
+            "active_processes",
+            "after_authenticated_private_remote_job_runner_returns_and_"
+            "reports_zero_active_processes",
+        ],
+        "race_closure": {
+            "ancestry_revalidated_while_handle_locked": True,
+            "close_api": "CloseHandle",
+            "deletion_api": "SetFileInformationByHandle",
+            "deletion_information_class": "FileDispositionInfo",
+            "deletion_target": "exact_same_locked_handle",
+            "disposition_delete_file": True,
+            "emptiness_verified_while_handle_locked": True,
+            "forbidden_attributes": ["FILE_ATTRIBUTE_REPARSE_POINT"],
+            "information_api": "GetFileInformationByHandleEx",
+            "information_classes": ["FileAttributeTagInfo", "FileIdInfo"],
+            "main_handle_identity_and_attributes_reverified_before_delete": True,
+            "pathname_reopen_for_deletion": "forbidden",
+            "pathname_witness": {
+                "close_before_main_recheck": True,
+                "creation_disposition": "OPEN_EXISTING",
+                "desired_access": [
+                    "FILE_LIST_DIRECTORY",
+                    "FILE_READ_ATTRIBUTES",
+                ],
+                "flags": [
+                    "FILE_FLAG_BACKUP_SEMANTICS",
+                    "FILE_FLAG_OPEN_REPARSE_POINT",
+                ],
+                "identity_and_attributes": "exact_match_to_initial_main_handle",
+                "purpose": "identity_only_never_deletion",
+                "share_mode": [
+                    "FILE_SHARE_READ",
+                    "FILE_SHARE_WRITE",
+                    "FILE_SHARE_DELETE",
+                ],
+            },
+            "postclose_path_absent_and_non_indirect": "required",
+            "postclose_scratch_empty": "required",
+            "required_attributes": ["FILE_ATTRIBUTE_DIRECTORY"],
+            "stable_identity_fields": [
+                "VolumeSerialNumber_uint64",
+                "FileId.Identifier_128_bit",
+            ],
+        },
+        "recursive_or_wildcard_deletion": "forbidden",
+        "relative_path": "temp/system-commandline-sentinel-files",
+        "runtime_scratch_verifier_allowlist": "forbidden",
+        "scratch_must_be_exactly_empty_after_cleanup": True,
+    }
+    assert pipeline.GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME == (
+        "system-commandline-sentinel-files"
+    )
+
+    protected = cast(
+        dict[str, Any],
+        cast(dict[str, Any], payload["revision_boundary"])[
+            "forbidden_private_history"
+        ],
+    )["paths"]
+    assert pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    parent_protocol = (
+        _SMOKE_PROJECT_ROOT / "configs" / "trust_sentinel_ood_external_v2_1.yaml"
+    ).read_text(encoding="utf-8")
+    assert "single_directory_rmdir_only" not in parent_protocol
+
+
+def test_x6_inventory_authorization_counts_and_seven_zip_contract_are_exact() -> None:
     payload = _successor_parent_yaml()
     inventory = cast(dict[str, Any], payload["successor_inventory_contract"])
     assert inventory["exact_zzu_exclusion_counts"] == {
@@ -568,7 +762,7 @@ def test_x5_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
     one_shot = cast(dict[str, Any], payload["one_shot_external_access"])
     assert one_shot["inventory_build_authorization"] == {
         "artifact_type": "ecg_trust.ood_external_v2_1_inventory_builder_attempt",
-        "authorization_id": "x5_inventory_build_attempt_1",
+        "authorization_id": "x6_inventory_build_attempt_1",
         "contains_external_source_bytes_or_identifiers": False,
         "contains_model_outputs_embeddings_or_scores": False,
         "creation": "atomic_create_new_no_overwrite",
@@ -582,7 +776,7 @@ def test_x5_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "maximum_consumptions": 1,
         "path": (
             "artifacts/trust_sentinel/"
-            ".ood_external_v2_1.x5-inventory-build-attempt.json"
+            ".ood_external_v2_1.x6-inventory-build-attempt.json"
         ),
         "postconsumption_first_raw_action": (
             "hash_every_official_source_against_exact_parent_size_sha256_and_md5"
@@ -596,15 +790,15 @@ def test_x5_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         ],
         "retention": "permanent",
         "retry_resume_or_reuse": "forbidden",
-        "scope": "sole_x5_preclaim_inventory_build_attempt",
+        "scope": "sole_x6_preclaim_inventory_build_attempt",
         "superseded_authorization_consumed": False,
         "superseded_authorization_must_remain_absent": True,
         "superseded_authorization_path": (
             "artifacts/trust_sentinel/"
-            ".ood_external_v2_1.x4-inventory-build-attempt.json"
+            ".ood_external_v2_1.x5-inventory-build-attempt.json"
         ),
         "superseded_authorization_state": "RETIRED_UNCONSUMED",
-        "supersedes_unconsumed_authorization_id": "x4_inventory_build_attempt_1",
+        "supersedes_unconsumed_authorization_id": "x5_inventory_build_attempt_1",
         "timing": (
             "after_exact_preflight_path_schema_and_tool_binding_before_first_"
             "official_source_byte"
@@ -619,7 +813,7 @@ def test_x5_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "scope": "after_external_one_shot_claim_entry_first_becomes_visible",
     }
     assert "retry_resume_or_second_inference" not in one_shot
-    assert "durable_x5_inventory_build_authorization_marker_verified" in one_shot[
+    assert "durable_x6_inventory_build_authorization_marker_verified" in one_shot[
         "prerequisites"
     ]
 
@@ -633,17 +827,40 @@ def test_x5_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "6b04c5c6308cfddd9a3b2b06f1ebbe24acc961e9",
         "sha256:ac3653cd3a83d8d963531e54566487749c0faf03b5bc816ae66bdbde7f21927c",
         "2026-08-30T02:00:56Z",
+        "ff7c821e8b01e48e7e96fc29ddcec6e515286ddb",
+        "sha256:d4c3145985219fd65c9a5a4800773427cecd1f099b9e7ab75958596b7a995c61",
+        "2026-08-30T03:08:59Z",
         r"C:\Program Files\Git",
         "x4_inventory_build_attempt_1",
-        "artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json",
+        "x5_inventory_build_attempt_1",
+        "x6_inventory_build_attempt_1",
+        "artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json",
         "RETIRED_UNCONSUMED",
         "--preflight-only",
+        "OOD_V2_INVENTORY_PREFLIGHT_VERIFIED",
+        "temp/system-commandline-sentinel-files",
+        "CreateFileW",
+        "FILE_FLAG_BACKUP_SEMANTICS",
+        "FILE_FLAG_OPEN_REPARSE_POINT",
+        "FILE_SHARE_READ",
+        "FILE_SHARE_WRITE",
+        "FILE_SHARE_DELETE",
+        "GetFileInformationByHandleEx",
+        "FileAttributeTagInfo",
+        "FileIdInfo",
+        "VolumeSerialNumber",
+        "FileId.Identifier",
+        "SetFileInformationByHandle",
+        "FileDispositionInfo",
+        "DeleteFile",
+        "CloseHandle",
         "relative `torch.ops` and `torch.classes` namespace placeholders",
         "aswAMSI.dll",
         "MpOav.dll",
         "no-retry rule is absolute",
     )
     assert all(literal in protocol for literal in required_literals)
+    assert "single_directory_rmdir_only" not in protocol
 
 
 @pytest.mark.parametrize("relative_path", _ISOLATED_ENTRYPOINTS)
@@ -1469,6 +1686,7 @@ def test_private_history_query_covers_every_forbidden_path_and_fails_closed(
         pipeline.PREDECESSOR_CLAIM_PATH,
         pipeline.SUCCESSOR_CLAIM_PATH,
         pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH,
+        pipeline.HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH,
         pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
         ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
         ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**",

@@ -108,6 +108,43 @@ pre-consumption controls but cannot consume authorization, read official source
 content, build an inventory, or write protocol artifacts. X5 changes no
 scientific decision.
 
+Frozen X5 revision `ff7c821e8b01e48e7e96fc29ddcec6e515286ddb`, whose
+parent YAML hash is
+`sha256:d4c3145985219fd65c9a5a4800773427cecd1f099b9e7ab75958596b7a995c61`
+and whose parent was frozen at `2026-08-30T03:08:59Z`, then ran the
+controls-only preflight. The isolated child completed the shared controls and
+emitted `OOD_V2_INVENTORY_PREFLIGHT_VERIFIED`, stage `complete`, with
+`authorization_consumed`, `official_source_content_accessed`, and
+`protocol_artifact_written` all false. The complete launcher nevertheless
+refused during outer runtime-root cleanup: exact bound GCM
+`2.7.3+5fa7116896c82164996a609accd1c5ad90fe730a` had left one direct,
+empty `temp/system-commandline-sentinel-files` directory. The verified inner
+line did not make the overall nonzero launcher invocation successful. Neither
+the X4 nor X5 authorization marker exists; no official external-source content,
+trained checkpoint, inference, inventory, public projection, child contract,
+armed marker, external claim, or successor output was created or accessed.
+X5 authorization `x5_inventory_build_attempt_1` is therefore permanently
+retired as `RETIRED_UNCONSUMED`, and its marker path must remain absent beside
+the already-retired X4 path.
+
+X6 is the sole direct-child operational amendment. Immediately after each
+bound GCM-version or authenticated-remote Job runner returns and reports zero
+active processes,
+it opens only the case-exact sentinel with `CreateFileW`, directory backup and
+open-reparse-point flags, delete/list/read-attributes access, and read sharing
+only. While that restrictive handle remains open, X6 uses
+`GetFileInformationByHandleEx` with `FileAttributeTagInfo` and 128-bit
+`FileIdInfo` to verify a non-reparse directory, its stable volume/file
+identity, and emptiness, then marks that same handle for deletion with
+`SetFileInformationByHandle(FileDispositionInfo)`, closes it, and requires
+temporary scratch to be exactly empty. A bounded-runner exception cannot
+assert a returned process-closure result, so inner scratch cleanup is deferred
+to the launcher after isolated-child exit. All four isolated launchers
+independently apply the same handle-bound fallback after child exit. X6 issues
+the new unconsumed authorization
+`x6_inventory_build_attempt_1`; it changes no cohort, preprocessing rule,
+model, policy, threshold, endpoint, hard gate, or scientific claim.
+
 ## Evidence boundary and v1 history
 
 The aggregate v1 source-support result was already known when both external
@@ -238,6 +275,51 @@ must resolve to the exact owned runtime-root layout but are represented by
 stable semantic role labels in the child hash. Pycache, temporary, and
 application-cache leaves must be empty immediately before terminal success and
 again after the independent terminal reread, before success is returned.
+The only recognized GCM scratch side effect is the case-exact relative
+directory `temp/system-commandline-sentinel-files`. Immediately after the
+bound GCM-version Job runner and each authenticated private-remote Job runner
+return and report zero active processes, absence is accepted; otherwise the
+pipeline opens that
+exact path with `CreateFileW`. Desired access is exactly `DELETE |
+FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES`, disposition is `OPEN_EXISTING`,
+and flags are exactly `FILE_FLAG_BACKUP_SEMANTICS |
+FILE_FLAG_OPEN_REPARSE_POINT`. Share mode is `FILE_SHARE_READ` only: omission
+of `FILE_SHARE_WRITE` and `FILE_SHARE_DELETE` denies concurrent mutation,
+deletion, or rename of the opened sentinel object while the handle is held. No
+ancestor-immutability claim is made; direct ancestry is instead revalidated
+under that lock.
+
+`GetFileInformationByHandleEx(FileAttributeTagInfo)` must report
+`FILE_ATTRIBUTE_DIRECTORY` and must not report
+`FILE_ATTRIBUTE_REPARSE_POINT`.
+`GetFileInformationByHandleEx(FileIdInfo)` records the 64-bit
+`VolumeSerialNumber` and exact 128-bit `FileId.Identifier`. The pipeline
+revalidates direct ancestry and verifies sentinel emptiness while the main
+handle remains open. It then opens an identity-only pathname witness with
+`FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES`, all three share flags,
+`OPEN_EXISTING`, and the same backup/open-reparse-point flags. The witness must
+have exactly the initial main handle's attributes and volume/file identity and
+is closed before the main handle is queried again; that final main result must
+also match exactly.
+
+The pipeline calls `SetFileInformationByHandle` with `FileDispositionInfo` and
+`DeleteFile` true on the main handle that performed the locked verification;
+pathname reopening for deletion is forbidden. It then calls `CloseHandle`,
+requires the sentinel pathname to be absent and non-indirect, and requires all
+temporary scratch to be exactly empty. A failed API call, nonempty, reparse,
+differently named, additional, identity-changed, or raced entry fails closed
+and retains the runtime root; the runtime scratch verifier has no sentinel
+allowlist. If a bounded runner raises instead of returning its proven
+process-closure result, inner deletion is not attempted and cleanup is deferred
+until the isolated child has exited. After isolated-child exit, each of the
+inventory, freeze, evaluate,
+and verify launchers performs the same handle-bound fallback for abrupt failure
+paths. Recursive or wildcard deletion is forbidden. Overall launcher success
+requires both child exit code zero and complete removal of the owned runtime
+root; an inner verified report alone is insufficient. An outer cleanup attempt
+is never retried: the `finally` fallback is reserved for a child-launch path
+that exited before any outer cleanup attempt began, so a cleanup refusal
+retains its runtime root.
 `CUDA_CACHE_DISABLE=1` is exact and mandatory. `TORCHINDUCTOR_CACHE_DIR` is
 bound directly to the existing isolated runtime-temp role so eager PyTorch
 initialization cannot create an unbound `torchinductor_*` child. A dirty-scratch failure must
@@ -246,15 +328,15 @@ conditioned on scratch emptiness.
 
 Before the inventory builder reads any official archive, metadata, header, or
 inventory byte, a metadata-only preflight requires the exact frozen parent,
-clean pushed implementation revision X5, live remote, protected-path history,
+clean pushed implementation revision X6, live remote, protected-path history,
 tracked parent and complete source blobs, isolated runtime/Git identity,
 bound `__main__`, and absent successor claim/output. It also binds the exact
 parent schema, cohort and exclusion-count invariants, canonical dataset and raw
 source paths/keysets, declared raw size/SHA-256/MD5 values, and exact 7-Zip tool.
 After those checks but before the first official source byte, the builder must
 durably create, without overwrite,
-`artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json`.
-That marker authorizes exactly one X5 preclaim inventory build, remains ignored
+`artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json`.
+That marker authorizes exactly one X6 preclaim inventory build, remains ignored
 and untracked, contains no source identifiers or model output, and is distinct
 from the later waveform one-shot claim. Once consumed it cannot be retried,
 resumed, or reused. The first permitted raw action is to hash every official
@@ -265,17 +347,19 @@ to the in-memory build.
 
 The same exact argument contract can first be run with `--preflight-only`.
 That repeatable branch validates the runtime, Git, parent, namespace, schema,
-raw-path metadata, 7-Zip binding, both absent authorization paths, and absent
+raw-path metadata, 7-Zip binding, all three absent authorization paths, and absent
 private/public destinations, then returns fixed path-free JSON. It never calls
 authorization consumption, official-source hashing, inventory construction,
 writers, or postflight. Production reuses the same shared control function and
 immediately rechecks destination and authorization absence before atomically
-consuming X5.
+consuming X6. All three X4, X5, and X6 authorization paths must be absent for
+the controls-only branch; its inner report counts as an overall pass only when
+the outer process returns zero and removes the runtime root.
 
 The child binds the marker's exact canonical path, file SHA-256, and logical
-self-hash. At Y, the verifier reconstructs its expected X5 bytes from the
-parent hash, child-bound X5/source/Python/Git identities, and frozen
-source-bound authorization constants without requiring HEAD to return to X5;
+self-hash. At Y, the verifier reconstructs its expected X6 bytes from the
+parent hash, child-bound X6/source/Python/Git identities, and frozen
+source-bound authorization constants without requiring HEAD to return to X6;
 it rechecks those bytes during initial input verification, immediately before
 the external claim, after evaluation, and during terminal bundle verification.
 
@@ -307,7 +391,7 @@ injected image fails closed.
 
 Every tracked `src/ecg_trust/**/*.py` file and all four inventory/freeze/
 evaluate/verify entrypoints are bound by exact path, size, SHA-256, worktree
-bytes, and X5/Y Git blobs. Git resolves only from the exact direct Windows
+bytes, and X6/Y Git blobs. Git resolves only from the exact direct Windows
 installation root `C:\Program Files\Git`: the `cmd\git.exe` launcher and
 `mingw64\bin\git.exe` binary are derived from that root without `PATH` lookup,
 then their bytes, direct ancestry, and the full `mingw64` runtime tree are
@@ -415,7 +499,8 @@ denominator-integrity gates, not additional inferential endpoints.
 The parent and exact child must be committed and pushed before access. The first
 frozen successor revision `85b55d0...`, tag-amended revision `b5727c4...`,
 private-auth revision `6b6ddfd...`, X4, and X5 form four consecutive sole-parent
-amendments. The first two amendments each modify the same seven frozen paths.
+amendments; X6 extends that chain to five. The first two amendments each modify
+the same seven frozen paths.
 Historical X4 has sole parent `6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6`
 and modifies all and only these eleven existing paths, each with Git status
 `M`:
@@ -446,15 +531,35 @@ and modifies all and only these nine existing paths, also with Git status
 - `tests/unit/test_ood_v2_pipeline.py`; and
 - `tests/unit/test_ood_v2_protocol_closure.py`.
 
-Every historical parent byte and exact diff is independently verified. X5 and
-child-freeze execution revision Y are also consecutive: Y has X5 as its sole
-parent, exactly one commit lies in `X5..Y`, and that commit adds only the
+X6 has exact sole parent `ff7c821e8b01e48e7e96fc29ddcec6e515286ddb`,
+whose parent YAML hash is
+`sha256:d4c3145985219fd65c9a5a4800773427cecd1f099b9e7ab75958596b7a995c61`
+and whose parent was frozen at `2026-08-30T03:08:59Z`. It modifies all and only
+these thirteen existing paths, each with Git status `M`:
+
+- `configs/trust_sentinel_ood_external_v2_1.yaml`;
+- `docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md`;
+- `scripts/build_trust_sentinel_ood_v2_inventory.py`;
+- `scripts/evaluate_trust_sentinel_ood_external_v2.py`;
+- `scripts/freeze_trust_sentinel_ood_external_v2.py`;
+- `scripts/verify_trust_sentinel_ood_external_v2.py`;
+- `src/ecg_trust/ood_v2/models.py`;
+- `src/ecg_trust/ood_v2/pipeline.py`;
+- `tests/unit/test_ood_v2_cli.py`;
+- `tests/unit/test_ood_v2_inventory_cli.py`;
+- `tests/unit/test_ood_v2_models.py`;
+- `tests/unit/test_ood_v2_pipeline.py`; and
+- `tests/unit/test_ood_v2_protocol_closure.py`.
+
+Every historical parent byte and exact diff is independently verified. X6 and
+child-freeze execution revision Y are also consecutive: Y has X6 as its sole
+parent, exactly one commit lies in `X6..Y`, and that commit adds only the
 tracked child plus its aggregate public inventory projection. The private
-inventory and durable X5 inventory-build marker remain ignored and untracked;
-the retired X4 marker remains absent.
+inventory and durable X6 inventory-build marker remain ignored and untracked;
+the retired X4 and X5 markers remain absent.
 The only Git remote is `origin`, its fetch and push URL are exactly
 `https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git`, and
-`refs/remotes/origin/main` must equal X5 at child freeze and Y immediately
+`refs/remotes/origin/main` must equal X6 at child freeze and Y immediately
 before the claim and after evaluation. A live `git ls-remote --symref` against
 the exact HTTPS URL—not a symbolic local remote—must return exactly the HEAD
 symref, HEAD and `refs/heads/main` at that revision, plus the required pinned
@@ -482,7 +587,7 @@ blob equals both the worktree bytes and the frozen SHA-256. At those same
 boundaries, `git log --full-history --all --reflog --format=%H -- <exact protected glob
 pathspecs>` must return empty output for the entire external raw-data tree,
 both protocols' complete private-preflight trees, both output/claim namespaces,
-both the retired X4 and current X5 inventory-build marker paths, all retained
+the retired X4 and X5 plus current X6 inventory-build marker paths, all retained
 staging namespaces, and
 the isolated runtime-root namespace. This
 proves absence of those protected pathnames from local reachable refs and
@@ -490,12 +595,12 @@ reflogs. It does not—and Git cannot—prove the content absence of unreachable
 objects that are not named by those refs/reflogs; no stronger repository-wide
 purge claim is made.
 
-The durable X5 inventory-build authorization is not the external one-shot
+The durable X6 inventory-build authorization is not the external one-shot
 claim: it is consumed before metadata inventory source-byte access and does not
 authorize waveform decoding, quality, model, score, or endpoint access. After
-it is consumed, no X5 inventory retry, resume, or marker reuse is allowed. The
-X4 authorization was never consumed and is permanently retired; it cannot be
-revived or substituted for X5.
+it is consumed, no X6 inventory retry, resume, or marker reuse is allowed. The
+X4 and X5 authorizations were never consumed and are permanently retired; they
+cannot be revived or substituted for X6.
 
 The implementation durably creates the armed marker, including parent-
 directory persistence, and only then atomically creates the permanent adjacent

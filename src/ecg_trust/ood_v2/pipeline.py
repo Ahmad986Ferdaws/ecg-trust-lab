@@ -187,7 +187,7 @@ EXPECTED_PARENT_CONFIG_SHA256: Final = (
     "sha256:3aacb31be939d1a2bea96bb29f193d60a4b54c38a40a1a7e2a490cfe60c3b0d9"
 )
 EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256: Final[str | None] = (
-    "sha256:d4c3145985219fd65c9a5a4800773427cecd1f099b9e7ab75958596b7a995c61"
+    "sha256:5457ef7e773825523446d15e4f9f688f7c7006364c7843cd2d624dc2514fe11a"
 )
 SUCCESSOR_PROTOCOL_ID: Final = PROTOCOL_ID
 PREDECESSOR_TERMINATION_PATH: Final = (
@@ -227,8 +227,11 @@ SUCCESSOR_CLAIM_PATH: Final = (
 HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
     "artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json"
 )
-SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
+HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
     "artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json"
+)
+SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
+    "artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json"
 )
 SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE: Final = (
     "ecg_trust.ood_external_v2_1_inventory_builder_attempt"
@@ -242,6 +245,7 @@ FORBIDDEN_GIT_HISTORY_PATHS: Final[tuple[str, ...]] = (
     PREDECESSOR_CLAIM_PATH,
     SUCCESSOR_CLAIM_PATH,
     HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH,
+    HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH,
     SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
     ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
     ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**",
@@ -367,6 +371,9 @@ EXPECTED_GIT_EXECUTABLE_SHA256: Final = (
     "sha256:c39b1b4f7a57935bbeadf246dc2466316619453a6a9da77c4a9c6bd6d8fb21d3"
 )
 EXPECTED_GIT_CREDENTIAL_MANAGER_NAME: Final = "git-credential-manager.exe"
+GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME: Final = (
+    "system-commandline-sentinel-files"
+)
 EXPECTED_GIT_CREDENTIAL_MANAGER_SIZE_BYTES: Final = 133_192
 EXPECTED_GIT_CREDENTIAL_MANAGER_SHA256: Final = (
     "sha256:b7f0e61535b7bab81ea11126ecf1e7ad4486426df69921a78a680dc40bae2c12"
@@ -708,6 +715,12 @@ FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
 FOURTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
     "sha256:ac3653cd3a83d8d963531e54566487749c0faf03b5bc816ae66bdbde7f21927c"
 )
+FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
+    "ff7c821e8b01e48e7e96fc29ddcec6e515286ddb"
+)
+FIFTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
+    "sha256:d4c3145985219fd65c9a5a4800773427cecd1f099b9e7ab75958596b7a995c61"
+)
 SUCCESSOR_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "configs/trust_sentinel_ood_external_v2_1.yaml",
     "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
@@ -745,6 +758,21 @@ SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "scripts/build_trust_sentinel_ood_v2_inventory.py",
     "src/ecg_trust/ood_v2/models.py",
     "src/ecg_trust/ood_v2/pipeline.py",
+    "tests/unit/test_ood_v2_inventory_cli.py",
+    "tests/unit/test_ood_v2_models.py",
+    "tests/unit/test_ood_v2_pipeline.py",
+    "tests/unit/test_ood_v2_protocol_closure.py",
+)
+SUCCESSOR_GCM_SCRATCH_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
+    "configs/trust_sentinel_ood_external_v2_1.yaml",
+    "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+    "scripts/build_trust_sentinel_ood_v2_inventory.py",
+    "scripts/evaluate_trust_sentinel_ood_external_v2.py",
+    "scripts/freeze_trust_sentinel_ood_external_v2.py",
+    "scripts/verify_trust_sentinel_ood_external_v2.py",
+    "src/ecg_trust/ood_v2/models.py",
+    "src/ecg_trust/ood_v2/pipeline.py",
+    "tests/unit/test_ood_v2_cli.py",
     "tests/unit/test_ood_v2_inventory_cli.py",
     "tests/unit/test_ood_v2_models.py",
     "tests/unit/test_ood_v2_pipeline.py",
@@ -1793,6 +1821,78 @@ def verify_successor_parent_preflight(
         raise OODExternalV2ConfigError(
             "successor runtime-preflight amendment declaration differs"
         )
+    gcm_scratch_amendment = _mapping(
+        design.get("x5_gcm_scratch_cleanup_preflight"),
+        "successor GCM scratch-cleanup amendment",
+    )
+    expected_gcm_scratch_amendment = {
+        "amendment": (
+            "handle_bind_verify_and_delete_exact_empty_gcm_system_commandline_"
+            "sentinel_after_each_bound_process_and_in_all_four_launchers_then_"
+            "issue_unconsumed_x6_authorization"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_predecessor_runtime_preflight_revision": 1,
+            "exact_modified_paths": list(
+                SUCCESSOR_GCM_SCRATCH_AMENDMENT_MODIFIED_PATHS
+            ),
+            "sole_parent": FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+            "status_for_every_path": "modified",
+        },
+        "inner_outcome": "INVENTORY_BUILDER_PREFLIGHT_VERIFIED",
+        "inner_report": {
+            "authorization_consumed": False,
+            "official_source_content_accessed": False,
+            "protocol_artifact_written": False,
+            "stage": "complete",
+            "status": "OOD_V2_INVENTORY_PREFLIGHT_VERIFIED",
+        },
+        "invocation_mode": "controls_only_preflight",
+        "new_successor_external_source_archive_header_record_metadata_or_"
+        "waveform_byte_read": False,
+        "new_successor_trained_checkpoint_or_inference_access_occurred": False,
+        "new_x6_inventory_build_authorization_id": "x6_inventory_build_attempt_1",
+        "observed_failure": (
+            "exact_empty_gcm_system_commandline_sentinel_directory_remained"
+        ),
+        "observed_runtime_residue": {
+            "entry_count": 0,
+            "entry_kind": "direct_directory",
+            "gcm_version": EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION,
+            "relative_path": (
+                f"temp/{GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME}"
+            ),
+        },
+        "operational_amendment_only": True,
+        "outer_outcome": "refused_during_isolated_runtime_root_cleanup",
+        "overall_controls_only_preflight_succeeded": False,
+        "predecessor_runtime_preflight_frozen_at_utc": "2026-08-30T03:08:59Z",
+        "predecessor_runtime_preflight_implementation_revision": (
+            FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+        ),
+        "predecessor_runtime_preflight_parent_config_file_sha256": (
+            FIFTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+        ),
+        "scientific_protocol_change": False,
+        "successor_child_execution_contract_created": False,
+        "successor_external_access_armed_marker_created": False,
+        "successor_external_one_shot_claim_created": False,
+        "successor_inventory_created": False,
+        "successor_output_root_created": False,
+        "successor_parent_protocol_byte_read": True,
+        "successor_public_projection_created": False,
+        "x5_inventory_build_authorization_consumed": False,
+        "x5_inventory_build_authorization_id": "x5_inventory_build_attempt_1",
+        "x5_inventory_build_authorization_marker_created": False,
+        "x5_inventory_build_authorization_path": (
+            HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH
+        ),
+        "x5_inventory_build_authorization_state": "RETIRED_UNCONSUMED",
+    }
+    if gcm_scratch_amendment != expected_gcm_scratch_amendment:
+        raise OODExternalV2ConfigError(
+            "successor GCM scratch-cleanup amendment declaration differs"
+        )
     revision_boundary = _mapping(
         payload.get("revision_boundary"),
         "successor revision boundary",
@@ -2136,7 +2236,7 @@ def verify_successor_parent_preflight(
         raise OODExternalV2ConfigError("successor namespace paths differ")
     if inventory_authorization != {
         "artifact_type": SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE,
-        "authorization_id": "x5_inventory_build_attempt_1",
+        "authorization_id": "x6_inventory_build_attempt_1",
         "contains_external_source_bytes_or_identifiers": False,
         "contains_model_outputs_embeddings_or_scores": False,
         "creation": "atomic_create_new_no_overwrite",
@@ -2163,14 +2263,14 @@ def verify_successor_parent_preflight(
         ],
         "retention": "permanent",
         "retry_resume_or_reuse": "forbidden",
-        "scope": "sole_x5_preclaim_inventory_build_attempt",
+        "scope": "sole_x6_preclaim_inventory_build_attempt",
         "superseded_authorization_consumed": False,
         "superseded_authorization_must_remain_absent": True,
         "superseded_authorization_path": (
-            HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
+            HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH
         ),
         "superseded_authorization_state": "RETIRED_UNCONSUMED",
-        "supersedes_unconsumed_authorization_id": "x4_inventory_build_attempt_1",
+        "supersedes_unconsumed_authorization_id": "x5_inventory_build_attempt_1",
         "timing": (
             "after_exact_preflight_path_schema_and_tool_binding_before_first_"
             "official_source_byte"
@@ -2198,7 +2298,7 @@ def verify_successor_parent_preflight(
             "exact_raw_source_hashes_and_semantic_roles_rederived",
             "exact_python_scientific_package_tree_and_7zip_identities_verified",
             "quality_implementation_hash_verified",
-            "durable_x5_inventory_build_authorization_marker_verified",
+            "durable_x6_inventory_build_authorization_marker_verified",
             "output_root_absent",
             "clean_committed_revision",
         ]
@@ -2273,6 +2373,100 @@ def verify_successor_parent_preflight(
         runtime.get("isolated_launcher"),
         "successor isolated launcher",
     )
+    gcm_sentinel_cleanup = _mapping(
+        isolated_launcher.get("gcm_system_commandline_sentinel_cleanup"),
+        "successor GCM system-commandline sentinel cleanup",
+    )
+    if gcm_sentinel_cleanup != {
+        "accepted_precleanup_state": (
+            "absent_or_exact_case_sensitive_non_reparse_empty_directory"
+        ),
+        "bounded_runner_exception_cleanup": (
+            "deferred_to_outer_launcher_after_isolated_child_exit"
+        ),
+        "handle_binding": {
+            "creation_disposition": "OPEN_EXISTING",
+            "desired_access": [
+                "DELETE",
+                "FILE_LIST_DIRECTORY",
+                "FILE_READ_ATTRIBUTES",
+            ],
+            "flags": [
+                "FILE_FLAG_BACKUP_SEMANTICS",
+                "FILE_FLAG_OPEN_REPARSE_POINT",
+            ],
+            "open_api": "CreateFileW",
+            "share_mode": ["FILE_SHARE_READ"],
+        },
+        "nonempty_indirect_extra_or_raced_content": (
+            "fail_closed_and_retain_runtime_root"
+        ),
+        "outer_launcher_fallback": (
+            "after_isolated_child_exit_in_all_four_operational_entrypoints"
+        ),
+        "outer_launcher_fallback_scope": (
+            "only_when_no_prior_outer_cleanup_attempt"
+        ),
+        "outer_launcher_cleanup_retry_after_attempt": "forbidden",
+        "overall_success_requires_child_exit_zero_and_runtime_root_absent": True,
+        "process_boundaries": [
+            "after_bound_gcm_version_job_runner_returns_and_reports_zero_"
+            "active_processes",
+            "after_authenticated_private_remote_job_runner_returns_and_"
+            "reports_zero_active_processes",
+        ],
+        "race_closure": {
+            "ancestry_revalidated_while_handle_locked": True,
+            "close_api": "CloseHandle",
+            "deletion_api": "SetFileInformationByHandle",
+            "deletion_information_class": "FileDispositionInfo",
+            "deletion_target": "exact_same_locked_handle",
+            "disposition_delete_file": True,
+            "emptiness_verified_while_handle_locked": True,
+            "forbidden_attributes": ["FILE_ATTRIBUTE_REPARSE_POINT"],
+            "information_api": "GetFileInformationByHandleEx",
+            "information_classes": ["FileAttributeTagInfo", "FileIdInfo"],
+            "main_handle_identity_and_attributes_reverified_before_delete": True,
+            "pathname_reopen_for_deletion": "forbidden",
+            "pathname_witness": {
+                "close_before_main_recheck": True,
+                "creation_disposition": "OPEN_EXISTING",
+                "desired_access": [
+                    "FILE_LIST_DIRECTORY",
+                    "FILE_READ_ATTRIBUTES",
+                ],
+                "flags": [
+                    "FILE_FLAG_BACKUP_SEMANTICS",
+                    "FILE_FLAG_OPEN_REPARSE_POINT",
+                ],
+                "identity_and_attributes": (
+                    "exact_match_to_initial_main_handle"
+                ),
+                "purpose": "identity_only_never_deletion",
+                "share_mode": [
+                    "FILE_SHARE_READ",
+                    "FILE_SHARE_WRITE",
+                    "FILE_SHARE_DELETE",
+                ],
+            },
+            "postclose_path_absent_and_non_indirect": "required",
+            "postclose_scratch_empty": "required",
+            "required_attributes": ["FILE_ATTRIBUTE_DIRECTORY"],
+            "stable_identity_fields": [
+                "VolumeSerialNumber_uint64",
+                "FileId.Identifier_128_bit",
+            ],
+        },
+        "recursive_or_wildcard_deletion": "forbidden",
+        "relative_path": (
+            f"temp/{GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME}"
+        ),
+        "runtime_scratch_verifier_allowlist": "forbidden",
+        "scratch_must_be_exactly_empty_after_cleanup": True,
+    }:
+        raise OODExternalV2ConfigError(
+            "successor GCM sentinel cleanup declaration differs"
+        )
     inventory_builder_boundary = _mapping(
         isolated_launcher.get("inventory_builder_boundary"),
         "successor inventory builder boundary",
@@ -2285,8 +2479,8 @@ def verify_successor_parent_preflight(
             "exact_shared_preconsumption_path_repeatable_no_marker_raw_content_"
             "or_output_write"
         ),
-        "historical_x4_and_current_x5_authorization_paths_checked_before_"
-        "authorization": True,
+        "historical_x4_and_x5_and_current_x6_authorization_paths_checked_"
+        "before_authorization": True,
         "postflight_before_success_report": (
             "exact_same_preflight_plus_strict_private_public_output_hashes"
         ),
@@ -3830,7 +4024,7 @@ def _verify_successor_amendment_revision(
     )
     _verify_exact_modification_child(
         project_root,
-        child_revision=revision,
+        child_revision=FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         parent_revision=FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         modified_paths=SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS,
         context="runtime-preflight successor amendment",
@@ -3841,6 +4035,20 @@ def _verify_successor_amendment_revision(
         relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
         expected_file_sha256=FOURTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
         context="fourth frozen successor parent",
+    )
+    _verify_exact_modification_child(
+        project_root,
+        child_revision=revision,
+        parent_revision=FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        modified_paths=SUCCESSOR_GCM_SCRATCH_AMENDMENT_MODIFIED_PATHS,
+        context="GCM scratch-cleanup successor amendment",
+    )
+    _verify_historical_revision_blob(
+        project_root,
+        revision=FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=FIFTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        context="fifth frozen successor parent",
     )
 
 
@@ -6192,7 +6400,7 @@ def _inventory_builder_attempt_body(
         raise TypeError("preflight must be InventoryBuilderPreflight")
     body: dict[str, object] = {
         "artifact_type": SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE,
-        "authorization_id": "x5_inventory_build_attempt_1",
+        "authorization_id": "x6_inventory_build_attempt_1",
         "contains_external_source_bytes_or_identifiers": False,
         "contains_model_outputs_embeddings_or_scores": False,
         "consumption_ordinal": 1,
@@ -6207,9 +6415,9 @@ def _inventory_builder_attempt_body(
         "schema_version": 2,
         "state": "PRECLAIM_INVENTORY_BUILD_AUTHORIZATION_CONSUMED",
         "superseded_authorization_consumed": False,
-        "superseded_authorization_id": "x4_inventory_build_attempt_1",
+        "superseded_authorization_id": "x5_inventory_build_attempt_1",
         "superseded_authorization_path": (
-            HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
+            HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH
         ),
         "superseded_authorization_state": "RETIRED_UNCONSUMED",
     }
@@ -6291,15 +6499,19 @@ def verify_inventory_builder_attempt_marker(
     if not isinstance(preflight, InventoryBuilderPreflight):
         raise TypeError("preflight must be InventoryBuilderPreflight")
     root = _strict_project_root(project_root)
-    historical = _resolve_project_relative(
-        root,
-        HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH,
-        require_file=False,
-    )
-    if historical.exists() or _is_indirect(historical):
-        raise OODExternalV2IntegrityError(
-            "retired X4 inventory builder authorization path must remain absent"
+    for relative_path, label in (
+        (HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH, "X4"),
+        (HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH, "X5"),
+    ):
+        historical = _resolve_project_relative(
+            root,
+            relative_path,
+            require_file=False,
         )
+        if historical.exists() or _is_indirect(historical):
+            raise OODExternalV2IntegrityError(
+                f"retired {label} inventory builder authorization path must remain absent"
+            )
     marker = _resolve_project_relative(
         root,
         SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
@@ -6328,7 +6540,7 @@ def verify_inventory_builder_authorization_available(
     *,
     project_root: str | Path,
 ) -> None:
-    """Prove retired X4 and current X5 authorizations are both unconsumed."""
+    """Prove retired X4/X5 and current X6 authorizations are unconsumed."""
 
     if not isinstance(preflight, InventoryBuilderPreflight):
         raise TypeError("preflight must be InventoryBuilderPreflight")
@@ -6343,8 +6555,12 @@ def verify_inventory_builder_authorization_available(
             "retired X4 inventory builder authorization",
         ),
         (
+            HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH,
+            "retired X5 inventory builder authorization",
+        ),
+        (
             SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
-            "X5 inventory builder authorization",
+            "X6 inventory builder authorization",
         ),
     ):
         marker = _resolve_project_relative(
@@ -6366,7 +6582,7 @@ def consume_inventory_builder_authorization(
     *,
     project_root: str | Path,
 ) -> str:
-    """Durably consume the sole X5 build authorization before source-byte access."""
+    """Durably consume the sole X6 build authorization before source-byte access."""
 
     if not isinstance(preflight, InventoryBuilderPreflight):
         raise TypeError("preflight must be InventoryBuilderPreflight")
@@ -6382,7 +6598,7 @@ def consume_inventory_builder_authorization(
     )
     if marker.exists() or _is_indirect(marker):
         raise OODExternalV2IntegrityError(
-            "X5 inventory builder authorization is already consumed"
+            "X6 inventory builder authorization is already consumed"
         )
     _atomic_write_new(marker, _inventory_builder_attempt_bytes(preflight))
     return verify_inventory_builder_attempt_marker(preflight, project_root=root)
@@ -8584,6 +8800,277 @@ def _verify_runtime_scratch_empty(project_root: Path) -> None:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _WindowsDirectoryHandleIdentity:
+    attributes: int
+    volume_serial_number: int
+    file_id: bytes
+
+
+def _windows_directory_handle_identity(
+    handle: int,
+    *,
+    context: str,
+) -> _WindowsDirectoryHandleIdentity:
+    """Read a reparse-aware, 128-bit identity from one open directory handle."""
+
+    class _FileAttributeTagInfo(ctypes.Structure):
+        _fields_ = [
+            ("FileAttributes", ctypes.c_uint32),
+            ("ReparseTag", ctypes.c_uint32),
+        ]
+
+    class _FileId128(ctypes.Structure):
+        _fields_ = [("Identifier", ctypes.c_ubyte * 16)]
+
+    class _FileIdInfo(ctypes.Structure):
+        _fields_ = [
+            ("VolumeSerialNumber", ctypes.c_uint64),
+            ("FileId", _FileId128),
+        ]
+
+    if os.name != "nt":
+        raise OODExternalV2IntegrityError(f"{context} requires Windows handle identity")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_information = kernel32.GetFileInformationByHandleEx
+    get_information.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+    ]
+    get_information.restype = ctypes.c_int
+    attribute_info = _FileAttributeTagInfo()
+    file_id_info = _FileIdInfo()
+    ctypes.set_last_error(0)
+    if get_information(
+        handle,
+        9,  # FileAttributeTagInfo
+        ctypes.byref(attribute_info),
+        ctypes.sizeof(attribute_info),
+    ) == 0:
+        raise OODExternalV2IntegrityError(
+            f"{context} attributes cannot be read from its bound handle"
+        ) from None
+    ctypes.set_last_error(0)
+    if get_information(
+        handle,
+        18,  # FileIdInfo
+        ctypes.byref(file_id_info),
+        ctypes.sizeof(file_id_info),
+    ) == 0:
+        raise OODExternalV2IntegrityError(
+            f"{context} identity cannot be read from its bound handle"
+        ) from None
+    return _WindowsDirectoryHandleIdentity(
+        attributes=int(attribute_info.FileAttributes),
+        volume_serial_number=int(file_id_info.VolumeSerialNumber),
+        file_id=bytes(file_id_info.FileId.Identifier),
+    )
+
+
+def _remove_exact_empty_windows_directory(path: Path, *, context: str) -> None:
+    """Delete one direct empty directory through the handle that was inspected."""
+
+    class _FileDispositionInfo(ctypes.Structure):
+        _fields_ = [("DeleteFile", ctypes.c_ubyte)]
+
+    if os.name != "nt":
+        raise OODExternalV2IntegrityError(f"{context} cleanup requires Windows")
+    direct = _assert_direct_ancestry(path, context=context)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    ]
+    create_file.restype = ctypes.c_void_p
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [ctypes.c_void_p]
+    close_handle.restype = ctypes.c_int
+    set_information = kernel32.SetFileInformationByHandle
+    set_information.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+    ]
+    set_information.restype = ctypes.c_int
+
+    file_list_directory = 0x00000001
+    file_read_attributes = 0x00000080
+    delete_access = 0x00010000
+    file_share_read = 0x00000001
+    file_share_all = 0x00000001 | 0x00000002 | 0x00000004
+    open_existing = 3
+    file_flag_open_reparse_point = 0x00200000
+    file_flag_backup_semantics = 0x02000000
+    file_attribute_directory = 0x00000010
+    file_attribute_reparse_point = 0x00000400
+    invalid_handle = ctypes.c_void_p(-1).value
+
+    def _open(*, delete: bool, restrictive: bool) -> int:
+        desired_access = file_list_directory | file_read_attributes
+        if delete:
+            desired_access |= delete_access
+        ctypes.set_last_error(0)
+        opened = create_file(
+            os.fspath(direct),
+            desired_access,
+            file_share_read if restrictive else file_share_all,
+            None,
+            open_existing,
+            file_flag_backup_semantics | file_flag_open_reparse_point,
+            None,
+        )
+        if opened in (None, invalid_handle):
+            raise OODExternalV2IntegrityError(
+                f"{context} cannot be opened with a race-safe directory handle"
+            ) from None
+        return cast(int, opened)
+
+    def _close(handle: int) -> None:
+        ctypes.set_last_error(0)
+        if close_handle(handle) == 0:
+            raise OODExternalV2IntegrityError(
+                f"{context} race-safe directory handle could not be closed"
+            ) from None
+
+    handle = _open(delete=True, restrictive=True)
+    try:
+        initial_identity = _windows_directory_handle_identity(handle, context=context)
+        if (
+            initial_identity.attributes & file_attribute_directory == 0
+            or initial_identity.attributes & file_attribute_reparse_point != 0
+        ):
+            raise OODExternalV2IntegrityError(
+                f"{context} is not a direct directory"
+            )
+        if _assert_direct_ancestry(direct, context=context) != direct:
+            raise OODExternalV2IntegrityError(f"{context} path identity differs")
+        try:
+            if any(direct.iterdir()):
+                raise OODExternalV2IntegrityError(f"{context} is not empty")
+        except OODExternalV2IntegrityError:
+            raise
+        except OSError:
+            raise OODExternalV2IntegrityError(
+                f"{context} cannot be inspected while locked"
+            ) from None
+
+        witness = _open(delete=False, restrictive=False)
+        try:
+            witness_identity = _windows_directory_handle_identity(
+                witness,
+                context=context,
+            )
+        finally:
+            _close(witness)
+        final_identity = _windows_directory_handle_identity(handle, context=context)
+        if witness_identity != initial_identity or final_identity != initial_identity:
+            raise OODExternalV2IntegrityError(
+                f"{context} identity changed while locked"
+            )
+
+        disposition = _FileDispositionInfo(1)
+        ctypes.set_last_error(0)
+        if set_information(
+            handle,
+            4,  # FileDispositionInfo
+            ctypes.byref(disposition),
+            ctypes.sizeof(disposition),
+        ) == 0:
+            raise OODExternalV2IntegrityError(
+                f"{context} could not be removed through its bound handle"
+            ) from None
+    finally:
+        _close(handle)
+    try:
+        if direct.exists() or _is_indirect(direct):
+            raise OODExternalV2IntegrityError(
+                f"{context} remains after bound-handle removal"
+            )
+    except OODExternalV2IntegrityError:
+        raise
+    except OSError:
+        raise OODExternalV2IntegrityError(
+            f"{context} removal cannot be verified"
+        ) from None
+
+
+def _remove_exact_empty_gcm_sentinel_directory(project_root: Path) -> None:
+    """Remove only GCM's exact empty System.CommandLine scratch directory."""
+
+    raw_prefix = sys.pycache_prefix
+    if not isinstance(raw_prefix, str) or not raw_prefix:
+        raise OODExternalV2IntegrityError(
+            "GCM scratch cleanup requires the isolated runtime prefix"
+        )
+    pycache = _assert_direct_ancestry(
+        Path(raw_prefix),
+        context="GCM scratch cleanup pycache",
+    )
+    runtime_root = pycache.parent
+    expected_parent = _assert_direct_ancestry(
+        project_root / "artifacts" / "trust_sentinel",
+        context="GCM scratch cleanup runtime parent",
+    )
+    if (
+        pycache.name != "pycache"
+        or runtime_root.parent != expected_parent
+        or re.fullmatch(
+            r"\.ood_external_v2_1\.runtime-[0-9a-f]{64}",
+            runtime_root.name,
+        )
+        is None
+    ):
+        raise OODExternalV2IntegrityError(
+            "GCM scratch cleanup is outside the frozen runtime namespace"
+        )
+    temporary = _assert_direct_ancestry(
+        runtime_root / "temp",
+        context="GCM scratch cleanup temporary directory",
+    )
+    expected_temporary = os.fspath(temporary)
+    if (
+        not temporary.is_dir()
+        or os.environ.get("TEMP") != expected_temporary
+        or os.environ.get("TMP") != expected_temporary
+    ):
+        raise OODExternalV2IntegrityError(
+            "GCM scratch cleanup temporary directory differs"
+        )
+    try:
+        entries = tuple(temporary.iterdir())
+    except OSError:
+        raise OODExternalV2IntegrityError(
+            "GCM scratch cleanup temporary directory cannot be inspected"
+        ) from None
+    if entries:
+        if (
+            len(entries) != 1
+            or entries[0].name
+            != GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME
+        ):
+            raise OODExternalV2IntegrityError(
+                "GCM scratch cleanup found unexpected temporary content"
+            )
+        sentinel = _assert_direct_ancestry(
+            entries[0],
+            context="GCM system-commandline sentinel directory",
+        )
+        _remove_exact_empty_windows_directory(
+            sentinel,
+            context="GCM system-commandline sentinel directory",
+        )
+    _verify_runtime_scratch_empty(project_root)
+
+
 def _loaded_windows_native_module_paths() -> tuple[Path, ...]:
     """Enumerate every image loaded in the active Windows process."""
 
@@ -10161,7 +10648,11 @@ def _run_bounded_windows_process(
     return completed
 
 
-def _verify_git_credential_manager(executable: Path) -> None:
+def _verify_git_credential_manager(
+    executable: Path,
+    *,
+    project_root: Path,
+) -> None:
     helper = _git_credential_manager_path(executable)
     completed = _run_bounded_windows_process(
         [os.fspath(helper), "--version"],
@@ -10178,6 +10669,7 @@ def _verify_git_credential_manager(executable: Path) -> None:
         or completed.stdout != EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION_STDOUT
     )
     del completed
+    _remove_exact_empty_gcm_sentinel_directory(project_root)
     if differs:
         raise OODExternalV2IntegrityError("frozen Git credential manager differs")
 
@@ -10401,7 +10893,7 @@ def _run_exact_private_live_remote(project_root: Path) -> str:
     _verify_git_runtime_tree_before_provenance()
     _, executable, _ = _git_executable_paths()
     _verify_git_repository_controls(project_root)
-    _verify_git_credential_manager(executable)
+    _verify_git_credential_manager(executable, project_root=project_root)
     command, environment = _private_remote_command(
         project_root,
         executable,
@@ -10420,6 +10912,11 @@ def _run_exact_private_live_remote(project_root: Path) -> str:
     stderr_empty = completed.stderr == b""
     stdout = completed.stdout
     del completed
+    try:
+        _remove_exact_empty_gcm_sentinel_directory(project_root)
+    except BaseException:
+        stdout = b""
+        raise
     if not stderr_empty:
         stdout = b""
         raise OODExternalV2IntegrityError(

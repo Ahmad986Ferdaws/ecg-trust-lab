@@ -2,7 +2,7 @@ schema_version: 1
 protocol_id: trust-sentinel-ood-external-v2-1-parent
 status: frozen_parent_preregistration_pre_waveform
 drafted_on: "2026-08-29"
-frozen_at_utc: "2026-08-30T03:08:59Z"
+frozen_at_utc: "2026-08-30T04:40:56Z"
 research_only: true
 
 purpose: >-
@@ -171,6 +171,62 @@ design_history:
         - scripts/build_trust_sentinel_ood_v2_inventory.py
         - src/ecg_trust/ood_v2/models.py
         - src/ecg_trust/ood_v2/pipeline.py
+        - tests/unit/test_ood_v2_inventory_cli.py
+        - tests/unit/test_ood_v2_models.py
+        - tests/unit/test_ood_v2_pipeline.py
+        - tests/unit/test_ood_v2_protocol_closure.py
+      status_for_every_path: modified
+  x5_gcm_scratch_cleanup_preflight:
+    predecessor_runtime_preflight_implementation_revision: ff7c821e8b01e48e7e96fc29ddcec6e515286ddb
+    predecessor_runtime_preflight_parent_config_file_sha256: sha256:d4c3145985219fd65c9a5a4800773427cecd1f099b9e7ab75958596b7a995c61
+    predecessor_runtime_preflight_frozen_at_utc: "2026-08-30T03:08:59Z"
+    invocation_mode: controls_only_preflight
+    inner_outcome: INVENTORY_BUILDER_PREFLIGHT_VERIFIED
+    inner_report:
+      status: OOD_V2_INVENTORY_PREFLIGHT_VERIFIED
+      stage: complete
+      authorization_consumed: false
+      official_source_content_accessed: false
+      protocol_artifact_written: false
+    outer_outcome: refused_during_isolated_runtime_root_cleanup
+    observed_failure: exact_empty_gcm_system_commandline_sentinel_directory_remained
+    observed_runtime_residue:
+      relative_path: temp/system-commandline-sentinel-files
+      entry_kind: direct_directory
+      entry_count: 0
+      gcm_version: 2.7.3+5fa7116896c82164996a609accd1c5ad90fe730a
+    overall_controls_only_preflight_succeeded: false
+    successor_parent_protocol_byte_read: true
+    new_successor_external_source_archive_header_record_metadata_or_waveform_byte_read: false
+    new_successor_trained_checkpoint_or_inference_access_occurred: false
+    successor_inventory_created: false
+    successor_public_projection_created: false
+    successor_child_execution_contract_created: false
+    successor_external_access_armed_marker_created: false
+    successor_external_one_shot_claim_created: false
+    successor_output_root_created: false
+    x5_inventory_build_authorization_id: x5_inventory_build_attempt_1
+    x5_inventory_build_authorization_path: artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json
+    x5_inventory_build_authorization_marker_created: false
+    x5_inventory_build_authorization_consumed: false
+    x5_inventory_build_authorization_state: RETIRED_UNCONSUMED
+    new_x6_inventory_build_authorization_id: x6_inventory_build_attempt_1
+    operational_amendment_only: true
+    scientific_protocol_change: false
+    amendment: handle_bind_verify_and_delete_exact_empty_gcm_system_commandline_sentinel_after_each_bound_process_and_in_all_four_launchers_then_issue_unconsumed_x6_authorization
+    amendment_revision_contract:
+      commit_count_after_predecessor_runtime_preflight_revision: 1
+      sole_parent: ff7c821e8b01e48e7e96fc29ddcec6e515286ddb
+      exact_modified_paths:
+        - configs/trust_sentinel_ood_external_v2_1.yaml
+        - docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md
+        - scripts/build_trust_sentinel_ood_v2_inventory.py
+        - scripts/evaluate_trust_sentinel_ood_external_v2.py
+        - scripts/freeze_trust_sentinel_ood_external_v2.py
+        - scripts/verify_trust_sentinel_ood_external_v2.py
+        - src/ecg_trust/ood_v2/models.py
+        - src/ecg_trust/ood_v2/pipeline.py
+        - tests/unit/test_ood_v2_cli.py
         - tests/unit/test_ood_v2_inventory_cli.py
         - tests/unit/test_ood_v2_models.py
         - tests/unit/test_ood_v2_pipeline.py
@@ -372,6 +428,7 @@ revision_boundary:
       - artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json
       - artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json
       - artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json
+      - artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json
       - :(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**
       - :(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**
       - :(glob)artifacts/trust_sentinel/.ood_external_v2_1.runtime-*/**
@@ -873,6 +930,52 @@ runtime:
       USERPROFILE: runtime_home
     child_binding_uses_path_neutral_role_names: true
     pycache_temp_and_application_cache_leaves_must_be_empty_before_terminal_success_and_before_success_return: true
+    gcm_system_commandline_sentinel_cleanup:
+      relative_path: temp/system-commandline-sentinel-files
+      accepted_precleanup_state: absent_or_exact_case_sensitive_non_reparse_empty_directory
+      process_boundaries:
+        - after_bound_gcm_version_job_runner_returns_and_reports_zero_active_processes
+        - after_authenticated_private_remote_job_runner_returns_and_reports_zero_active_processes
+      bounded_runner_exception_cleanup: deferred_to_outer_launcher_after_isolated_child_exit
+      outer_launcher_fallback: after_isolated_child_exit_in_all_four_operational_entrypoints
+      outer_launcher_fallback_scope: only_when_no_prior_outer_cleanup_attempt
+      outer_launcher_cleanup_retry_after_attempt: forbidden
+      handle_binding:
+        open_api: CreateFileW
+        desired_access: [DELETE, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES]
+        share_mode: [FILE_SHARE_READ]
+        creation_disposition: OPEN_EXISTING
+        flags: [FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT]
+      race_closure:
+        information_api: GetFileInformationByHandleEx
+        information_classes: [FileAttributeTagInfo, FileIdInfo]
+        required_attributes: [FILE_ATTRIBUTE_DIRECTORY]
+        forbidden_attributes: [FILE_ATTRIBUTE_REPARSE_POINT]
+        stable_identity_fields: [VolumeSerialNumber_uint64, FileId.Identifier_128_bit]
+        ancestry_revalidated_while_handle_locked: true
+        emptiness_verified_while_handle_locked: true
+        pathname_witness:
+          purpose: identity_only_never_deletion
+          desired_access: [FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES]
+          share_mode: [FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_SHARE_DELETE]
+          creation_disposition: OPEN_EXISTING
+          flags: [FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT]
+          identity_and_attributes: exact_match_to_initial_main_handle
+          close_before_main_recheck: true
+        main_handle_identity_and_attributes_reverified_before_delete: true
+        deletion_api: SetFileInformationByHandle
+        deletion_information_class: FileDispositionInfo
+        disposition_delete_file: true
+        deletion_target: exact_same_locked_handle
+        pathname_reopen_for_deletion: forbidden
+        close_api: CloseHandle
+        postclose_path_absent_and_non_indirect: required
+        postclose_scratch_empty: required
+      recursive_or_wildcard_deletion: forbidden
+      nonempty_indirect_extra_or_raced_content: fail_closed_and_retain_runtime_root
+      runtime_scratch_verifier_allowlist: forbidden
+      scratch_must_be_exactly_empty_after_cleanup: true
+      overall_success_requires_child_exit_zero_and_runtime_root_absent: true
     dirty_scratch_failure_receipt_retention: still_required
     caller_environment_not_on_allowlist: forbidden
     inventory_builder_boundary:
@@ -880,7 +983,7 @@ runtime:
       controls_only_mode: exact_shared_preconsumption_path_repeatable_no_marker_raw_content_or_output_write
       controls_only_failure_disclosure: stable_stage_code_without_exception_path_or_external_identifier
       private_public_inventory_destinations_must_be_absent_before_authorization: true
-      historical_x4_and_current_x5_authorization_paths_checked_before_authorization: true
+      historical_x4_and_x5_and_current_x6_authorization_paths_checked_before_authorization: true
       postflight_before_success_report: exact_same_preflight_plus_strict_private_public_output_hashes
   complete_runtime_tree_binding:
     cpython_base:
@@ -1103,12 +1206,12 @@ one_shot_external_access:
     - model_logits_or_probabilities
     - endpoint_or_subgroup_metrics
   inventory_build_authorization:
-    authorization_id: x5_inventory_build_attempt_1
+    authorization_id: x6_inventory_build_attempt_1
     artifact_type: ecg_trust.ood_external_v2_1_inventory_builder_attempt
-    path: artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json
-    scope: sole_x5_preclaim_inventory_build_attempt
-    supersedes_unconsumed_authorization_id: x4_inventory_build_attempt_1
-    superseded_authorization_path: artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json
+    path: artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json
+    scope: sole_x6_preclaim_inventory_build_attempt
+    supersedes_unconsumed_authorization_id: x5_inventory_build_attempt_1
+    superseded_authorization_path: artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json
     superseded_authorization_consumed: false
     superseded_authorization_state: RETIRED_UNCONSUMED
     superseded_authorization_must_remain_absent: true
@@ -1139,7 +1242,7 @@ one_shot_external_access:
     - exact_raw_source_hashes_and_semantic_roles_rederived
     - exact_python_scientific_package_tree_and_7zip_identities_verified
     - quality_implementation_hash_verified
-    - durable_x5_inventory_build_authorization_marker_verified
+    - durable_x6_inventory_build_authorization_marker_verified
     - output_root_absent
     - clean_committed_revision
   output_root: artifacts/trust_sentinel/ood_external_v2_1

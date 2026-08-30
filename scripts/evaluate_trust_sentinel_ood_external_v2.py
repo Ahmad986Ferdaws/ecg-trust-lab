@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import os
 import secrets
@@ -11,15 +12,93 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from contextlib import suppress
+from ctypes import wintypes
 from pathlib import Path
 
 _ISOLATED_CHILD_FLAG = "--_ecg-trust-ood-v2-isolated-child"
 _RUNTIME_ROOT_PREFIX = ".ood_external_v2_1.runtime-"
 _HANDOFF_FILENAME = ".parent-handoff"
+_GCM_COMMANDLINE_SENTINEL_DIRECTORY = "system-commandline-sentinel-files"
 _FROZEN_WINDOWS_DIRECTORY = Path(r"C:\Windows")
 _FROZEN_PROGRAM_FILES_DIRECTORY = Path(r"C:\Program Files")
 _FROZEN_PROGRAM_FILES_X86_DIRECTORY = Path(r"C:\Program Files (x86)")
 _FROZEN_PROGRAM_DATA_DIRECTORY = Path(r"C:\ProgramData")
+
+_WINDOWS_DELETE = 0x00010000
+_WINDOWS_FILE_LIST_DIRECTORY = 0x00000001
+_WINDOWS_FILE_READ_ATTRIBUTES = 0x00000080
+_WINDOWS_FILE_SHARE_READ = 0x00000001
+_WINDOWS_FILE_SHARE_WRITE = 0x00000002
+_WINDOWS_FILE_SHARE_DELETE = 0x00000004
+_WINDOWS_OPEN_EXISTING = 3
+_WINDOWS_FILE_ATTRIBUTE_DIRECTORY = 0x00000010
+_WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+_WINDOWS_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+_WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+_WINDOWS_FILE_DISPOSITION_INFO_CLASS = 4
+_WINDOWS_FILE_ATTRIBUTE_TAG_INFO_CLASS = 9
+_WINDOWS_FILE_ID_INFO_CLASS = 18
+_WINDOWS_INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+
+class _WindowsFileAttributeTagInfo(ctypes.Structure):
+    _fields_ = [
+        ("file_attributes", wintypes.DWORD),
+        ("reparse_tag", wintypes.DWORD),
+    ]
+
+
+class _WindowsFileId128(ctypes.Structure):
+    _fields_ = [("identifier", ctypes.c_ubyte * 16)]
+
+
+class _WindowsFileIdInfo(ctypes.Structure):
+    _fields_ = [
+        ("volume_serial_number", ctypes.c_uint64),
+        ("file_id", _WindowsFileId128),
+    ]
+
+
+class _WindowsFileDispositionInfo(ctypes.Structure):
+    _fields_ = [("delete_file", ctypes.c_ubyte)]
+
+
+_WINDOWS_CREATE_FILE_W = None
+_WINDOWS_GET_FILE_INFORMATION_BY_HANDLE_EX = None
+_WINDOWS_SET_FILE_INFORMATION_BY_HANDLE = None
+_WINDOWS_CLOSE_HANDLE = None
+if os.name == "nt":
+    _WINDOWS_KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _WINDOWS_CREATE_FILE_W = _WINDOWS_KERNEL32.CreateFileW
+    _WINDOWS_CREATE_FILE_W.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    _WINDOWS_CREATE_FILE_W.restype = wintypes.HANDLE
+    _WINDOWS_GET_FILE_INFORMATION_BY_HANDLE_EX = _WINDOWS_KERNEL32.GetFileInformationByHandleEx
+    _WINDOWS_GET_FILE_INFORMATION_BY_HANDLE_EX.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    _WINDOWS_GET_FILE_INFORMATION_BY_HANDLE_EX.restype = wintypes.BOOL
+    _WINDOWS_SET_FILE_INFORMATION_BY_HANDLE = _WINDOWS_KERNEL32.SetFileInformationByHandle
+    _WINDOWS_SET_FILE_INFORMATION_BY_HANDLE.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    _WINDOWS_SET_FILE_INFORMATION_BY_HANDLE.restype = wintypes.BOOL
+    _WINDOWS_CLOSE_HANDLE = _WINDOWS_KERNEL32.CloseHandle
+    _WINDOWS_CLOSE_HANDLE.argtypes = [wintypes.HANDLE]
+    _WINDOWS_CLOSE_HANDLE.restype = wintypes.BOOL
 
 
 def _is_indirect(path: Path) -> bool:
@@ -91,6 +170,131 @@ def _sanitized_runtime_environment(runtime_root: Path) -> dict[str, str]:
     }
 
 
+def _windows_directory_handle_state(handle: int) -> tuple[int, int, int, bytes]:
+    if _WINDOWS_GET_FILE_INFORMATION_BY_HANDLE_EX is None:
+        raise RuntimeError("isolated runtime GCM cleanup requires Windows handle APIs")
+    attribute_information = _WindowsFileAttributeTagInfo()
+    if not _WINDOWS_GET_FILE_INFORMATION_BY_HANDLE_EX(
+        handle,
+        _WINDOWS_FILE_ATTRIBUTE_TAG_INFO_CLASS,
+        ctypes.byref(attribute_information),
+        ctypes.sizeof(attribute_information),
+    ):
+        error = ctypes.WinError(ctypes.get_last_error())
+        raise RuntimeError("isolated runtime GCM handle attribute query failed") from error
+    identity_information = _WindowsFileIdInfo()
+    if not _WINDOWS_GET_FILE_INFORMATION_BY_HANDLE_EX(
+        handle,
+        _WINDOWS_FILE_ID_INFO_CLASS,
+        ctypes.byref(identity_information),
+        ctypes.sizeof(identity_information),
+    ):
+        error = ctypes.WinError(ctypes.get_last_error())
+        raise RuntimeError("isolated runtime GCM handle identity query failed") from error
+    return (
+        int(attribute_information.file_attributes),
+        int(attribute_information.reparse_tag),
+        int(identity_information.volume_serial_number),
+        bytes(identity_information.file_id.identifier),
+    )
+
+
+def _remove_empty_gcm_commandline_sentinel(temporary: Path) -> None:
+    entries = tuple(temporary.iterdir())
+    if not entries:
+        return
+    expected = temporary / _GCM_COMMANDLINE_SENTINEL_DIRECTORY
+    if len(entries) != 1 or entries[0].name != _GCM_COMMANDLINE_SENTINEL_DIRECTORY:
+        raise RuntimeError("isolated runtime temp has unexpected contents")
+    _direct_path(expected, directory=True)
+    if (
+        _WINDOWS_CREATE_FILE_W is None
+        or _WINDOWS_SET_FILE_INFORMATION_BY_HANDLE is None
+        or _WINDOWS_CLOSE_HANDLE is None
+    ):
+        raise RuntimeError("isolated runtime GCM cleanup requires Windows handle APIs")
+    main_handle = _WINDOWS_CREATE_FILE_W(
+        os.fspath(expected),
+        _WINDOWS_DELETE | _WINDOWS_FILE_LIST_DIRECTORY | _WINDOWS_FILE_READ_ATTRIBUTES,
+        _WINDOWS_FILE_SHARE_READ,
+        None,
+        _WINDOWS_OPEN_EXISTING,
+        _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS | _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    if main_handle is None or main_handle == _WINDOWS_INVALID_HANDLE_VALUE:
+        error = ctypes.WinError(ctypes.get_last_error())
+        raise RuntimeError("isolated runtime GCM main handle open failed") from error
+    try:
+        initial_state = _windows_directory_handle_state(main_handle)
+        if (
+            not initial_state[0] & _WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+            or initial_state[0] & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+            or initial_state[1] != 0
+        ):
+            raise RuntimeError("isolated runtime GCM handle is not a direct directory")
+        temporary = _direct_path(temporary, directory=True)
+        locked_entries = tuple(temporary.iterdir())
+        if (
+            len(locked_entries) != 1
+            or locked_entries[0].name != _GCM_COMMANDLINE_SENTINEL_DIRECTORY
+        ):
+            raise RuntimeError("isolated runtime temp changed during locked cleanup")
+        sentinel = _direct_path(expected, directory=True)
+        if any(sentinel.iterdir()):
+            raise RuntimeError("isolated runtime GCM sentinel is not empty")
+
+        witness_handle = _WINDOWS_CREATE_FILE_W(
+            os.fspath(expected),
+            _WINDOWS_FILE_LIST_DIRECTORY | _WINDOWS_FILE_READ_ATTRIBUTES,
+            _WINDOWS_FILE_SHARE_READ | _WINDOWS_FILE_SHARE_WRITE | _WINDOWS_FILE_SHARE_DELETE,
+            None,
+            _WINDOWS_OPEN_EXISTING,
+            _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS | _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        if witness_handle is None or witness_handle == _WINDOWS_INVALID_HANDLE_VALUE:
+            error = ctypes.WinError(ctypes.get_last_error())
+            raise RuntimeError("isolated runtime GCM witness handle open failed") from error
+        try:
+            witness_state = _windows_directory_handle_state(witness_handle)
+        finally:
+            if not _WINDOWS_CLOSE_HANDLE(witness_handle):
+                error = ctypes.WinError(ctypes.get_last_error())
+                raise RuntimeError("isolated runtime GCM witness handle close failed") from error
+        if witness_state != initial_state:
+            raise RuntimeError("isolated runtime GCM pathname identity changed")
+        final_state = _windows_directory_handle_state(main_handle)
+        if final_state != initial_state:
+            raise RuntimeError("isolated runtime GCM handle identity changed")
+        disposition = _WindowsFileDispositionInfo(delete_file=True)
+        if not _WINDOWS_SET_FILE_INFORMATION_BY_HANDLE(
+            main_handle,
+            _WINDOWS_FILE_DISPOSITION_INFO_CLASS,
+            ctypes.byref(disposition),
+            ctypes.sizeof(disposition),
+        ):
+            error = ctypes.WinError(ctypes.get_last_error())
+            raise RuntimeError("isolated runtime GCM handle deletion failed") from error
+    finally:
+        if not _WINDOWS_CLOSE_HANDLE(main_handle):
+            error = ctypes.WinError(ctypes.get_last_error())
+            raise RuntimeError("isolated runtime GCM main handle close failed") from error
+    temporary = _direct_path(temporary, directory=True)
+    if _is_indirect(expected):
+        raise RuntimeError("isolated runtime GCM path became indirect after cleanup")
+    try:
+        expected.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise RuntimeError("isolated runtime GCM path verification failed") from error
+    else:
+        raise RuntimeError("isolated runtime GCM path remains after cleanup")
+    if any(temporary.iterdir()):
+        raise RuntimeError("isolated runtime temp changed during cleanup")
+
+
 def _remove_empty_runtime_root(runtime_root: Path) -> None:
     if {entry.name for entry in runtime_root.iterdir()} != {"pycache", "temp", "home"}:
         raise RuntimeError("isolated runtime root has unexpected contents")
@@ -102,13 +306,14 @@ def _remove_empty_runtime_root(runtime_root: Path) -> None:
         raise RuntimeError("isolated runtime profile has unexpected contents")
     for relative in (
         "pycache",
-        "temp",
         "home/AppData/Roaming",
         "home/AppData/Local",
     ):
         directory = _direct_path(runtime_root / Path(relative), directory=True)
         if any(directory.iterdir()):
             raise RuntimeError("isolated runtime directory contains unexpected files")
+    temporary = _direct_path(runtime_root / "temp", directory=True)
+    _remove_empty_gcm_commandline_sentinel(temporary)
     for relative in (
         "home/AppData/Roaming",
         "home/AppData/Local",
@@ -183,6 +388,7 @@ def _relaunch_isolated(arguments: Sequence[str]) -> int:
     roaming.mkdir(parents=True)
     local.mkdir()
     _write_parent_handoff(runtime_root / _HANDOFF_FILENAME, token=token)
+    cleanup_started = False
     try:
         completed = subprocess.run(
             [
@@ -201,10 +407,11 @@ def _relaunch_isolated(arguments: Sequence[str]) -> int:
             cwd=root,
             env=_sanitized_runtime_environment(runtime_root),
         )
+        cleanup_started = True
         _remove_empty_runtime_root(runtime_root)
         return completed.returncode
     finally:
-        if runtime_root.exists():
+        if runtime_root.exists() and not cleanup_started:
             with suppress(OSError):
                 _remove_empty_runtime_root(runtime_root)
 

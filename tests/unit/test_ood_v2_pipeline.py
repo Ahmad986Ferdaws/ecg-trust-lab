@@ -354,6 +354,15 @@ def test_successor_preflight_rejects_hash_identical_parent_copy(
             "successor runtime-preflight amendment declaration differs",
         ),
         (
+            (
+                "design_history",
+                "x5_gcm_scratch_cleanup_preflight",
+                "predecessor_runtime_preflight_implementation_revision",
+            ),
+            "0" * 40,
+            "successor GCM scratch-cleanup amendment declaration differs",
+        ),
+        (
             ("revision_boundary", "git_execution", "install_root_windows"),
             r"C:\Alternate Git",
             "successor Git execution declaration differs",
@@ -366,6 +375,16 @@ def test_successor_preflight_rejects_hash_identical_parent_copy(
             ),
             5,
             "successor inventory counts differ from the frozen metadata contract",
+        ),
+        (
+            (
+                "runtime",
+                "isolated_launcher",
+                "gcm_system_commandline_sentinel_cleanup",
+                "deletion_operation",
+            ),
+            "recursive_delete",
+            "successor GCM sentinel cleanup declaration differs",
         ),
         (
             (
@@ -1789,6 +1808,7 @@ def test_git_credential_manager_version_probe_is_exact_and_noninteractive(
     executable = tmp_path / "mingw64" / "bin" / "git.exe"
     helper = executable.parent / pipeline.EXPECTED_GIT_CREDENTIAL_MANAGER_NAME
     observed: dict[str, object] = {}
+    cleanup_roots: list[Path] = []
     environment = {"GCM_INTERACTIVE": "0", "PATH": os.fspath(executable.parent)}
 
     def helper_path(value: Path) -> Path:
@@ -1815,7 +1835,15 @@ def test_git_credential_manager_version_probe_is_exact_and_noninteractive(
         )
 
     monkeypatch.setattr(pipeline, "_run_bounded_windows_process", fake_run)
-    pipeline._verify_git_credential_manager(executable)  # noqa: SLF001
+    monkeypatch.setattr(
+        pipeline,
+        "_remove_exact_empty_gcm_sentinel_directory",
+        cleanup_roots.append,
+    )
+    pipeline._verify_git_credential_manager(  # noqa: SLF001
+        executable,
+        project_root=tmp_path,
+    )
 
     assert observed == {
         "command": [os.fspath(helper), "--version"],
@@ -1846,7 +1874,79 @@ def test_git_credential_manager_version_probe_is_exact_and_noninteractive(
             pipeline.OODExternalV2IntegrityError,
             match="credential manager differs",
         ):
-            pipeline._verify_git_credential_manager(executable)  # noqa: SLF001
+            pipeline._verify_git_credential_manager(  # noqa: SLF001
+                executable,
+                project_root=tmp_path,
+            )
+    assert cleanup_roots == [tmp_path] * 5
+
+
+def test_private_live_remote_removes_gcm_sentinel_after_each_returned_job(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    runtime_root = (
+        project
+        / "artifacts"
+        / "trust_sentinel"
+        / f".ood_external_v2_1.runtime-{'d' * 64}"
+    )
+    _runtime_scratch_layout(runtime_root)
+    sentinel = (
+        runtime_root
+        / "temp"
+        / pipeline.GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME
+    )
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    helper = executable.parent / pipeline.EXPECTED_GIT_CREDENTIAL_MANAGER_NAME
+    base_environment = {"PATH": os.fspath(executable.parent)}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(sys, "pycache_prefix", os.fspath(runtime_root / "pycache"))
+    monkeypatch.setattr(os, "environ", _runtime_scratch_environment(runtime_root))
+    monkeypatch.setattr(
+        pipeline,
+        "_git_executable_paths",
+        lambda: (tmp_path / "cmd" / "git.exe", executable, tmp_path),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_runtime_tree_before_provenance",
+        lambda: None,
+    )
+    monkeypatch.setattr(pipeline, "_verify_git_repository_controls", lambda _root: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_git_credential_manager_path",
+        lambda value: helper if value == executable else Path("unexpected"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_sanitized_git_environment",
+        lambda value: dict(base_environment) if value == executable else {},
+    )
+
+    def fake_run(
+        command: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[bytes]:
+        assert not sentinel.exists()
+        sentinel.mkdir()
+        calls.append(command)
+        stdout = (
+            pipeline.EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION_STDOUT
+            if len(calls) == 1
+            else b"synthetic refs\n"
+        )
+        return subprocess.CompletedProcess(command, 0, stdout, b"")
+
+    monkeypatch.setattr(pipeline, "_run_bounded_windows_process", fake_run)
+
+    assert pipeline._run_exact_private_live_remote(project) == "synthetic refs\n"
+    assert len(calls) == 2
+    assert calls[0] == [os.fspath(helper), "--version"]
+    assert not sentinel.exists()
+    assert tuple((runtime_root / "temp").iterdir()) == ()
 
 
 def test_private_live_remote_uses_exact_argv_env_and_devnull(
@@ -1878,7 +1978,16 @@ def test_private_live_remote_uses_exact_argv_env_and_devnull(
     monkeypatch.setattr(
         pipeline,
         "_verify_git_credential_manager",
-        lambda value: observed.setdefault("gcm_executable", value),
+        lambda value, *, project_root: observed.update(
+            gcm_executable=value,
+            gcm_project_root=project_root,
+        ),
+    )
+    cleanup_roots: list[Path] = []
+    monkeypatch.setattr(
+        pipeline,
+        "_remove_exact_empty_gcm_sentinel_directory",
+        cleanup_roots.append,
     )
     monkeypatch.setattr(
         pipeline,
@@ -1936,6 +2045,8 @@ def test_private_live_remote_uses_exact_argv_env_and_devnull(
     ]
     assert observed["controls_root"] == tmp_path
     assert observed["gcm_executable"] == executable
+    assert observed["gcm_project_root"] == tmp_path
+    assert cleanup_roots == [tmp_path]
     assert observed["cwd"] == executable.parent
     assert observed["environment"] == environment
     assert observed["timeout_seconds"] == 60
@@ -1963,7 +2074,17 @@ def test_private_live_remote_failure_is_single_attempt_and_never_surfaces_secret
         lambda: None,
     )
     monkeypatch.setattr(pipeline, "_verify_git_repository_controls", lambda _root: None)
-    monkeypatch.setattr(pipeline, "_verify_git_credential_manager", lambda _value: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_credential_manager",
+        lambda _value, *, project_root: None,
+    )
+    cleanup_roots: list[Path] = []
+    monkeypatch.setattr(
+        pipeline,
+        "_remove_exact_empty_gcm_sentinel_directory",
+        cleanup_roots.append,
+    )
     base_environment = {"PATH": os.fspath(executable.parent)}
     monkeypatch.setattr(
         pipeline,
@@ -1993,6 +2114,7 @@ def test_private_live_remote_failure_is_single_attempt_and_never_surfaces_secret
     assert secret not in repr(captured.value)
     assert captured.value.__cause__ is None
     assert pipeline.EXPECTED_GIT_REMOTE_URL in calls[0]
+    assert cleanup_roots == [tmp_path]
 
 
 def test_private_live_remote_timeout_discards_partial_secret_output(
@@ -2012,7 +2134,17 @@ def test_private_live_remote_timeout_discards_partial_secret_output(
         lambda: None,
     )
     monkeypatch.setattr(pipeline, "_verify_git_repository_controls", lambda _root: None)
-    monkeypatch.setattr(pipeline, "_verify_git_credential_manager", lambda _value: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_credential_manager",
+        lambda _value, *, project_root: None,
+    )
+    cleanup_roots: list[Path] = []
+    monkeypatch.setattr(
+        pipeline,
+        "_remove_exact_empty_gcm_sentinel_directory",
+        cleanup_roots.append,
+    )
     monkeypatch.setattr(
         pipeline,
         "_private_remote_command",
@@ -2035,6 +2167,7 @@ def test_private_live_remote_timeout_discards_partial_secret_output(
     assert secret.decode() not in repr(captured.value)
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
+    assert cleanup_roots == []
 
 
 def test_private_live_remote_invalid_utf8_has_no_retained_exception_context(
@@ -2054,7 +2187,17 @@ def test_private_live_remote_invalid_utf8_has_no_retained_exception_context(
         lambda: None,
     )
     monkeypatch.setattr(pipeline, "_verify_git_repository_controls", lambda _root: None)
-    monkeypatch.setattr(pipeline, "_verify_git_credential_manager", lambda _value: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_credential_manager",
+        lambda _value, *, project_root: None,
+    )
+    cleanup_roots: list[Path] = []
+    monkeypatch.setattr(
+        pipeline,
+        "_remove_exact_empty_gcm_sentinel_directory",
+        cleanup_roots.append,
+    )
     monkeypatch.setattr(
         pipeline,
         "_private_remote_command",
@@ -2081,6 +2224,7 @@ def test_private_live_remote_invalid_utf8_has_no_retained_exception_context(
     assert "github_pat_synthetic" not in repr(captured.value)
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
+    assert cleanup_roots == [tmp_path]
 
 
 def _amendment_git_runner(
@@ -2095,6 +2239,9 @@ def _amendment_git_runner(
     third_revision_line: str | None = None,
     third_commit_count: str = "1",
     third_diff_stdout: str | None = None,
+    fourth_revision_line: str | None = None,
+    fourth_commit_count: str = "1",
+    fourth_diff_stdout: str | None = None,
     revision_line: str | None = None,
     commit_count: str = "1",
     diff_stdout: str | None = None,
@@ -2105,11 +2252,17 @@ def _amendment_git_runner(
             f"M\t{path}\n"
             for path in pipeline.SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS
         )
+    fourth_diff = fourth_diff_stdout
+    if fourth_diff is None:
+        fourth_diff = "".join(
+            f"M\t{path}\n"
+            for path in pipeline.SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS
+        )
     current_diff = diff_stdout
     if current_diff is None:
         current_diff = "".join(
             f"M\t{path}\n"
-            for path in pipeline.SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS
+            for path in pipeline.SUCCESSOR_GCM_SCRATCH_AMENDMENT_MODIFIED_PATHS
         )
     first_diff = first_diff_stdout
     if first_diff is None:
@@ -2203,23 +2356,48 @@ def _amendment_git_runner(
             "--parents",
             "-n",
             "1",
-            implementation_revision,
-        ): revision_line
+            pipeline.FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        ): fourth_revision_line
         or (
-            f"{implementation_revision} "
+            f"{pipeline.FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
             f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
         ),
         (
             "rev-list",
             "--count",
             f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+        ): f"{fourth_commit_count}\n",
+        (
+            "diff",
+            "--name-status",
+            "--no-renames",
+            f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+            "--",
+        ): fourth_diff,
+        (
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            implementation_revision,
+        ): revision_line
+        or (
+            f"{implementation_revision} "
+            f"{pipeline.FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
+        ),
+        (
+            "rev-list",
+            "--count",
+            f"{pipeline.FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
         ): f"{commit_count}\n",
         (
             "diff",
             "--name-status",
             "--no-renames",
-            f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
             "--",
         ): current_diff,
@@ -2289,6 +2467,14 @@ def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
             ),
             "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
             "revision": pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        },
+        {
+            "context": "fifth frozen successor parent",
+            "expected_file_sha256": (
+                pipeline.FIFTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+            ),
+            "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
+            "revision": pipeline.FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         },
     ]
 
@@ -2447,14 +2633,19 @@ def test_successor_amendment_revision_rejects_x3_to_x4_lineage_or_diff_drift(
     ("runner_kwargs", "message"),
     (
         (
-            {"revision_line": f"{'d' * 40} {'e' * 40}\n"},
+            {
+                "fourth_revision_line": (
+                    f"{pipeline.FIFTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
+                    f"{'e' * 40}\n"
+                )
+            },
             "sole direct child",
         ),
-        ({"commit_count": "2"}, "sole direct child"),
-        ({"diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
+        ({"fourth_commit_count": "2"}, "sole direct child"),
+        ({"fourth_diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
         (
             {
-                "diff_stdout": "".join(
+                "fourth_diff_stdout": "".join(
                     f"M\t{path}\n"
                     for path in (
                         pipeline.SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS[
@@ -2467,7 +2658,7 @@ def test_successor_amendment_revision_rejects_x3_to_x4_lineage_or_diff_drift(
         ),
         (
             {
-                "diff_stdout": "".join(
+                "fourth_diff_stdout": "".join(
                     f"M\t{path}\n"
                     for path in (
                         pipeline.SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS
@@ -2477,10 +2668,75 @@ def test_successor_amendment_revision_rejects_x3_to_x4_lineage_or_diff_drift(
             },
             "paths differ",
         ),
-        ({"diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
+        (
+            {"fourth_diff_stdout": "R100\told.txt\tnew.txt\n"},
+            "non-modification",
+        ),
     ),
 )
 def test_successor_amendment_revision_rejects_x4_to_x5_lineage_or_diff_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runner_kwargs: dict[str, str],
+    message: str,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        _amendment_git_runner(revision, **runner_kwargs),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(pipeline.OODExternalV2IntegrityError, match=message):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+@pytest.mark.parametrize(
+    ("runner_kwargs", "message"),
+    (
+        (
+            {"revision_line": f"{'d' * 40} {'e' * 40}\n"},
+            "sole direct child",
+        ),
+        ({"commit_count": "2"}, "sole direct child"),
+        ({"diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
+        (
+            {
+                "diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in (
+                        pipeline.SUCCESSOR_GCM_SCRATCH_AMENDMENT_MODIFIED_PATHS[
+                            :-1
+                        ]
+                    )
+                )
+            },
+            "paths differ",
+        ),
+        (
+            {
+                "diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in (
+                        pipeline.SUCCESSOR_GCM_SCRATCH_AMENDMENT_MODIFIED_PATHS
+                    )
+                )
+                + "M\textra.txt\n"
+            },
+            "paths differ",
+        ),
+        ({"diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
+    ),
+)
+def test_successor_amendment_revision_rejects_x5_to_x6_lineage_or_diff_drift(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     runner_kwargs: dict[str, str],
@@ -2606,6 +2862,35 @@ def test_successor_amendment_revision_rejects_x4_parent_blob_drift(
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
         match="X4 parent blob differs",
+    ):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+def test_successor_amendment_revision_rejects_x5_parent_blob_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(pipeline, "_run_git", _amendment_git_runner(revision))
+
+    def reject_fifth_parent(
+        _root: Path,
+        **kwargs: object,
+    ) -> None:
+        if kwargs.get("context") == "fifth frozen successor parent":
+            raise pipeline.OODExternalV2IntegrityError("X5 parent blob differs")
+
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        reject_fifth_parent,
+    )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="X5 parent blob differs",
     ):
         pipeline._verify_successor_amendment_revision(  # noqa: SLF001
             tmp_path,
@@ -2962,6 +3247,250 @@ def test_runtime_environment_hash_material_canonicalizes_fresh_owned_roots(
             )
     assert observed[0] == observed[1]
     assert all(str(root) not in repr(observed) for root in roots)
+
+
+@pytest.mark.parametrize("sentinel_present", [False, True])
+def test_gcm_sentinel_cleanup_accepts_only_absent_or_exact_empty_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    sentinel_present: bool,
+) -> None:
+    project = tmp_path / "project"
+    runtime_root = (
+        project
+        / "artifacts"
+        / "trust_sentinel"
+        / f".ood_external_v2_1.runtime-{'a' * 64}"
+    )
+    _runtime_scratch_layout(runtime_root)
+    sentinel = (
+        runtime_root
+        / "temp"
+        / pipeline.GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME
+    )
+    if sentinel_present:
+        sentinel.mkdir()
+    monkeypatch.setattr(sys, "pycache_prefix", os.fspath(runtime_root / "pycache"))
+    monkeypatch.setattr(os, "environ", _runtime_scratch_environment(runtime_root))
+
+    pipeline._remove_exact_empty_gcm_sentinel_directory(project)  # noqa: SLF001
+
+    assert not sentinel.exists()
+    assert tuple((runtime_root / "temp").iterdir()) == ()
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["nonempty", "extra", "regular_file", "near_name", "indirect"],
+)
+def test_gcm_sentinel_cleanup_rejects_every_broader_temp_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    variant: str,
+) -> None:
+    project = tmp_path / "project"
+    runtime_root = (
+        project
+        / "artifacts"
+        / "trust_sentinel"
+        / f".ood_external_v2_1.runtime-{'b' * 64}"
+    )
+    _runtime_scratch_layout(runtime_root)
+    temporary = runtime_root / "temp"
+    sentinel = temporary / pipeline.GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME
+    if variant == "regular_file":
+        sentinel.write_bytes(b"")
+    elif variant == "near_name":
+        (temporary / "system-commandline-sentinel-file").mkdir()
+    else:
+        sentinel.mkdir()
+        if variant == "nonempty":
+            (sentinel / "unexpected.txt").write_text("unexpected", encoding="ascii")
+        elif variant == "extra":
+            (temporary / "extra").mkdir()
+        elif variant == "indirect":
+            original_is_indirect = pipeline._is_indirect  # noqa: SLF001
+            monkeypatch.setattr(
+                pipeline,
+                "_is_indirect",
+                lambda path: Path(path) == sentinel or original_is_indirect(path),
+            )
+    monkeypatch.setattr(sys, "pycache_prefix", os.fspath(runtime_root / "pycache"))
+    monkeypatch.setattr(os, "environ", _runtime_scratch_environment(runtime_root))
+
+    with pytest.raises(pipeline.OODExternalV2IntegrityError):
+        pipeline._remove_exact_empty_gcm_sentinel_directory(  # noqa: SLF001
+            project
+        )
+
+    assert tuple(temporary.iterdir()) != ()
+
+
+def test_gcm_sentinel_cleanup_blocks_final_identity_swap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    runtime_root = (
+        project
+        / "artifacts"
+        / "trust_sentinel"
+        / f".ood_external_v2_1.runtime-{'d' * 64}"
+    )
+    _runtime_scratch_layout(runtime_root)
+    temporary = runtime_root / "temp"
+    sentinel = temporary / pipeline.GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME
+    sentinel.mkdir()
+    original_iterdir = Path.iterdir
+    swap_attempted = False
+
+    def racing_iterdir(path: Path) -> Any:
+        nonlocal swap_attempted
+        observed = tuple(original_iterdir(path))
+        if path == sentinel and not swap_attempted:
+            swap_attempted = True
+            sentinel.rmdir()
+            sentinel.mkdir()
+        return iter(observed)
+
+    monkeypatch.setattr(Path, "iterdir", racing_iterdir)
+    monkeypatch.setattr(sys, "pycache_prefix", os.fspath(runtime_root / "pycache"))
+    monkeypatch.setattr(os, "environ", _runtime_scratch_environment(runtime_root))
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="cannot be inspected while locked",
+    ):
+        pipeline._remove_exact_empty_gcm_sentinel_directory(project)  # noqa: SLF001
+
+    assert swap_attempted
+    assert sentinel.is_dir()
+    assert tuple(original_iterdir(sentinel)) == ()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows reparse-point contract")
+def test_bound_directory_handle_rejects_raced_junction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    sentinel = tmp_path / pipeline.GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME
+    target = tmp_path / "external-target"
+    sentinel.mkdir()
+    target.mkdir()
+    original_assert_direct = pipeline._assert_direct_ancestry  # noqa: SLF001
+    raced = False
+
+    def racing_assert_direct(path: Path, *, context: str) -> Path:
+        nonlocal raced
+        direct = original_assert_direct(path, context=context)
+        if direct == sentinel and not raced:
+            raced = True
+            direct.rmdir()
+            completed = subprocess.run(
+                [
+                    r"C:\Windows\System32\cmd.exe",
+                    "/d",
+                    "/c",
+                    "mklink",
+                    "/J",
+                    os.fspath(sentinel),
+                    os.fspath(target),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert completed.returncode == 0, completed.stderr
+        return direct
+
+    monkeypatch.setattr(pipeline, "_assert_direct_ancestry", racing_assert_direct)
+    try:
+        with pytest.raises(
+            pipeline.OODExternalV2IntegrityError,
+            match="not a direct directory",
+        ):
+            pipeline._remove_exact_empty_windows_directory(  # noqa: SLF001
+                sentinel,
+                context="synthetic GCM sentinel",
+            )
+
+        assert raced
+        assert sentinel.is_junction()
+        assert target.is_dir()
+    finally:
+        if sentinel.is_junction():
+            os.rmdir(sentinel)
+
+
+@pytest.mark.parametrize("drift_call", [2, 3])
+def test_bound_directory_handle_rejects_witness_or_final_identity_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    drift_call: int,
+) -> None:
+    sentinel = tmp_path / pipeline.GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME
+    sentinel.mkdir()
+    original_identity = pipeline._windows_directory_handle_identity  # noqa: SLF001
+    identity_calls = 0
+
+    def drifting_identity(
+        handle: int,
+        *,
+        context: str,
+    ) -> pipeline._WindowsDirectoryHandleIdentity:  # noqa: SLF001
+        nonlocal identity_calls
+        identity_calls += 1
+        observed = original_identity(handle, context=context)
+        if identity_calls == drift_call:
+            changed_id = bytes([observed.file_id[0] ^ 0xFF, *observed.file_id[1:]])
+            return replace(observed, file_id=changed_id)
+        return observed
+
+    monkeypatch.setattr(
+        pipeline,
+        "_windows_directory_handle_identity",
+        drifting_identity,
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="identity changed while locked",
+    ):
+        pipeline._remove_exact_empty_windows_directory(  # noqa: SLF001
+            sentinel,
+            context="synthetic GCM sentinel",
+        )
+
+    assert identity_calls == 3
+    assert sentinel.is_dir()
+
+
+def test_runtime_scratch_verifier_does_not_allowlist_empty_gcm_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    runtime_root = (
+        project
+        / "artifacts"
+        / "trust_sentinel"
+        / f".ood_external_v2_1.runtime-{'c' * 64}"
+    )
+    _runtime_scratch_layout(runtime_root)
+    (
+        runtime_root
+        / "temp"
+        / pipeline.GCM_SYSTEM_COMMANDLINE_SENTINEL_DIRECTORY_NAME
+    ).mkdir()
+    monkeypatch.setattr(sys, "pycache_prefix", os.fspath(runtime_root / "pycache"))
+    monkeypatch.setattr(os, "environ", _runtime_scratch_environment(runtime_root))
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="runtime role is unavailable or non-empty",
+    ):
+        pipeline._verify_runtime_scratch_empty(project)  # noqa: SLF001
 
 
 def _module_audit_main(
@@ -3492,18 +4021,21 @@ def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim
     marker_payload = json.loads(marker.read_bytes())
     assert marker_payload["consumption_ordinal"] == 1
     assert marker_payload["maximum_consumptions"] == 1
-    assert marker_payload["authorization_id"] == "x5_inventory_build_attempt_1"
+    assert marker_payload["authorization_id"] == "x6_inventory_build_attempt_1"
     assert marker_payload["schema_version"] == 2
     assert marker_payload["superseded_authorization_id"] == (
-        "x4_inventory_build_attempt_1"
+        "x5_inventory_build_attempt_1"
     )
     assert marker_payload["superseded_authorization_consumed"] is False
     assert marker_payload["superseded_authorization_path"] == (
-        pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
+        pipeline.HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH
     )
     assert marker_payload["superseded_authorization_state"] == "RETIRED_UNCONSUMED"
     assert not (
         root / pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
+    ).exists()
+    assert not (
+        root / pipeline.HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH
     ).exists()
     assert (
         marker_payload["external_one_shot_claim_consumed_at_marker_creation"]
@@ -3533,9 +4065,18 @@ def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim
         )
 
 
-def test_inventory_builder_authorization_rejects_retired_x4_marker(
+@pytest.mark.parametrize(
+    ("historical_path", "label"),
+    [
+        (pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH, "X4"),
+        (pipeline.HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH, "X5"),
+    ],
+)
+def test_inventory_builder_authorization_rejects_retired_marker(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    historical_path: str,
+    label: str,
 ) -> None:
     root = tmp_path / "project"
     marker_parent = root / "artifacts" / "trust_sentinel"
@@ -3552,9 +4093,7 @@ def test_inventory_builder_authorization_rejects_retired_x4_marker(
         seven_zip_tool_binding=cast(Any, object()),
         inventory_counts=cast(Any, object()),
     )
-    historical_marker = (
-        root / pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
-    )
+    historical_marker = root / historical_path
     historical_marker.write_bytes(b"{}\n")
     monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
     monkeypatch.setattr(
@@ -3570,7 +4109,7 @@ def test_inventory_builder_authorization_rejects_retired_x4_marker(
 
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
-        match="retired X4 inventory builder authorization is unavailable",
+        match=rf"retired {label} inventory builder authorization is unavailable",
     ):
         pipeline.consume_inventory_builder_authorization(
             preflight,

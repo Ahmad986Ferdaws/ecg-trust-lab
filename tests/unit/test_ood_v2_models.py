@@ -295,7 +295,7 @@ def test_constants_match_authoritative_frozen_parent() -> None:
     assert OOD_V2_ARTIFACT_TYPE == "ecg_trust.ood_external_v2_1_result"
     assert OOD_V2_RESULT_FILENAME == "ood-external-v2-1-result.json"
     assert OOD_V2_PARENT_CONFIG_SHA256 == (
-        "sha256:d4c3145985219fd65c9a5a4800773427cecd1f099b9e7ab75958596b7a995c61"
+        "sha256:5457ef7e773825523446d15e4f9f688f7c7006364c7843cd2d624dc2514fe11a"
     )
     parent_bytes = Path(
         "configs/trust_sentinel_ood_external_v2_1.yaml"
