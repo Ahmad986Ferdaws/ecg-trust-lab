@@ -1130,6 +1130,9 @@ def test_real_launcher_help_reexecutes_isolated_and_leaves_no_runtime_root(
 
     assert completed.returncode == 0, completed.stderr
     assert "usage:" in completed.stdout
+    if script_name == "freeze_trust_sentinel_ood_external_v2.py":
+        assert "X10 child-freeze controls" in completed.stdout
+        assert "X9" not in completed.stdout
     after = {path.name for path in runtime_parent.glob(".ood_external_v2_1.runtime-*")}
     assert after == before
 
@@ -1290,7 +1293,7 @@ def test_child_freeze_preflight_only_is_repeatable_and_canonical(
         "output_state": "NONE",
         "retry_authorized": True,
         "stage": "closing_control_state",
-        "stage_ordinal": 5,
+        "stage_ordinal": 6,
         "stage_scope": "PREFLIGHT",
         "status": "OOD_EXTERNAL_V2_CHILD_PREFLIGHT_VERIFIED",
     }
@@ -1298,16 +1301,21 @@ def test_child_freeze_preflight_only_is_repeatable_and_canonical(
     assert observed["seven_zip_executable"] == Path("7z")
 
 
-def test_child_freeze_preflight_refusal_discloses_only_allowlisted_stage(
+def test_x10_child_freeze_preflight_refusal_before_marker_is_sanitized(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     def refuse(**_: object) -> None:
         raise freeze_cli.ChildFreezePreflightStageError(
-            "x8_inventory_evidence"
+            "decision_and_runtime_bindings"
         ) from RuntimeError(r"secret C:\private\patient-123")
 
     monkeypatch.setattr(freeze_cli, "verify_child_freeze_preflight", refuse)
+    monkeypatch.setattr(
+        freeze_cli,
+        "freeze_external_v2_child_contract",
+        lambda **_: pytest.fail("X10 preflight refusal consumed the authorization marker"),
+    )
 
     assert freeze_cli.main(_freeze_arguments(preflight_only=True)) == 3
     captured = capsys.readouterr()
@@ -1323,10 +1331,60 @@ def test_child_freeze_preflight_refusal_discloses_only_allowlisted_stage(
         "official_source_content_accessed": False,
         "output_state": "PRESENT_UNVERIFIABLE",
         "retry_authorized": False,
-        "stage": "x8_inventory_evidence",
-        "stage_ordinal": 3,
+        "stage": "decision_and_runtime_bindings",
+        "stage_ordinal": 4,
         "stage_scope": "PREFLIGHT",
         "status": "OOD_EXTERNAL_V2_CHILD_PREFLIGHT_REFUSED",
+    }
+    assert "secret" not in captured.err
+    assert "private" not in captured.err
+    assert "patient" not in captured.err
+
+
+def test_x10_child_freeze_post_marker_failure_is_terminal_and_never_retriable(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def freeze(**kwargs: object) -> None:
+        stage_callback = kwargs["stage_callback"]
+        source_witness = kwargs["source_access_witness"]
+        assert callable(stage_callback)
+        assert callable(source_witness)
+        terminal_stage = "decision_and_child_materialization"
+        for stage in freeze_cli.CHILD_FREEZE_ATTEMPT_STAGES:
+            stage_callback(stage)
+            if stage == "raw_source_binding_verification":
+                source_witness()
+            if stage == terminal_stage:
+                break
+        raise freeze_cli.ChildFreezeAttemptError(
+            stage=terminal_stage,
+            reason="STAGE_REFUSED",
+            output_state="NONE",
+            official_source_content_accessed=True,
+            failure_receipt_written=True,
+        ) from RuntimeError(r"secret C:\private\patient-123")
+
+    monkeypatch.setattr(freeze_cli, "freeze_external_v2_child_contract", freeze)
+
+    assert freeze_cli.main(_freeze_arguments()) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.count("\n") == 1
+    assert json.loads(captured.err) == {
+        "authorization_state": "CONSUMED",
+        "child_publication_witnessed": False,
+        "child_visibility_witnessed": False,
+        "cleanup_state": "NOT_REACHED",
+        "failure_reason": "STAGE_REFUSED",
+        "failure_receipt_written": True,
+        "official_source_content_accessed": True,
+        "output_state": "NONE",
+        "retry_authorized": False,
+        "stage": "decision_and_child_materialization",
+        "stage_ordinal": 9,
+        "stage_scope": "ATTEMPT",
+        "status": "OOD_EXTERNAL_V2_CHILD_FREEZE_FAILED",
     }
     assert "secret" not in captured.err
     assert "private" not in captured.err

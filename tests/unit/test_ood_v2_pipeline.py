@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import _thread
 import importlib.util
+import inspect
 import json
 import os
 import shutil
@@ -114,6 +115,27 @@ def _write_required_x9_inventory_lineage(root: Path) -> tuple[Path, Path, Path, 
     x6, x7_marker, x7_receipt = _write_required_historical_inventory_artifacts(root)
     x8_marker = _write_historical_x8_inventory_marker(root)
     return x6, x7_marker, x7_receipt, x8_marker
+
+
+def _write_historical_x9_child_freeze_artifacts(root: Path) -> tuple[Path, Path]:
+    marker = root / pipeline.HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_PATH
+    receipt = root / pipeline.HISTORICAL_X9_CHILD_FREEZE_FAILURE_PATH
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_bytes(
+        pipeline._historical_x9_child_freeze_attempt_bytes()  # noqa: SLF001
+    )
+    receipt.write_bytes(
+        pipeline._historical_x9_child_freeze_failure_bytes()  # noqa: SLF001
+    )
+    return marker, receipt
+
+
+def _write_required_x10_child_freeze_lineage(
+    root: Path,
+) -> tuple[Path, Path, Path, Path, Path, Path]:
+    x6, x7_marker, x7_receipt, x8_marker = _write_required_x9_inventory_lineage(root)
+    x9_marker, x9_receipt = _write_historical_x9_child_freeze_artifacts(root)
+    return x6, x7_marker, x7_receipt, x8_marker, x9_marker, x9_receipt
 
 
 def _inventory_record() -> ExternalInventoryRecord:
@@ -2322,6 +2344,9 @@ def _amendment_git_runner(
     revision_line: str | None = None,
     commit_count: str = "1",
     diff_stdout: str | None = None,
+    current_revision_line: str | None = None,
+    current_commit_count: str = "1",
+    current_diff_stdout: str | None = None,
 ) -> Any:
     third_diff = third_diff_stdout
     if third_diff is None:
@@ -2353,11 +2378,19 @@ def _amendment_git_runner(
             f"M\t{path}\n"
             for path in pipeline.SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS
         )
-    current_diff = diff_stdout
+    eighth_diff = diff_stdout
+    if eighth_diff is None:
+        eighth_diff = "".join(
+            f"M\t{path}\n"
+            for path in pipeline.SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS
+        )
+    current_diff = current_diff_stdout
     if current_diff is None:
         current_diff = "".join(
             f"M\t{path}\n"
-            for path in pipeline.SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS
+            for path in (
+                pipeline.SUCCESSOR_CHILD_FREEZE_DECISION_BINDING_AMENDMENT_MODIFIED_PATHS
+            )
         )
     first_diff = first_diff_stdout
     if first_diff is None:
@@ -2551,23 +2584,48 @@ def _amendment_git_runner(
             "--parents",
             "-n",
             "1",
-            implementation_revision,
+            pipeline.NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         ): revision_line
         or (
-            f"{implementation_revision} "
+            f"{pipeline.NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
             f"{pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
         ),
         (
             "rev-list",
             "--count",
             f"{pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
-            f"{implementation_revision}",
+            f"{pipeline.NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
         ): f"{commit_count}\n",
         (
             "diff",
             "--name-status",
             "--no-renames",
             f"{pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+            "--",
+        ): eighth_diff,
+        (
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            implementation_revision,
+        ): current_revision_line
+        or (
+            f"{implementation_revision} "
+            f"{pipeline.NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
+        ),
+        (
+            "rev-list",
+            "--count",
+            f"{pipeline.NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{implementation_revision}",
+        ): f"{current_commit_count}\n",
+        (
+            "diff",
+            "--name-status",
+            "--no-renames",
+            f"{pipeline.NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
             "--",
         ): current_diff,
@@ -2669,6 +2727,14 @@ def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
             ),
             "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
             "revision": pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        },
+        {
+            "context": "ninth frozen successor parent",
+            "expected_file_sha256": (
+                pipeline.NINTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+            ),
+            "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
+            "revision": pipeline.NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         },
     ]
 
@@ -3136,6 +3202,65 @@ def test_successor_amendment_revision_rejects_x8_to_x9_lineage_or_diff_drift(
         )
 
 
+@pytest.mark.parametrize(
+    ("runner_kwargs", "message"),
+    (
+        ({"current_revision_line": f"{'d' * 40} {'e' * 40}\n"}, "sole direct child"),
+        ({"current_commit_count": "2"}, "sole direct child"),
+        ({"current_diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
+        (
+            {
+                "current_diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in (
+                        pipeline.SUCCESSOR_CHILD_FREEZE_DECISION_BINDING_AMENDMENT_MODIFIED_PATHS[
+                            :-1
+                        ]
+                    )
+                )
+            },
+            "paths differ",
+        ),
+        (
+            {
+                "current_diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in (
+                        pipeline.SUCCESSOR_CHILD_FREEZE_DECISION_BINDING_AMENDMENT_MODIFIED_PATHS
+                    )
+                )
+                + "M\textra.txt\n"
+            },
+            "paths differ",
+        ),
+        ({"current_diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
+    ),
+)
+def test_successor_amendment_revision_rejects_x9_to_x10_lineage_or_diff_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runner_kwargs: dict[str, str],
+    message: str,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        _amendment_git_runner(revision, **runner_kwargs),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(pipeline.OODExternalV2IntegrityError, match=message):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
 def test_successor_amendment_revision_rejects_old_parent_blob_drift(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -3353,6 +3478,35 @@ def test_successor_amendment_revision_rejects_x8_parent_blob_drift(
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
         match="X8 parent blob differs",
+    ):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+def test_successor_amendment_revision_rejects_x9_parent_blob_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(pipeline, "_run_git", _amendment_git_runner(revision))
+
+    def reject_ninth_parent(
+        _root: Path,
+        **kwargs: object,
+    ) -> None:
+        if kwargs.get("context") == "ninth frozen successor parent":
+            raise pipeline.OODExternalV2IntegrityError("X9 parent blob differs")
+
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        reject_ninth_parent,
+    )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="X9 parent blob differs",
     ):
         pipeline._verify_successor_amendment_revision(  # noqa: SLF001
             tmp_path,
@@ -4897,8 +5051,8 @@ def test_child_attempt_verification_binds_historical_x8_and_x9_without_x8_prefli
         ),
         output_root=pipeline.SUCCESSOR_OUTPUT_PATH,
     )
-    _write_required_x9_inventory_lineage(tmp_path)
-    x9_attempt_body = pipeline._child_freeze_attempt_body_from_identity(  # noqa: SLF001
+    _write_required_x10_child_freeze_lineage(tmp_path)
+    x10_attempt_body = pipeline._child_freeze_attempt_body_from_identity(  # noqa: SLF001
         parent_config_file_sha256=parent.file_sha256,
         implementation_revision=child.implementation_revision,
         project_source_tree_sha256=child.project_source_tree.tree_sha256,
@@ -4911,15 +5065,15 @@ def test_child_attempt_verification_binds_historical_x8_and_x9_without_x8_prefli
         frozen_at_utc=child.frozen_at_utc,
         counts=(1_000, 12_328, 10_350, 13_328),
     )
-    x9_marker_bytes = pipeline.canonical_json_bytes(x9_attempt_body)
-    x9_marker = tmp_path / pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
-    x9_marker.write_bytes(x9_marker_bytes)
+    x10_marker_bytes = pipeline.canonical_json_bytes(x10_attempt_body)
+    x10_marker = tmp_path / pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+    x10_marker.write_bytes(x10_marker_bytes)
     child = replace(
         child,
         child_freeze_attempt=pipeline.BoundFile(
             relative_path=pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
-            file_sha256=sha256_bytes(x9_marker_bytes),
-            artifact_sha256=cast(str, x9_attempt_body["artifact_sha256"]),
+            file_sha256=sha256_bytes(x10_marker_bytes),
+            artifact_sha256=cast(str, x10_attempt_body["artifact_sha256"]),
         ),
     )
 
@@ -4992,7 +5146,7 @@ def test_child_attempt_verification_binds_historical_x8_and_x9_without_x8_prefli
     for changed_parent_value, changed_child_value in identity_mutations:
         with pytest.raises(
             pipeline.OODExternalV2IntegrityError,
-            match="X9 child freeze attempt marker differs",
+            match="X10 child freeze attempt marker differs",
         ):
             pipeline._verify_child_inventory_builder_attempt(  # noqa: SLF001
                 changed_parent_value,
@@ -5092,7 +5246,7 @@ def test_inventory_builder_marker_visibility_blocks_retry_after_directory_fsync_
         )
 
 
-def _x9_child_freeze_preflight(root: Path) -> pipeline.ChildFreezePreflight:
+def _x10_child_freeze_preflight(root: Path) -> pipeline.ChildFreezePreflight:
     (root / "artifacts" / "trust_sentinel").mkdir(parents=True, exist_ok=True)
     (root / "configs").mkdir(parents=True, exist_ok=True)
     parent = pipeline.load_parent_config(PARENT_PATH)
@@ -5116,6 +5270,21 @@ def _x9_child_freeze_preflight(root: Path) -> pipeline.ChildFreezePreflight:
         implementation_revision="a" * 40,
         project_source_tree=project_tree,
         runtime_environment=cast(Any, runtime),
+        decision_bindings={
+            "demo_policy": pipeline.BoundFile(
+                relative_path=pipeline.EXPECTED_DEMO_POLICY_PATH,
+                file_sha256=pipeline.EXPECTED_DEMO_POLICY_FILE_SHA256,
+                artifact_sha256=None,
+            ),
+            "source_calibration_result": pipeline.BoundFile(
+                relative_path=pipeline.EXPECTED_SOURCE_CALIBRATION_PATH,
+                file_sha256=pipeline.EXPECTED_SOURCE_CALIBRATION_FILE_SHA256,
+                artifact_sha256=(
+                    pipeline.EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256
+                ),
+            ),
+        },
+        runtime_bindings={},
         frozen_at_utc=datetime(2026, 8, 30, 10, tzinfo=UTC),
         inventory_path=root / pipeline.SUCCESSOR_PRIVATE_INVENTORY_PATH,
         public_projection_path=root / pipeline.SUCCESSOR_PUBLIC_PROJECTION_PATH,
@@ -5184,13 +5353,78 @@ def test_historical_x8_inventory_evidence_requires_exact_marker_and_absent_recei
         pipeline._verify_historical_x8_inventory_builder_evidence(root)  # noqa: SLF001
 
 
-def test_x9_child_freeze_marker_and_failure_receipt_are_canonical_and_sanitized(
+def test_historical_x9_child_freeze_artifacts_reconstruct_exact_bytes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "project"
-    preflight = _x9_child_freeze_preflight(root)
-    _write_required_x9_inventory_lineage(root)
+    _write_required_x10_child_freeze_lineage(root)
+    monkeypatch.setattr(
+        pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+
+    marker = root / pipeline.HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_PATH
+    receipt = root / pipeline.HISTORICAL_X9_CHILD_FREEZE_FAILURE_PATH
+    marker_payload = json.loads(marker.read_bytes())
+    receipt_payload = json.loads(receipt.read_bytes())
+    assert sha256_file(marker) == pipeline.HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_FILE_SHA256
+    assert marker_payload["artifact_sha256"] == (
+        pipeline.HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256
+    )
+    assert marker_payload["project_source_tree_sha256"] == (
+        pipeline.HISTORICAL_X9_CHILD_FREEZE_PROJECT_SOURCE_TREE_SHA256
+    )
+    assert sha256_file(receipt) == pipeline.HISTORICAL_X9_CHILD_FREEZE_FAILURE_FILE_SHA256
+    assert receipt_payload["artifact_sha256"] == (
+        pipeline.HISTORICAL_X9_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256
+    )
+    assert receipt_payload["failure_stage"] == "decision_and_child_materialization"
+    assert receipt_payload["failure_stage_ordinal"] == 9
+    assert receipt_payload["official_source_content_accessed"] is True
+    assert receipt_payload["output_state"] == "NONE"
+    pipeline._verify_historical_x9_child_freeze_artifacts(root)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    "historical_path",
+    (
+        pipeline.HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_PATH,
+        pipeline.HISTORICAL_X9_CHILD_FREEZE_FAILURE_PATH,
+    ),
+)
+@pytest.mark.parametrize("state", ("missing", "tampered"))
+def test_x10_authorization_requires_exact_historical_x9_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    historical_path: str,
+    state: str,
+) -> None:
+    root = tmp_path / "project"
+    _write_required_x10_child_freeze_lineage(root)
+    target = root / historical_path
+    if state == "missing":
+        target.unlink()
+    else:
+        target.write_bytes(b"{}\n")
+    monkeypatch.setattr(
+        pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(pipeline.OODExternalV2IntegrityError):
+        pipeline._verify_historical_x9_child_freeze_artifacts(root)  # noqa: SLF001
+
+
+def test_x10_child_freeze_marker_and_failure_receipt_are_canonical_and_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    preflight = _x10_child_freeze_preflight(root)
+    _write_required_x10_child_freeze_lineage(root)
     monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
     monkeypatch.setattr(
         pipeline,
@@ -5205,10 +5439,22 @@ def test_x9_child_freeze_marker_and_failure_receipt_are_canonical_and_sanitized(
     marker = root / pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
     marker_payload = json.loads(marker.read_bytes())
     assert marker_sha == sha256_file(marker)
-    assert marker_payload["authorization_id"] == "x9_child_freeze_attempt_1"
+    assert marker_payload["authorization_id"] == "x10_child_freeze_attempt_1"
     assert marker_payload["historical_x8_inventory_builder_attempt_file_sha256"] == (
         pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
     )
+    assert marker_payload["historical_x9_authorization_consumed_failed_retained"] is True
+    assert marker_payload["historical_x9_child_freeze_attempt_file_sha256"] == (
+        pipeline.HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_FILE_SHA256
+    )
+    assert marker_payload["historical_x9_child_freeze_failure_receipt_file_sha256"] == (
+        pipeline.HISTORICAL_X9_CHILD_FREEZE_FAILURE_FILE_SHA256
+    )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="X10 child freeze authorization is unavailable",
+    ):
+        pipeline.consume_child_freeze_authorization(preflight, project_root=root)
 
     receipt_sha = pipeline.record_child_freeze_failure(
         preflight,
@@ -5238,13 +5484,13 @@ def test_x9_child_freeze_marker_and_failure_receipt_are_canonical_and_sanitized(
     }.intersection(payload)
 
 
-def test_x9_failure_receipt_binds_preflight_parent_identity(
+def test_x10_failure_receipt_binds_preflight_parent_identity(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "project"
-    preflight = _x9_child_freeze_preflight(root)
-    _write_required_x9_inventory_lineage(root)
+    preflight = _x10_child_freeze_preflight(root)
+    _write_required_x10_child_freeze_lineage(root)
     monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
     monkeypatch.setattr(
         pipeline,
@@ -5277,13 +5523,13 @@ def test_x9_failure_receipt_binds_preflight_parent_identity(
     assert not (root / pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH).exists()
 
 
-def test_x9_failure_receipt_witnesses_visibility_before_durability_failure(
+def test_x10_failure_receipt_witnesses_visibility_before_durability_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "project"
-    preflight = _x9_child_freeze_preflight(root)
-    _write_required_x9_inventory_lineage(root)
+    preflight = _x10_child_freeze_preflight(root)
+    _write_required_x10_child_freeze_lineage(root)
     monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
     monkeypatch.setattr(
         pipeline,
@@ -5317,12 +5563,12 @@ def test_x9_failure_receipt_witnesses_visibility_before_durability_failure(
     assert events == ["visible"]
 
 
-def test_x9_source_access_remains_false_before_raw_source_verification(
+def test_x10_source_access_remains_false_before_raw_source_verification(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "project"
-    preflight = _x9_child_freeze_preflight(root)
+    preflight = _x10_child_freeze_preflight(root)
     monkeypatch.setattr(
         pipeline,
         "_verify_historical_x8_inventory_builder_evidence",
@@ -5336,7 +5582,7 @@ def test_x9_source_access_remains_false_before_raw_source_verification(
     accessed: list[str] = []
 
     with pytest.raises(pipeline.OODExternalV2IntegrityError):
-        pipeline._freeze_external_v2_child_contract_after_x9_authorization(  # noqa: SLF001
+        pipeline._freeze_external_v2_child_contract_after_x10_authorization(  # noqa: SLF001
             preflight=preflight,
             stage_callback=None,
             source_access_witness=lambda: accessed.append("accessed"),
@@ -5348,7 +5594,7 @@ def test_x9_source_access_remains_false_before_raw_source_verification(
     assert accessed == []
 
 
-def test_x9_raw_source_access_witness_is_deduplicated_across_ordered_bindings(
+def test_x10_raw_source_access_witness_is_deduplicated_across_ordered_bindings(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -5432,12 +5678,12 @@ def test_md5_source_access_witness_requires_one_successful_read(
     assert accessed == expected_accessed
 
 
-def test_x9_raced_exact_destination_is_preexisting_and_visible_receipt_is_reported(
+def test_x10_raced_exact_destination_is_preexisting_and_visible_receipt_is_reported(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "project"
-    preflight = _x9_child_freeze_preflight(root)
+    preflight = _x10_child_freeze_preflight(root)
     monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
     monkeypatch.setattr(
         pipeline,
@@ -5488,7 +5734,7 @@ def test_x9_raced_exact_destination_is_preexisting_and_visible_receipt_is_report
     monkeypatch.setattr(pipeline, "consume_child_freeze_authorization", consume)
     monkeypatch.setattr(
         pipeline,
-        "_freeze_external_v2_child_contract_after_x9_authorization",
+        "_freeze_external_v2_child_contract_after_x10_authorization",
         race_destination,
     )
     monkeypatch.setattr(
@@ -5521,12 +5767,12 @@ def test_x9_raced_exact_destination_is_preexisting_and_visible_receipt_is_report
     assert observed_receipt["reason"] == "DESTINATION_PREEXISTED"
 
 
-def test_x9_freeze_wraps_post_marker_baseexception_with_exact_stage_and_receipt(
+def test_x10_freeze_wraps_post_marker_baseexception_with_exact_stage_and_receipt(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "project"
-    preflight = _x9_child_freeze_preflight(root)
+    preflight = _x10_child_freeze_preflight(root)
     observed_receipt: dict[str, object] = {}
     observed_stages: list[str] = []
     monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
@@ -5577,7 +5823,7 @@ def test_x9_freeze_wraps_post_marker_baseexception_with_exact_stage_and_receipt(
     monkeypatch.setattr(pipeline, "consume_child_freeze_authorization", consume)
     monkeypatch.setattr(
         pipeline,
-        "_freeze_external_v2_child_contract_after_x9_authorization",
+        "_freeze_external_v2_child_contract_after_x10_authorization",
         fail_after_source_access,
     )
     monkeypatch.setattr(pipeline, "record_child_freeze_failure", record)
@@ -5618,6 +5864,197 @@ def test_x9_freeze_wraps_post_marker_baseexception_with_exact_stage_and_receipt(
         "official_source_content_accessed": True,
         "output_state": "NONE",
     }
+
+
+def _valid_nested_child_contract_body() -> dict[str, object]:
+    def closure(dataset: str, archive_format: str, archive_file_count: int) -> dict[str, object]:
+        return {
+            "archive_bytes_total": 1,
+            "archive_file_count": archive_file_count,
+            "archive_format": archive_format,
+            "closure_sha256": "sha256:" + "6" * 64,
+            "dataset": dataset,
+            "member_bytes_total": 1,
+            "member_count": 1,
+            "member_role_counts": {
+                role: 0 for role in pipeline._ARCHIVE_MEMBER_ROLES  # noqa: SLF001
+            },
+            "tool_binding": None,
+        }
+
+    return {
+        "artifact_type": pipeline.CHILD_CONTRACT_ARTIFACT_TYPE,
+        "child_freeze_attempt": {
+            "artifact_sha256": "sha256:" + "4" * 64,
+            "file_sha256": "sha256:" + "5" * 64,
+            "relative_path": pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+        },
+        "dataset_roots": dict(pipeline.EXPECTED_DATASET_ROOTS),
+        "decision_bindings": {
+            "demo_policy": {
+                "file_sha256": pipeline.EXPECTED_DEMO_POLICY_FILE_SHA256,
+                "relative_path": pipeline.EXPECTED_DEMO_POLICY_PATH,
+            },
+            "source_calibration_result": {
+                "artifact_sha256": (
+                    pipeline.EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256
+                ),
+                "file_sha256": pipeline.EXPECTED_SOURCE_CALIBRATION_FILE_SHA256,
+                "relative_path": pipeline.EXPECTED_SOURCE_CALIBRATION_PATH,
+            },
+        },
+        "frozen_at_utc": "2026-08-30T11:00:00Z",
+        "implementation_revision": "a" * 40,
+        "inventory": {
+            "archive_closures": [
+                closure(CHALLENGE_2011_DATASET, "tar_gzip", 1),
+                closure(ZZU_PEDIATRIC_DATASET, "split_zip_7zip", 2),
+            ],
+            "challenge_records": 1_000,
+            "file_sha256": pipeline.HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256,
+            "inventory_sha256": (
+                pipeline.HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256
+            ),
+            "relative_path": pipeline.SUCCESSOR_PRIVATE_INVENTORY_PATH,
+            "selected_records_total": 13_328,
+            "zzu_patients": 10_350,
+            "zzu_records": 12_328,
+        },
+        "inventory_builder_attempt": {
+            "artifact_sha256": (
+                pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+            ),
+            "file_sha256": (
+                pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+            ),
+            "relative_path": pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH,
+        },
+        "output_root": pipeline.SUCCESSOR_OUTPUT_PATH,
+        "parent_config_file_sha256": "sha256:" + "b" * 64,
+        "project_source_tree": {},
+        "protocol_id": pipeline.PROTOCOL_ID,
+        "public_inventory_projection": {
+            "artifact_sha256": pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256,
+            "file_sha256": pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256,
+            "relative_path": pipeline.SUCCESSOR_PUBLIC_PROJECTION_PATH,
+        },
+        "raw_source_bindings": {
+            name: {
+                "file_sha256": "sha256:" + "7" * 64,
+                "official_md5": None,
+                "relative_path": relative_path,
+                "size_bytes": 1,
+            }
+            for name, relative_path in pipeline.EXPECTED_RAW_SOURCE_PATHS.items()
+        },
+        "runtime_bindings": {
+            relative_path: "sha256:" + "8" * 64
+            for relative_path in pipeline.REQUIRED_RUNTIME_BINDING_PATHS
+        },
+        "runtime_environment": {},
+        "schema_version": 1,
+    }
+
+
+def test_real_decision_files_use_exact_demo_file_hash_and_source_self_hash() -> None:
+    bindings = pipeline._verify_child_freeze_decision_bindings(PROJECT_ROOT)  # noqa: SLF001
+
+    assert bindings["demo_policy"] == pipeline.BoundFile(
+        relative_path=pipeline.EXPECTED_DEMO_POLICY_PATH,
+        file_sha256=pipeline.EXPECTED_DEMO_POLICY_FILE_SHA256,
+        artifact_sha256=None,
+    )
+    assert bindings["source_calibration_result"] == pipeline.BoundFile(
+        relative_path=pipeline.EXPECTED_SOURCE_CALIBRATION_PATH,
+        file_sha256=pipeline.EXPECTED_SOURCE_CALIBRATION_FILE_SHA256,
+        artifact_sha256=pipeline.EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256,
+    )
+
+
+def test_full_child_decoder_rejects_success_manifest_hash_in_demo_policy() -> None:
+    body = _valid_nested_child_contract_body()
+    decisions = cast(dict[str, Any], body["decision_bindings"])
+    cast(dict[str, object], decisions["demo_policy"])["artifact_sha256"] = (
+        "sha256:6f97e0697d661372e62f4aee9245f26014312e6a1d681615314bc9fcb77c5732"
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2ConfigError,
+        match="without a logical artifact hash",
+    ):
+        pipeline._load_child_contract_bytes(  # noqa: SLF001
+            pipeline.child_contract_bytes(body),
+            source="child.json",
+        )
+
+
+def test_full_child_decoder_requires_exact_source_calibration_self_hash() -> None:
+    body = _valid_nested_child_contract_body()
+    decisions = cast(dict[str, Any], body["decision_bindings"])
+    cast(dict[str, object], decisions["source_calibration_result"])[
+        "artifact_sha256"
+    ] = "sha256:" + "9" * 64
+
+    with pytest.raises(
+        pipeline.OODExternalV2ConfigError,
+        match="exact frozen components",
+    ):
+        pipeline._load_child_contract_bytes(  # noqa: SLF001
+            pipeline.child_contract_bytes(body),
+            source="child.json",
+        )
+
+
+def test_full_nested_child_bytes_round_trip_before_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_tree = SimpleNamespace(tree_sha256="sha256:" + "a" * 64)
+    runtime = SimpleNamespace(python_environment_sha256="sha256:" + "b" * 64)
+    monkeypatch.setattr(
+        pipeline,
+        "_project_source_tree_binding",
+        lambda *_args, **_kwargs: project_tree,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_runtime_environment_binding",
+        lambda *_args, **_kwargs: runtime,
+    )
+    raw = pipeline.child_contract_bytes(_valid_nested_child_contract_body())
+
+    child = pipeline._load_child_contract_bytes(raw, source="child.json")  # noqa: SLF001
+
+    assert child.file_sha256 == sha256_bytes(raw)
+    assert child.decision_bindings["demo_policy"].artifact_sha256 is None
+    assert child.decision_bindings["source_calibration_result"].artifact_sha256 == (
+        pipeline.EXPECTED_SOURCE_CALIBRATION_ARTIFACT_SHA256
+    )
+
+
+def test_child_freeze_validates_full_nested_bytes_before_publication() -> None:
+    source = inspect.getsource(
+        pipeline._freeze_external_v2_child_contract_after_x10_authorization  # noqa: SLF001
+    )
+
+    assert source.index("_load_child_contract_bytes(child_bytes") < source.index(
+        "_atomic_write_new("
+    )
+
+
+def test_decision_binding_preflight_refusal_cannot_create_x10_marker(
+    tmp_path: Path,
+) -> None:
+    def refuse() -> None:
+        raise pipeline.OODExternalV2IntegrityError("deterministic decision fault")
+
+    with pytest.raises(pipeline.ChildFreezePreflightStageError) as captured:
+        pipeline._child_freeze_preflight_stage(  # noqa: SLF001
+            "decision_and_runtime_bindings",
+            refuse,
+        )
+
+    assert captured.value.stage == "decision_and_runtime_bindings"
+    assert not (tmp_path / pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH).exists()
 
 
 def _skeletal_child_contract_body() -> dict[str, object]:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze external OOD v2 child metadata (original v2 is hard-refused)."""
+"""Freeze X10 external OOD v2.1 child metadata (original v2 is hard-refused)."""
 
 from __future__ import annotations
 
@@ -47,6 +47,7 @@ _EXPECTED_CHILD_FREEZE_PREFLIGHT_STAGES = (
     "runtime_environment",
     "git_source_provenance",
     "x8_inventory_evidence",
+    "decision_and_runtime_bindings",
     "namespace_and_timestamp",
     "closing_control_state",
 )
@@ -912,7 +913,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--preflight-only",
         action="store_true",
-        help="verify repeatable X9 child-freeze controls without durable writes",
+        help="verify repeatable X10 child-freeze controls without durable writes",
     )
     parser.add_argument(
         "--parent",

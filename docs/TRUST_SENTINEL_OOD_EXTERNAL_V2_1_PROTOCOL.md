@@ -282,7 +282,7 @@ load a trained checkpoint, execute a model or evaluation, create the external
 one-shot claim, or create the successor scientific output root, and none of
 those actions occurred in either invocation.
 
-X9, frozen at `2026-08-30T09:49:39Z`, is the sole direct-child,
+X9, frozen at `2026-08-30T09:49:39Z`, was the sole direct-child,
 child-freeze-only operational amendment. It
 preserves the exact successful X8 marker, private inventory, and public
 projection without rebuilding, rewriting, or issuing another inventory-build
@@ -291,8 +291,9 @@ authorization. It adds one single-use child-freeze authorization,
 `artifacts/trust_sentinel/.ood_external_v2_1.x9-child-freeze-attempt.json` and
 one possible immutable sanitized failure receipt at
 `artifacts/trust_sentinel/.ood_external_v2_1.x9-child-freeze-failure.json`.
-The child continues to bind the exact X8 marker in `inventory_builder_attempt`
-and separately binds the X9 marker in `child_freeze_attempt`.
+The planned X9 child would have continued to bind the exact X8 marker in
+`inventory_builder_attempt` and separately bound the X9 marker in
+`child_freeze_attempt`; no X9 child was created.
 
 All controls that do not require official source-content reverification run
 before the X9 marker and are repeatable only while that marker, its receipt,
@@ -300,8 +301,7 @@ and the child destination remain absent. Marker visibility consumes X9 even if
 its parent-directory durability flush later fails. After visibility, failure,
 receipt-write failure, interruption, or ambiguous child publication cannot
 authorize a retry, resume, overwrite, deletion, or reuse; another attempt
-requires a future frozen amendment and authorization ID. Later evaluation
-requires the exact X9 marker and requires the X9 failure receipt to be absent.
+requires a future frozen amendment and authorization ID.
 The receipt can contain only frozen provenance booleans, one allowlisted stage
 and ordinal, one allowlisted reason, one allowlisted output state, and a logical
 self-hash. Exception class or text, traceback, errno, process output,
@@ -351,6 +351,67 @@ pipeline, and protocol-closure unit tests. It changes no inventory builder or
 inventory implementation, raw/private/public X8 artifact, cohort, selection,
 archive closure, preprocessing rule, model, policy, threshold, endpoint, hard
 gate, or scientific claim.
+
+Frozen X9 revision `06005b87557bb39455cf5fea1f48fb1c0633da9a`, whose
+parent YAML hash is
+`sha256:790251613a94052a88eb9f8598021d9bb3684707cd0a865c74b62dcb76c8417b`,
+consumed its one authorized production child-freeze attempt. The retained X9
+marker has file SHA-256
+`sha256:507eb238000c6a2485e58801d255ae2efae00b828b1ab93ee5a14de4d941b9bb`
+and logical artifact SHA-256
+`sha256:46f1eb12f6dd145ead167a05b4b445353074fea8362961040063fc7b209872a2`.
+The retained failure receipt has file SHA-256
+`sha256:c17e1271c2c799ef4816dcb9c41557f0455054562e1c9cf253b3897b4a75e296`
+and logical artifact SHA-256
+`sha256:eaf06d21140c7f69f251ab4c288920dc7b9f2331939f4cae7c24aca389ab8aa2`.
+It reports `decision_and_child_materialization`, zero-based ordinal 9,
+`STAGE_REFUSED`, official source content accessed, and output state `NONE`.
+Runtime cleanup succeeded. No child, waveform decode, quality-policy execution,
+trained model or checkpoint access, evaluation, metric, external one-shot
+claim, or scientific output was created or observed. Both X9 artifacts are
+permanent ignored/untracked history; X9 cannot be retried, resumed, deleted,
+overwritten, or reused.
+
+The refusal was an operational identity-modeling defect, not a scientific
+result. The legacy demo-policy JSON is exactly the unchanged 1,147-byte file
+with SHA-256
+`sha256:539d9e7dfc84edc49ab285775cdd0f6e93b2f5bb804c6fe7be7d00bc2aff4d42`.
+Its schema has no top-level `artifact_sha256`, so its identity is the exact file
+hash only. X9 incorrectly compared the resulting absent logical field with
+`sha256:6f97e0697d661372e62f4aee9245f26014312e6a1d681615314bc9fcb77c5732`,
+which belongs exclusively to the v1 success manifest. The exact
+source-calibration decision binding passed. Neither decision JSON nor any
+model, policy, threshold, endpoint, cohort, or scientific setting changes.
+
+X10, planned and frozen at `2026-08-30T11:32:47Z`, is the sole direct child of
+X9 revision `06005b87557bb39455cf5fea1f48fb1c0633da9a`. Its temporary parent
+configuration SHA-256 sentinel is
+`sha256:2b6696d07c1fbab1e31eccb3d8d48fdc6251d12301df6ca604b8af1d02b7dd10`.
+This final fingerprint was propagated only after the shared nine-file bytes
+stabilized. X10 preserves the exact X8 inventory and projection and the
+exact X9 marker and receipt without rebuild, rewrite, deletion, or reuse. It
+adds one new single-use authorization, `x10_child_freeze_attempt_1`, at
+`artifacts/trust_sentinel/.ood_external_v2_1.x10-child-freeze-attempt.json`,
+and one possible sanitized failure receipt at
+`artifacts/trust_sentinel/.ood_external_v2_1.x10-child-freeze-failure.json`.
+
+Before the X10 marker, the exact controls-only stages are `parent_lineage`,
+`runtime_environment`, `git_source_provenance`, `x8_inventory_evidence`,
+`decision_and_runtime_bindings`, `namespace_and_timestamp`, and
+`closing_control_state`. This preflight validates the unchanged legacy demo
+policy by path and exact file hash only, the exact source-calibration decision,
+and every runtime binding without reading official source content. After X10
+authorization consumption and source reverification, the complete nested child
+contract bytes must successfully decode and pass semantic validation before
+publication. Later evaluation requires the exact historical X9 marker and
+receipt, the exact X10 marker, and an absent X10 failure receipt.
+
+X10 retains X9's 13 ordered attempt stages, six failure reasons, four output
+states, sanitized receipt schema, visibility/durability distinction, and
+single-use no-retry rule. It changes exactly the same nine tracked paths as X9
+and no others: this YAML, this protocol note, the child-freeze launcher,
+`models.py`, `pipeline.py`, and the model, CLI, pipeline, and protocol-closure
+unit tests. It does not change scientific behavior.
 
 ## Evidence boundary and v1 history
 
@@ -619,14 +680,16 @@ only as a boolean and never permits the X8 authorization to be reused.
 
 The child binds the X6, X7, and X8 inventory-build markers' exact canonical
 paths, file SHA-256 values, and logical self-hashes, plus the X7 failure
-receipt's exact path and physical and logical hashes. It separately binds the
-X9 child-freeze marker as `child_freeze_attempt`; `inventory_builder_attempt`
-continues to bind the exact successful X8 marker. At Y, the verifier validates
-the X8 marker against the frozen X8 revision, configuration, and source-tree
-identities and validates the X9 marker against the X9 parent identities without
-requiring HEAD to return to either revision. It also requires the disclosed
-exact X6 and X7 markers and X7 receipt, requires the X8 and X9 failure-receipt
-paths to remain absent, and rechecks every proof during initial input
+receipt's exact path and physical and logical hashes. It binds the X9
+child-freeze marker and failure receipt as immutable historical failure lineage
+and separately binds the X10 marker as `child_freeze_attempt`;
+`inventory_builder_attempt` continues to bind the exact successful X8 marker.
+At Y, the verifier validates the X8 marker against the frozen X8 revision and
+validates the X9 attempt and receipt and X10 marker against their respective
+parent identities without requiring HEAD to return to those revisions. It also
+requires the disclosed exact X6 and X7 markers and X7 receipt, requires the X8
+and X10 failure-receipt paths to remain absent, requires the X9 receipt to
+remain present and exact, and rechecks every proof during initial input
 verification, immediately before the external claim, after evaluation, and
 during terminal bundle verification.
 
@@ -658,7 +721,7 @@ injected image fails closed.
 
 Every tracked `src/ecg_trust/**/*.py` file and all four inventory/freeze/
 evaluate/verify entrypoints are bound by exact path, size, SHA-256, worktree
-bytes, and X9/Y Git blobs. Git resolves only from the exact direct Windows
+bytes, and X10/Y Git blobs. Git resolves only from the exact direct Windows
 installation root `C:\Program Files\Git`: the `cmd\git.exe` launcher and
 `mingw64\bin\git.exe` binary are derived from that root without `PATH` lookup,
 then their bytes, direct ancestry, and the full `mingw64` runtime tree are
@@ -770,8 +833,8 @@ denominator-integrity gates, not additional inferential endpoints.
 The parent and exact child must be committed and pushed before access. The first
 frozen successor revision `85b55d0...`, tag-amended revision `b5727c4...`,
 private-auth revision `6b6ddfd...`, X4, and X5 form four consecutive sole-parent
-amendments; X6 extends that chain to five, X7 to six, X8 to seven, and X9 to
-eight. The
+amendments; X6 extends that chain to five, X7 to six, X8 to seven, X9 to eight,
+and X10 to nine. The
 first two amendments each modify the same seven frozen paths.
 Historical X4 has sole parent `6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6`
 and modifies all and only these eleven existing paths, each with Git status
@@ -873,24 +936,31 @@ these nine existing paths, each with Git status `M`:
 - `tests/unit/test_ood_v2_pipeline.py`; and
 - `tests/unit/test_ood_v2_protocol_closure.py`.
 
-Every historical parent byte and exact diff is independently verified. X9 and
-child-freeze execution revision Y are also consecutive: Y has X9 as its sole
-parent, exactly one commit lies in `X9..Y`, and that commit adds only the
+X10 has exact sole parent `06005b87557bb39455cf5fea1f48fb1c0633da9a`,
+whose parent YAML hash is
+`sha256:790251613a94052a88eb9f8598021d9bb3684707cd0a865c74b62dcb76c8417b`
+and whose parent was frozen at `2026-08-30T09:49:39Z`. It modifies all and only
+the same nine existing paths listed for X9, each with Git status `M`.
+
+Every historical parent byte and exact diff is independently verified. X10 and
+child-freeze execution revision Y are also consecutive: Y has X10 as its sole
+parent, exactly one commit lies in `X10..Y`, and that commit adds only the
 tracked child plus its aggregate public inventory projection. The private
-inventory and durable X6, X7, and X8 inventory-build markers and X9 child-freeze
-marker remain ignored and untracked; the exact X7 failure receipt remains
-present, the X8 and X9 failure receipts must be absent on success, and the
-retired X4 and X5 markers remain absent.
+inventory and durable X6, X7, and X8 inventory-build markers, the X9 child-
+freeze marker and failure receipt, and the X10 child-freeze marker remain
+ignored and untracked; the exact X7 and X9 failure receipts remain present, the
+X8 and X10 failure receipts must be absent on success, and the retired X4 and
+X5 markers remain absent.
 The only Git remote is `origin`, its fetch and push URL are exactly
 `https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git`, and
-`refs/remotes/origin/main` must equal X9 at child freeze and Y immediately
+`refs/remotes/origin/main` must equal X10 at child freeze and Y immediately
 before the claim and after evaluation. A live `git ls-remote --symref` against
 the exact HTTPS URL—not a symbolic local remote—must return exactly the HEAD
 symref, HEAD and `refs/heads/main` at that revision, plus the required pinned
 `private-evidence-backup-v1-2026-08-29` tag at
 `a88ef86e8e0b28dd6f162cda88e16b4159d195d8`. Every other advertised ref is
 forbidden. The tag must remain a lightweight direct-commit ref with no peeled
-line; its local object must be a commit and an ancestor of the current X9 or Y,
+line; its local object must be a commit and an ancestor of the current X10 or Y,
 so it adds no protected-history reachability beyond `main`. The local tracking
 ref alone is not accepted as proof of push. Because the repository is private,
 the authenticated query uses only the frozen noninteractive GCM/WinCred
@@ -912,9 +982,10 @@ boundaries, `git log --full-history --all --reflog --format=%H -- <exact protect
 pathspecs>` must return empty output for the entire external raw-data tree,
 both protocols' complete private-preflight trees, both output/claim namespaces,
 the retired X4 and X5, retained X6 and X7 artifacts, the successful X8
-inventory-build marker and X8 failure-receipt path, the current X9 child-freeze
-marker and failure-receipt paths, all retained staging namespaces, and the
-isolated runtime-root namespace. This
+inventory-build marker and X8 failure-receipt path, the retained X9 child-
+freeze marker and receipt, the current X10 child-freeze marker and failure-
+receipt paths, all retained staging namespaces, and the isolated runtime-root
+namespace. This
 proves absence of those protected pathnames from local reachable refs and
 reflogs. It does not—and Git cannot—prove the content absence of unreachable
 objects that are not named by those refs/reflogs; no stronger repository-wide
@@ -929,13 +1000,15 @@ its exact marker, inventory, and projection are retained without rebuild or
 mutation. Success or a sanitized immutable failure receipt terminates any
 inventory-build authorization, and receipt write failure also leaves it
 consumed. Any further build requires a future frozen amendment and new
-authorization ID. X9 authorizes only one child-freeze attempt using those exact
-X8 outputs; it authorizes neither an inventory rebuild nor the external
-waveform claim. Once the X9 marker becomes visible, success, failure, or failure
-to write its sanitized receipt permanently terminates the authorization. Any
-retry requires a new frozen amendment and authorization ID. The X4 and X5
-authorizations were never consumed and are permanently retired; no retired or
-consumed authorization may substitute for X6, X7, X8, or X9.
+authorization ID. X9 authorized only one child-freeze attempt using those exact
+X8 outputs; its retained marker and receipt prove that attempt consumed-failed,
+and X9 authorizes neither a retry nor the external waveform claim. X10 alone
+authorizes one fresh child-freeze attempt without an inventory rebuild. Once
+the X10 marker becomes visible, success, failure, or failure to write its
+sanitized receipt permanently terminates X10. Any further attempt requires a
+new frozen amendment and authorization ID. The X4 and X5 authorizations were
+never consumed and are permanently retired; no retired or consumed
+authorization may substitute for X6, X7, X8, X9, or X10.
 
 The implementation durably creates the armed marker, including parent-
 directory persistence, and only then atomically creates the permanent adjacent
