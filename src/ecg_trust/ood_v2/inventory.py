@@ -22,7 +22,7 @@ import tarfile
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -72,6 +72,15 @@ InventoryExclusionReason = Literal[
     "lead_count_not_12",
     "noncanonical_lead_set",
 ]
+_ZZUArchiveClosureStage = Literal[
+    "zzu_tool_resolution",
+    "zzu_archive_listing",
+    "zzu_archive_test",
+    "zzu_evaluated_tree_snapshot",
+    "zzu_isolated_extraction",
+    "zzu_archive_comparison",
+]
+_ZZUArchiveClosureStageCallback = Callable[[_ZZUArchiveClosureStage], None]
 _QUALITY_LABELS: tuple[ChallengeQualityLabel, ...] = (
     "acceptable",
     "unacceptable",
@@ -2133,9 +2142,14 @@ def build_zzu_split_zip_extraction_closure(
     expected_required_relative_paths: Sequence[str],
     archive_root_prefix: str = "Child_ecg",
     runner: _SevenZipRunner = _run_seven_zip,
+    stage_callback: _ZZUArchiveClosureStageCallback | None = None,
 ) -> ArchiveExtractionClosure:
     """Test, isolate-extract, and SHA-close every ZZU split-ZIP member."""
 
+    if stage_callback is not None and not callable(stage_callback):
+        raise TypeError("stage_callback must be callable or None")
+    if stage_callback is not None:
+        stage_callback("zzu_tool_resolution")
     _assert_direct_ancestry(archive_z01_path, field="ZZU .z01 archive part")
     _assert_direct_ancestry(archive_zip_path, field="ZZU .zip archive part")
     _assert_direct_ancestry(extraction_root, field="ZZU extraction root")
@@ -2157,6 +2171,8 @@ def build_zzu_split_zip_extraction_closure(
     zip_before = _stable_file_snapshot(archive_zip_path, field="ZZU .zip archive part")
     tool = _resolve_seven_zip_tool(seven_zip_executable, runner=runner)
 
+    if stage_callback is not None:
+        stage_callback("zzu_archive_listing")
     listing_text = runner(
         tool.executable,
         ("l", "-slt", "-sccUTF-8", os.fspath(archive_zip_path)),
@@ -2180,6 +2196,8 @@ def build_zzu_split_zip_extraction_closure(
             listed_files[member.path] = member
             mapped_files[relative] = member
 
+    if stage_callback is not None:
+        stage_callback("zzu_archive_test")
     test_output = runner(
         tool.executable,
         ("t", "-bd", "-bb0", "-sccUTF-8", os.fspath(archive_zip_path)),
@@ -2195,8 +2213,12 @@ def build_zzu_split_zip_extraction_closure(
     ):
         raise ExternalInventoryError("ZZU split archive changed before isolated extraction")
 
+    if stage_callback is not None:
+        stage_callback("zzu_evaluated_tree_snapshot")
     evaluated = _snapshot_extraction_tree(extraction_root)
     isolated_snapshots: Mapping[str, _FileSnapshot]
+    if stage_callback is not None:
+        stage_callback("zzu_isolated_extraction")
     with tempfile.TemporaryDirectory(prefix="ecg-trust-zzu-closure-") as raw_temp:
         temporary_root = Path(raw_temp).resolve(strict=True)
         _assert_direct_ancestry(temporary_root, field="isolated extraction root")
@@ -2230,6 +2252,8 @@ def build_zzu_split_zip_extraction_closure(
             )
         isolated_snapshots = MappingProxyType(dict(isolated.files))
 
+    if stage_callback is not None:
+        stage_callback("zzu_archive_comparison")
     _validate_archive_and_extraction_sets(
         archive_file_paths=set(mapped_files),
         archive_directory_paths=mapped_directories,
@@ -2295,6 +2319,7 @@ def verify_zzu_split_zip_extraction_closure(
     closure: ArchiveExtractionClosure,
     *,
     runner: _SevenZipRunner = _run_seven_zip,
+    stage_callback: _ZZUArchiveClosureStageCallback | None = None,
 ) -> str:
     """Rebuild and exactly compare a frozen ZZU archive/tool closure."""
 
@@ -2310,6 +2335,7 @@ def verify_zzu_split_zip_extraction_closure(
         ),
         archive_root_prefix=closure.archive_root_prefix,
         runner=runner,
+        stage_callback=stage_callback,
     )
     if rebuilt != closure:
         raise ExternalInventoryError("ZZU archive closure no longer matches")

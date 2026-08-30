@@ -931,6 +931,129 @@ def test_zzu_split_zip_closure_binds_tool_crc_sha_and_round_trips(tmp_path: Path
         verify_seven_zip_tool_binding(executable, closure.tool_binding, runner=runner)
 
 
+def test_zzu_split_zip_closure_stage_callback_is_exact_and_result_neutral(
+    tmp_path: Path,
+) -> None:
+    z01, zip_path, root, executable, required, runner = _zzu_closure_fixture(tmp_path)
+    baseline = build_zzu_split_zip_extraction_closure(
+        z01,
+        zip_path,
+        root,
+        executable,
+        expected_required_relative_paths=required,
+        runner=runner,
+    )
+    observed: list[str] = []
+
+    staged = build_zzu_split_zip_extraction_closure(
+        z01,
+        zip_path,
+        root,
+        executable,
+        expected_required_relative_paths=required,
+        runner=runner,
+        stage_callback=observed.append,
+    )
+
+    assert staged == baseline
+    assert observed == [
+        "zzu_tool_resolution",
+        "zzu_archive_listing",
+        "zzu_archive_test",
+        "zzu_evaluated_tree_snapshot",
+        "zzu_isolated_extraction",
+        "zzu_archive_comparison",
+    ]
+    verification_observed: list[str] = []
+    assert verify_zzu_split_zip_extraction_closure(
+        z01,
+        zip_path,
+        root,
+        executable,
+        baseline,
+        runner=runner,
+        stage_callback=verification_observed.append,
+    ) == baseline.closure_sha256
+    assert verification_observed == observed
+
+
+def test_zzu_split_zip_closure_stage_callback_failure_is_not_swallowed(
+    tmp_path: Path,
+) -> None:
+    z01, zip_path, root, executable, required, raw_runner = _zzu_closure_fixture(tmp_path)
+    runner_commands: list[str] = []
+
+    def runner(executable_path: Path, arguments: tuple[str, ...]) -> str:
+        runner_commands.append(arguments[0])
+        return raw_runner(executable_path, arguments)
+
+    failure = RuntimeError("synthetic stage callback failure")
+    observed: list[str] = []
+
+    def stage_callback(stage: str) -> None:
+        observed.append(stage)
+        if stage == "zzu_archive_test":
+            raise failure
+
+    with pytest.raises(RuntimeError) as raised:
+        build_zzu_split_zip_extraction_closure(
+            z01,
+            zip_path,
+            root,
+            executable,
+            expected_required_relative_paths=required,
+            runner=runner,
+            stage_callback=stage_callback,
+        )
+
+    assert raised.value is failure
+    assert observed == [
+        "zzu_tool_resolution",
+        "zzu_archive_listing",
+        "zzu_archive_test",
+    ]
+    assert runner_commands == ["i", "l"]
+
+
+def test_zzu_split_zip_closure_rejects_noncallable_stage_callback(
+    tmp_path: Path,
+) -> None:
+    z01, zip_path, root, executable, required, runner = _zzu_closure_fixture(tmp_path)
+
+    with pytest.raises(TypeError, match="stage_callback must be callable or None"):
+        build_zzu_split_zip_extraction_closure(
+            z01,
+            zip_path,
+            root,
+            executable,
+            expected_required_relative_paths=required,
+            runner=runner,
+            stage_callback=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_zzu_split_zip_closure_attributes_early_precheck_failure(
+    tmp_path: Path,
+) -> None:
+    _, zip_path, root, executable, required, runner = _zzu_closure_fixture(tmp_path)
+    invalid_z01 = tmp_path / "Child_ecg.part"
+    invalid_z01.write_bytes(b"split-part-one")
+    observed: list[str] = []
+
+    with pytest.raises(ExternalInventoryError, match="matching .z01/.zip"):
+        build_zzu_split_zip_extraction_closure(
+            invalid_z01,
+            zip_path,
+            root,
+            executable,
+            expected_required_relative_paths=required,
+            runner=runner,
+            stage_callback=observed.append,
+        )
+
+    assert observed == ["zzu_tool_resolution"]
+
+
 def test_scoop_shim_resolves_and_binds_only_real_tool_identity(tmp_path: Path) -> None:
     real_root = tmp_path / "apps/7zip/current"
     real_root.mkdir(parents=True)

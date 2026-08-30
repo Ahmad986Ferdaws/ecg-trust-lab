@@ -145,6 +145,50 @@ the new unconsumed authorization
 `x6_inventory_build_attempt_1`; it changes no cohort, preprocessing rule,
 model, policy, threshold, endpoint, hard gate, or scientific claim.
 
+Frozen X6 revision `62f18d2ab4a20d8b588e97d8b6f93b95387996ca`, whose
+parent YAML hash is
+`sha256:5457ef7e773825523446d15e4f9f688f7c7006364c7843cd2d624dc2514fe11a`
+and whose parent was frozen at `2026-08-30T04:40:56Z`, first passed the complete
+controls-only preflight. That invocation consumed no authorization, accessed
+no official source content, wrote no protocol artifact, and removed its owned
+runtime root. The production invocation then durably created and consumed the
+retained marker
+`artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json`.
+Its file SHA-256 is
+`sha256:4e3e968a2dc9f0c7f552bc05f8d70ef6afc99d97b5b81a60c2920e064efbe9e8`
+and its logical artifact SHA-256 is
+`sha256:88fb0a119f5c550f352cc2dca6f181567e0dd660449eb0ddd3c6247a7884cf93`.
+The invocation failed after marker consumption and before creation of the
+output parent. It created no private inventory, public projection, child
+contract, armed marker, external one-shot claim, or output. It performed no
+waveform sample decode, quality-policy execution, model inference, embedding,
+distribution score, logit, probability, endpoint, or subgroup metric, and its
+runtime cleanup succeeded.
+
+Bounded post-failure forensic checks are disclosed as operational observations,
+not scientific results: all 10 frozen source size, SHA-256, and declared MD5
+bindings matched; Challenge contained 1,000 records; and ZZU contained 14,190
+candidates, of which 12,328 were selected and 1,862 excluded. No waveform
+sample was decoded. Absence of the output parent narrowed the failure to
+archive closure or a later prewrite in-memory stage, but X6's generic stderr
+made the exact stage unrecoverable. The X6 authorization is therefore
+`CONSUMED_FAILED_RETAINED`; its exact ignored, untracked marker must remain
+present permanently and cannot authorize a retry, resume, or reuse.
+
+X7 is the sole direct-child operational amendment. It requires that exact X6
+marker, adds an ordered stage tracker and an immutable sanitized failure
+receipt, and issues one new authorization, `x7_inventory_build_attempt_1`, at
+`artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-attempt.json`.
+Any post-consumption failure attempts exactly one durable create-new write at
+`artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-failure.json`.
+That ignored, untracked receipt can disclose only frozen provenance and state
+booleans, one allowlisted stage and its ordinal, one allowlisted output state,
+and its logical self-hash; it contains no exception-derived data, timestamp,
+path, external source or record identifier, waveform, or model output. Receipt
+write failure does not restore authorization. X7 permits one consumption only;
+any further attempt requires a future frozen amendment and a new authorization
+ID. This operational amendment changes no scientific decision.
+
 ## Evidence boundary and v1 history
 
 The aggregate v1 source-support result was already known when both external
@@ -328,40 +372,92 @@ conditioned on scratch emptiness.
 
 Before the inventory builder reads any official archive, metadata, header, or
 inventory byte, a metadata-only preflight requires the exact frozen parent,
-clean pushed implementation revision X6, live remote, protected-path history,
+clean pushed implementation revision X7, live remote, protected-path history,
 tracked parent and complete source blobs, isolated runtime/Git identity,
 bound `__main__`, and absent successor claim/output. It also binds the exact
 parent schema, cohort and exclusion-count invariants, canonical dataset and raw
-source paths/keysets, declared raw size/SHA-256/MD5 values, and exact 7-Zip tool.
-After those checks but before the first official source byte, the builder must
-durably create, without overwrite,
-`artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json`.
-That marker authorizes exactly one X6 preclaim inventory build, remains ignored
-and untracked, contains no source identifiers or model output, and is distinct
-from the later waveform one-shot claim. Once consumed it cannot be retried,
-resumed, or reused. The first permitted raw action is to hash every official
-source against the frozen parent. Before reporting success, a postflight
-repeats the preflight and marker proof and strict-reloads the exact canonical
-private inventory and public projection, matching physical and logical hashes
-to the in-memory build.
+source paths/keysets, declared raw size/SHA-256/MD5 values, and exact 7-Zip
+tool. X4 and X5 marker paths must remain absent; the retained X6 marker must
+match its exact canonical bytes, file hash, and logical hash; and the X7 marker,
+X7 failure receipt, and private/public destinations must be absent. After those
+checks but before the first official source byte, the builder must durably
+create, without overwrite,
+`artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-attempt.json`.
+That marker authorizes exactly one fresh X7 preclaim inventory build, remains
+ignored and untracked, contains no source identifiers or model output, and is
+distinct from both the consumed X6 marker and the later waveform one-shot
+claim. The first permitted raw action is again to hash every official source
+against the frozen parent. Before reporting success, a postflight repeats the
+preflight and both marker proofs and strict-reloads the exact canonical private
+inventory and public projection, matching physical and logical hashes to the
+in-memory build.
 
 The same exact argument contract can first be run with `--preflight-only`.
 That repeatable branch validates the runtime, Git, parent, namespace, schema,
-raw-path metadata, 7-Zip binding, all three absent authorization paths, and absent
-private/public destinations, then returns fixed path-free JSON. It never calls
-authorization consumption, official-source hashing, inventory construction,
-writers, or postflight. Production reuses the same shared control function and
-immediately rechecks destination and authorization absence before atomically
-consuming X6. All three X4, X5, and X6 authorization paths must be absent for
-the controls-only branch; its inner report counts as an overall pass only when
-the outer process returns zero and removes the runtime root.
+raw-path metadata, 7-Zip binding, absent X4/X5 markers, the exact retained X6
+marker, absent X7 marker and failure receipt, and absent private/public
+destinations, then returns fixed path-free JSON. It never calls authorization
+consumption, official-source hashing, inventory construction, writers, or
+postflight. Production reuses the same shared control function and immediately
+rechecks every marker and destination condition before atomically consuming
+X7. Its inner report counts as an overall pass only when the outer process
+returns zero and removes the runtime root.
 
-The child binds the marker's exact canonical path, file SHA-256, and logical
-self-hash. At Y, the verifier reconstructs its expected X6 bytes from the
-parent hash, child-bound X6/source/Python/Git identities, and frozen
-source-bound authorization constants without requiring HEAD to return to X6;
-it rechecks those bytes during initial input verification, immediately before
-the external claim, after evaluation, and during terminal bundle verification.
+Beginning with X7 authorization publication, the builder records entry to
+exactly these stages in this order: `authorization_publication`,
+`raw_source_binding_verification`, `expectation_materialization`,
+`challenge_inventory`, `zzu_metadata_parse_and_counts`,
+`zzu_header_selection_and_counts`, `challenge_archive_closure`,
+`zzu_tool_resolution`, `zzu_archive_listing`, `zzu_archive_test`,
+`zzu_evaluated_tree_snapshot`, `zzu_isolated_extraction`,
+`zzu_archive_comparison`, `archive_closure_role_validation`,
+`inventory_assembly_and_reverification`,
+`public_projection_build_and_verify`, `canonical_serialization`,
+`precommit_inventory_reverify`, `output_transaction`,
+`output_reload_and_verify`, and `postflight`. A post-consumption failure writes
+exactly one schema-1 receipt with state `PRECLAIM_INVENTORY_BUILD_FAILED` and
+the zero-based ordinal of the last entered allowlisted stage. Its `output_state`
+is exactly one of `NONE`, `PRIVATE_ONLY`, `PUBLIC_ONLY`, `BOTH`, or
+`UNVERIFIABLE`.
+
+The authorization-publication stage is entered before the create-new marker
+operation. A separate witness turns `official_source_content_accessed` true
+only immediately after the first official source file is successfully opened
+and before its first content read for hashing; publication or open failures
+before that witness therefore remain factually source-free in the immutable
+receipt.
+
+The inventory output transaction creates each missing directory one level at
+a time and durably flushes the directory that owns each new entry. It then
+flushes every exact leaf parent after destination-link publication and
+temporary-entry removal; rollback deletions receive the same durability gate.
+
+The receipt's exact top-level fields are `artifact_type`,
+`authorization_consumed`, `authorization_id`,
+`authorization_marker_artifact_sha256`, `authorization_marker_file_sha256`,
+`contains_external_source_bytes_or_identifiers`,
+`contains_model_outputs_embeddings_or_scores`,
+`external_one_shot_claim_consumed`,
+`failure_requires_new_frozen_amendment_and_authorization_id`, `failure_stage`,
+`failure_stage_ordinal`, `implementation_revision`,
+`official_source_content_accessed`, `output_state`,
+`parent_config_file_sha256`, `protocol_id`,
+`quality_model_score_logit_probability_or_metric_observed`,
+`retry_resume_or_reuse_authorized`, `schema_version`, `state`,
+`waveform_sample_decode_occurred`, and `artifact_sha256`. Canonical serialization
+and the logical self-hash make it immutable. Exception class, message,
+traceback, errno, subprocess output, timestamps, paths, archive/member/file/
+record/patient identifiers, source bytes, waveform observations, and model or
+metric outputs are forbidden. Failure to create the receipt is itself reported
+only as a boolean and never permits the X7 authorization to be reused.
+
+The child binds both markers' exact canonical paths, file SHA-256 values, and
+logical self-hashes. At Y, the verifier reconstructs its expected X7 bytes from
+the parent hash, child-bound X7/source/Python/Git identities, and frozen
+source-bound authorization constants without requiring HEAD to return to X7;
+it also requires the disclosed exact X6 marker and rechecks both proofs during
+initial input verification, immediately before the external claim, after
+evaluation, and during terminal bundle verification.
 
 The child path-neutrally binds every regular file and directory in the full
 resolved CPython 3.12.13 base tree and the full venv `site-packages` tree,
@@ -391,7 +487,7 @@ injected image fails closed.
 
 Every tracked `src/ecg_trust/**/*.py` file and all four inventory/freeze/
 evaluate/verify entrypoints are bound by exact path, size, SHA-256, worktree
-bytes, and X6/Y Git blobs. Git resolves only from the exact direct Windows
+bytes, and X7/Y Git blobs. Git resolves only from the exact direct Windows
 installation root `C:\Program Files\Git`: the `cmd\git.exe` launcher and
 `mingw64\bin\git.exe` binary are derived from that root without `PATH` lookup,
 then their bytes, direct ancestry, and the full `mingw64` runtime tree are
@@ -499,8 +595,8 @@ denominator-integrity gates, not additional inferential endpoints.
 The parent and exact child must be committed and pushed before access. The first
 frozen successor revision `85b55d0...`, tag-amended revision `b5727c4...`,
 private-auth revision `6b6ddfd...`, X4, and X5 form four consecutive sole-parent
-amendments; X6 extends that chain to five. The first two amendments each modify
-the same seven frozen paths.
+amendments; X6 extends that chain to five and X7 extends it to six. The first
+two amendments each modify the same seven frozen paths.
 Historical X4 has sole parent `6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6`
 and modifies all and only these eleven existing paths, each with Git status
 `M`:
@@ -551,15 +647,34 @@ these thirteen existing paths, each with Git status `M`:
 - `tests/unit/test_ood_v2_pipeline.py`; and
 - `tests/unit/test_ood_v2_protocol_closure.py`.
 
-Every historical parent byte and exact diff is independently verified. X6 and
-child-freeze execution revision Y are also consecutive: Y has X6 as its sole
-parent, exactly one commit lies in `X6..Y`, and that commit adds only the
+X7 has exact sole parent `62f18d2ab4a20d8b588e97d8b6f93b95387996ca`,
+whose parent YAML hash is
+`sha256:5457ef7e773825523446d15e4f9f688f7c7006364c7843cd2d624dc2514fe11a`
+and whose parent was frozen at `2026-08-30T04:40:56Z`. It modifies all and only
+these eleven existing paths, each with Git status `M`:
+
+- `configs/trust_sentinel_ood_external_v2_1.yaml`;
+- `docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md`;
+- `scripts/build_trust_sentinel_ood_v2_inventory.py`;
+- `src/ecg_trust/ood_v2/inventory.py`;
+- `src/ecg_trust/ood_v2/models.py`;
+- `src/ecg_trust/ood_v2/pipeline.py`;
+- `tests/unit/test_ood_v2_inventory.py`;
+- `tests/unit/test_ood_v2_inventory_cli.py`;
+- `tests/unit/test_ood_v2_models.py`;
+- `tests/unit/test_ood_v2_pipeline.py`; and
+- `tests/unit/test_ood_v2_protocol_closure.py`.
+
+Every historical parent byte and exact diff is independently verified. X7 and
+child-freeze execution revision Y are also consecutive: Y has X7 as its sole
+parent, exactly one commit lies in `X7..Y`, and that commit adds only the
 tracked child plus its aggregate public inventory projection. The private
-inventory and durable X6 inventory-build marker remain ignored and untracked;
-the retired X4 and X5 markers remain absent.
+inventory and durable X6 and X7 inventory-build markers remain ignored and
+untracked; the X7 failure receipt must be absent on success, and the retired X4
+and X5 markers remain absent.
 The only Git remote is `origin`, its fetch and push URL are exactly
 `https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git`, and
-`refs/remotes/origin/main` must equal X6 at child freeze and Y immediately
+`refs/remotes/origin/main` must equal X7 at child freeze and Y immediately
 before the claim and after evaluation. A live `git ls-remote --symref` against
 the exact HTTPS URL—not a symbolic local remote—must return exactly the HEAD
 symref, HEAD and `refs/heads/main` at that revision, plus the required pinned
@@ -587,20 +702,24 @@ blob equals both the worktree bytes and the frozen SHA-256. At those same
 boundaries, `git log --full-history --all --reflog --format=%H -- <exact protected glob
 pathspecs>` must return empty output for the entire external raw-data tree,
 both protocols' complete private-preflight trees, both output/claim namespaces,
-the retired X4 and X5 plus current X6 inventory-build marker paths, all retained
-staging namespaces, and
+the retired X4 and X5, retained X6, current X7 inventory-build marker, and X7
+failure-receipt paths, all retained staging namespaces, and
 the isolated runtime-root namespace. This
 proves absence of those protected pathnames from local reachable refs and
 reflogs. It does not—and Git cannot—prove the content absence of unreachable
 objects that are not named by those refs/reflogs; no stronger repository-wide
 purge claim is made.
 
-The durable X6 inventory-build authorization is not the external one-shot
-claim: it is consumed before metadata inventory source-byte access and does not
-authorize waveform decoding, quality, model, score, or endpoint access. After
-it is consumed, no X6 inventory retry, resume, or marker reuse is allowed. The
-X4 and X5 authorizations were never consumed and are permanently retired; they
-cannot be revived or substituted for X6.
+Neither durable inventory-build authorization is the external one-shot claim:
+each is consumed before metadata inventory source-byte access and neither
+authorizes waveform decoding, quality, model, score, or endpoint access. X6 is
+consumed-failed and permanently retained; no X6 retry, resume, or marker reuse
+is allowed. X7 authorizes one fresh build only. Once X7 is consumed, success or
+a sanitized immutable failure receipt terminates that authorization; receipt
+write failure also leaves it consumed. Any further build requires a future
+frozen amendment and new authorization ID. The X4 and X5 authorizations were
+never consumed and are permanently retired; they cannot be revived or
+substituted for X6 or X7.
 
 The implementation durably creates the armed marker, including parent-
 directory persistence, and only then atomically creates the permanent adjacent

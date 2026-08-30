@@ -14,11 +14,12 @@ import hashlib
 import json
 import os
 import secrets
+import stat
 import subprocess
 import sys
 import tempfile
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -513,9 +514,13 @@ from ecg_trust.ood_v2.inventory import (  # noqa: E402
     verify_wfdb_candidate_file_set,
 )
 from ecg_trust.ood_v2.pipeline import (  # noqa: E402
+    INVENTORY_BUILDER_ATTEMPT_STAGES,
+    INVENTORY_BUILDER_OUTPUT_STATES,
     InventoryBuilderPreflight,
     InventoryBuilderPreflightStageError,
+    _fsync_directory,
     consume_inventory_builder_authorization,
+    record_inventory_builder_failure,
     verify_inventory_builder_authorization_available,
     verify_inventory_builder_input_contract,
     verify_inventory_builder_postflight,
@@ -577,6 +582,103 @@ class InventoryControlsStageError(InventoryCLIError):
             raise ValueError("inventory controls stage is not allowlisted")
         self.stage = stage
         super().__init__(f"inventory controls refused at stage {stage}")
+
+
+_EXPECTED_INVENTORY_BUILDER_ATTEMPT_STAGES = (
+    "authorization_publication",
+    "raw_source_binding_verification",
+    "expectation_materialization",
+    "challenge_inventory",
+    "zzu_metadata_parse_and_counts",
+    "zzu_header_selection_and_counts",
+    "challenge_archive_closure",
+    "zzu_tool_resolution",
+    "zzu_archive_listing",
+    "zzu_archive_test",
+    "zzu_evaluated_tree_snapshot",
+    "zzu_isolated_extraction",
+    "zzu_archive_comparison",
+    "archive_closure_role_validation",
+    "inventory_assembly_and_reverification",
+    "public_projection_build_and_verify",
+    "canonical_serialization",
+    "precommit_inventory_reverify",
+    "output_transaction",
+    "output_reload_and_verify",
+    "postflight",
+)
+if INVENTORY_BUILDER_ATTEMPT_STAGES != _EXPECTED_INVENTORY_BUILDER_ATTEMPT_STAGES:
+    raise RuntimeError("inventory builder attempt stage contract differs")
+_INVENTORY_BUILDER_ATTEMPT_STAGE_INDEX = {
+    stage: index for index, stage in enumerate(INVENTORY_BUILDER_ATTEMPT_STAGES)
+}
+_EXPECTED_INVENTORY_OUTPUT_STATES = (
+    "NONE",
+    "PRIVATE_ONLY",
+    "PUBLIC_ONLY",
+    "BOTH",
+    "UNVERIFIABLE",
+)
+if INVENTORY_BUILDER_OUTPUT_STATES != _EXPECTED_INVENTORY_OUTPUT_STATES:
+    raise RuntimeError("inventory builder output state contract differs")
+InventoryStageCallback = Callable[[str], None]
+
+
+class InventoryBuilderAttemptFailure(InventoryCLIError):
+    """Path-free terminal failure after inventory authorization consumption."""
+
+    def __init__(self, stage: str, *, failure_receipt_written: bool) -> None:
+        if stage not in _INVENTORY_BUILDER_ATTEMPT_STAGE_INDEX:
+            raise ValueError("inventory builder failure stage is not allowlisted")
+        if type(failure_receipt_written) is not bool:
+            raise TypeError("failure_receipt_written must be bool")
+        self.stage = stage
+        self.failure_receipt_written = failure_receipt_written
+        super().__init__(f"inventory builder failed at stage {stage}")
+
+
+class _InventoryOutputCleanupError(InventoryCLIError):
+    """Raised when output rollback cannot establish a durable aggregate state."""
+
+
+class InventoryBuilderAttemptStageTracker:
+    """Accept only forward transitions through the frozen attempt stage order."""
+
+    def __init__(self) -> None:
+        self._position = -1
+        self._stage: str | None = None
+
+    @property
+    def stage(self) -> str | None:
+        return self._stage
+
+    def transition(self, stage: str) -> None:
+        position = _INVENTORY_BUILDER_ATTEMPT_STAGE_INDEX.get(stage)
+        if position is None:
+            raise InventoryCLIError("inventory builder stage is not allowlisted")
+        if position != self._position + 1:
+            raise InventoryCLIError("inventory builder stage order changed")
+        self._position = position
+        self._stage = stage
+
+
+def _validate_inventory_stage_callback(
+    stage_callback: InventoryStageCallback | None,
+) -> None:
+    if stage_callback is not None and not callable(stage_callback):
+        raise TypeError("stage_callback must be callable or None")
+
+
+def _emit_inventory_stage(
+    stage_callback: InventoryStageCallback | None,
+    stage: str,
+) -> None:
+    if stage not in _INVENTORY_BUILDER_ATTEMPT_STAGE_INDEX:
+        raise InventoryCLIError("inventory builder stage is not allowlisted")
+    _validate_inventory_stage_callback(stage_callback)
+    if stage_callback is None:
+        return
+    stage_callback(stage)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1195,7 +1297,10 @@ def _build_archive_closures(
     inputs: InventoryInputPaths,
     challenge: Sequence[ExternalInventoryRecord],
     candidates: Sequence[ZZUPediatricCandidate],
+    *,
+    stage_callback: InventoryStageCallback | None = None,
 ) -> tuple[ArchiveExtractionClosure, ...]:
+    _validate_inventory_stage_callback(stage_callback)
     optional_paths = (
         inputs.challenge_archive,
         inputs.zzu_archive_z01,
@@ -1232,6 +1337,7 @@ def _build_archive_closures(
             ),
         )
     )
+    _emit_inventory_stage(stage_callback, "challenge_archive_closure")
     challenge_closure = build_challenge_tar_extraction_closure(
         challenge_archive,
         inputs.challenge_root,
@@ -1250,7 +1356,9 @@ def _build_archive_closures(
         seven_zip_executable,
         expected_required_relative_paths=zzu_required,
         archive_root_prefix="Child_ecg",
+        stage_callback=stage_callback,
     )
+    _emit_inventory_stage(stage_callback, "archive_closure_role_validation")
     challenge_roles = Counter(member.role for member in challenge_closure.members)
     expected_challenge_roles = {
         "ignored_release_file": len(challenge) + 1,
@@ -1294,9 +1402,11 @@ def build_inventory_artifacts(
     *,
     zzu_schema: ZZUMetadataSchema,
     expectations: InventoryExpectations | None = None,
+    stage_callback: InventoryStageCallback | None = None,
 ) -> BuiltInventoryArtifacts:
     """Build and verify both selected cohorts without decoding any waveform."""
 
+    _validate_inventory_stage_callback(stage_callback)
     if not isinstance(inputs, InventoryInputPaths):
         raise TypeError("inputs must be InventoryInputPaths")
     if not isinstance(zzu_schema, ZZUMetadataSchema):
@@ -1304,9 +1414,12 @@ def build_inventory_artifacts(
     resolved_expectations = expectations or InventoryExpectations()
     if not isinstance(resolved_expectations, InventoryExpectations):
         raise TypeError("expectations must be InventoryExpectations")
+    _emit_inventory_stage(stage_callback, "challenge_inventory")
     challenge = _challenge_records(inputs, expectations=resolved_expectations)
+    _emit_inventory_stage(stage_callback, "zzu_metadata_parse_and_counts")
     candidates = read_zzu_candidates(inputs.zzu_metadata, schema=zzu_schema)
     _validate_zzu_metadata_counts(candidates, resolved_expectations)
+    _emit_inventory_stage(stage_callback, "zzu_header_selection_and_counts")
     selected_zzu, zzu_summary = select_zzu_pediatric_inventory_records(inputs.zzu_root, candidates)
     if not selected_zzu:
         raise InventoryCLIError("no ZZU record satisfies the frozen input contract")
@@ -1314,7 +1427,13 @@ def build_inventory_artifacts(
     if len(challenge) + len(selected_zzu) != resolved_expectations.total_selected_records:
         raise InventoryCLIError("combined selected count differs from the frozen total")
 
-    archive_closures = _build_archive_closures(inputs, challenge, candidates)
+    archive_closures = _build_archive_closures(
+        inputs,
+        challenge,
+        candidates,
+        stage_callback=stage_callback,
+    )
+    _emit_inventory_stage(stage_callback, "inventory_assembly_and_reverification")
     inventory = build_external_inventory(
         (*challenge, *selected_zzu),
         archive_closures=archive_closures,
@@ -1324,6 +1443,7 @@ def build_inventory_artifacts(
     verify_external_inventory(inputs.challenge_root, challenge_inventory)
     verify_external_inventory(inputs.zzu_root, zzu_inventory)
     patient_count = len({candidate.patient_key for candidate in candidates})
+    _emit_inventory_stage(stage_callback, "public_projection_build_and_verify")
     projection = _public_projection(
         inventory,
         zzu_summary,
@@ -1346,9 +1466,7 @@ def _reject_output_path(path: Path) -> None:
     if _is_indirect(path) or path.exists():
         raise InventoryCLIError("immutable output path already exists")
     parent = path.parent
-    parent.mkdir(parents=True, exist_ok=True)
-    if _direct_path(parent, directory=True) != parent:
-        raise InventoryCLIError("immutable output parent is invalid")
+    _create_durable_output_parent(parent)
 
 
 def _assert_direct_existing_ancestry(path: Path) -> None:
@@ -1366,6 +1484,80 @@ def _assert_direct_existing_ancestry(path: Path) -> None:
         raise InventoryCLIError("immutable output ancestry is unavailable") from error
     if resolved != Path(os.path.abspath(os.fspath(existing))):
         raise InventoryCLIError("immutable output ancestry resolves indirectly")
+
+
+def _create_durable_output_parent(path: Path) -> None:
+    """Create each missing direct directory and persist its parent entry."""
+
+    lexical = Path(os.path.abspath(os.fspath(path)))
+    missing: list[Path] = []
+    cursor = lexical
+    while not cursor.exists():
+        if _is_indirect(cursor):
+            raise InventoryCLIError("immutable output ancestry became indirect")
+        missing.append(cursor)
+        parent = cursor.parent
+        if parent == cursor:
+            raise InventoryCLIError("immutable output ancestry is unavailable")
+        cursor = parent
+    if _direct_path(cursor, directory=True) != cursor:
+        raise InventoryCLIError("immutable output ancestry is invalid")
+
+    for directory in reversed(missing):
+        owning_parent = _direct_path(directory.parent, directory=True)
+        parent_identity = (
+            owning_parent.stat().st_dev,
+            owning_parent.stat().st_ino,
+        )
+        try:
+            directory.mkdir()
+        except OSError as error:
+            raise InventoryCLIError("immutable output parent creation failed") from error
+        if _direct_path(directory, directory=True) != directory:
+            raise InventoryCLIError("immutable output parent creation became indirect")
+        try:
+            _fsync_directory(owning_parent)
+        except OSError as error:
+            raise InventoryCLIError(
+                "immutable output parent entry durability failed"
+            ) from error
+        if (
+            _direct_path(owning_parent, directory=True) != owning_parent
+            or (
+                owning_parent.stat().st_dev,
+                owning_parent.stat().st_ino,
+            )
+            != parent_identity
+            or _direct_path(directory, directory=True) != directory
+        ):
+            raise InventoryCLIError(
+                "immutable output parent changed during durable creation"
+            )
+
+
+def _flush_output_parents(
+    parent_identities: Mapping[Path, tuple[int, int]],
+) -> None:
+    """Persist exact output-parent directory entries and fail closed."""
+
+    for parent, identity in sorted(
+        parent_identities.items(),
+        key=lambda item: os.fspath(item[0]),
+    ):
+        if (
+            _direct_path(parent, directory=True) != parent
+            or (parent.stat().st_dev, parent.stat().st_ino) != identity
+        ):
+            raise InventoryCLIError("immutable output parent changed before durability flush")
+        try:
+            _fsync_directory(parent)
+        except OSError as error:
+            raise InventoryCLIError("immutable output parent durability failed") from error
+        if (
+            _direct_path(parent, directory=True) != parent
+            or (parent.stat().st_dev, parent.stat().st_ino) != identity
+        ):
+            raise InventoryCLIError("immutable output parent changed after durability flush")
 
 
 def _commit_new_outputs(outputs: Mapping[Path, tuple[bytes, int]]) -> None:
@@ -1429,6 +1621,10 @@ def _commit_new_outputs(outputs: Mapping[Path, tuple[bytes, int]]) -> None:
         for destination, (payload, _) in zip(canonical_paths, outputs.values(), strict=True):
             if _direct_path(destination, directory=False).read_bytes() != payload:
                 raise InventoryCLIError("immutable output bytes changed during commit")
+        for temporary in temporary_by_destination.values():
+            temporary.unlink()
+        temporary_by_destination.clear()
+        _flush_output_parents(parent_identities)
     except BaseException as error:
         cleanup_failed = False
         for destination in committed:
@@ -1436,8 +1632,20 @@ def _commit_new_outputs(outputs: Mapping[Path, tuple[bytes, int]]) -> None:
                 destination.unlink(missing_ok=True)
             except OSError:
                 cleanup_failed = True
+        namespace_changed = bool(committed or temporary_by_destination)
+        for temporary in temporary_by_destination.values():
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                cleanup_failed = True
+        temporary_by_destination.clear()
+        if namespace_changed:
+            try:
+                _flush_output_parents(parent_identities)
+            except BaseException:
+                cleanup_failed = True
         if cleanup_failed:
-            raise InventoryCLIError(
+            raise _InventoryOutputCleanupError(
                 "immutable output transaction failed and requires private cleanup"
             ) from error
         raise
@@ -1452,18 +1660,22 @@ def write_inventory_artifacts(
     inputs: InventoryInputPaths,
     private_output: Path,
     public_output: Path,
+    stage_callback: InventoryStageCallback | None = None,
 ) -> InventoryCLIResult:
     """Create, reload, and byte-verify immutable private and public artifacts."""
 
+    _validate_inventory_stage_callback(stage_callback)
     if not isinstance(artifacts, BuiltInventoryArtifacts):
         raise TypeError("artifacts must be BuiltInventoryArtifacts")
     private_absolute = Path(os.path.abspath(os.fspath(private_output)))
     public_absolute = Path(os.path.abspath(os.fspath(public_output)))
     if private_absolute == public_absolute:
         raise InventoryCLIError("private and public output paths must be distinct")
+    _emit_inventory_stage(stage_callback, "precommit_inventory_reverify")
     _verify_inventory_roots(artifacts.inventory, inputs)
     private_bytes = artifacts.inventory.to_canonical_json_bytes()
     public_bytes = _canonical_json_bytes(artifacts.public_projection) + b"\n"
+    _emit_inventory_stage(stage_callback, "output_transaction")
     _commit_new_outputs(
         {
             private_output: (private_bytes, 0o600),
@@ -1471,6 +1683,7 @@ def write_inventory_artifacts(
         }
     )
 
+    _emit_inventory_stage(stage_callback, "output_reload_and_verify")
     loaded = load_external_inventory(private_output)
     if loaded != artifacts.inventory:
         raise InventoryCLIError("reloaded private inventory differs from its frozen value")
@@ -1679,62 +1892,152 @@ def run_inventory_preflight_only(
     return _verify_inventory_preconsumption_controls(arguments).preflight
 
 
+def _direct_output_exists(path: Path) -> bool:
+    lexical = Path(os.path.abspath(os.fspath(path)))
+    try:
+        metadata = os.lstat(lexical)
+    except FileNotFoundError:
+        return False
+    if _is_indirect(lexical) or not stat.S_ISREG(metadata.st_mode):
+        raise InventoryCLIError("inventory output state is not a direct file")
+    if _direct_path(lexical, directory=False) != lexical:
+        raise InventoryCLIError("inventory output state changed during inspection")
+    return True
+
+
+def _inventory_output_state(private_output: Path, public_output: Path) -> str:
+    try:
+        private_exists = _direct_output_exists(private_output)
+        public_exists = _direct_output_exists(public_output)
+    except BaseException:
+        return "UNVERIFIABLE"
+    if private_exists and public_exists:
+        state = "BOTH"
+    elif private_exists:
+        state = "PRIVATE_ONLY"
+    elif public_exists:
+        state = "PUBLIC_ONLY"
+    else:
+        state = "NONE"
+    if state not in INVENTORY_BUILDER_OUTPUT_STATES:
+        raise RuntimeError("inventory output state is not allowlisted")
+    return state
+
+
 def run_inventory_build(arguments: argparse.Namespace) -> InventoryCLIResult:
     controls = _verify_inventory_preconsumption_controls(arguments)
     _, project_root, _, _ = _project_layout()
     preflight = controls.preflight
     inputs = controls.inputs
     schema = controls.schema
-    consume_inventory_builder_authorization(preflight, project_root=project_root)
-    verify_inventory_builder_raw_source_bindings(preflight, project_root=project_root)
-    counts = preflight.inventory_counts
-    exclusions = counts.zzu_exclusion_counts
-    expectations = InventoryExpectations(
-        challenge_records=counts.challenge_records,
-        zzu_records=counts.zzu_candidate_records,
-        zzu_patients=counts.zzu_candidate_patients,
-        zzu_twelve_lead_records=counts.zzu_twelve_lead_records,
-        zzu_nine_lead_records=counts.zzu_nine_lead_records,
-        zzu_selected_records=counts.zzu_records,
-        zzu_selected_patients=counts.zzu_patients,
-        total_selected_records=counts.total_records,
-        zzu_duration_under_10_seconds=exclusions["duration_under_10_seconds"],
-        zzu_lead_count_not_12=exclusions["lead_count_not_12"],
-        zzu_noncanonical_lead_set=exclusions["noncanonical_lead_set"],
-        zzu_pediatric_12_lead_flag_false=exclusions["pediatric_12_lead_flag_false"],
-        zzu_sampling_frequency_not_500_hz=exclusions["sampling_frequency_not_500_hz"],
-    )
-    artifacts = build_inventory_artifacts(
-        inputs,
-        zzu_schema=schema,
-        expectations=expectations,
-    )
-    private_bytes = artifacts.inventory.to_canonical_json_bytes()
-    public_bytes = _canonical_json_bytes(artifacts.public_projection) + b"\n"
-    result = write_inventory_artifacts(
-        artifacts,
-        inputs=inputs,
-        private_output=arguments.private_output,
-        public_output=arguments.public_output,
-    )
-    public_artifact_sha256 = artifacts.public_projection.get("projection_sha256")
-    if not isinstance(public_artifact_sha256, str):
-        raise InventoryCLIError("public projection has no in-memory artifact identity")
-    verify_inventory_builder_postflight(
-        preflight,
-        parent_path=arguments.parent,
-        project_root=project_root,
-        implementation_revision=arguments.implementation_revision,
-        inventory_path=arguments.private_output,
-        public_projection_path=arguments.public_output,
-        expected_inventory_file_sha256=("sha256:" + hashlib.sha256(private_bytes).hexdigest()),
-        expected_inventory_sha256=artifacts.inventory.inventory_sha256,
-        expected_public_projection_file_sha256=(
-            "sha256:" + hashlib.sha256(public_bytes).hexdigest()
-        ),
-        expected_public_projection_artifact_sha256=public_artifact_sha256,
-    )
-    return result
+    tracker = InventoryBuilderAttemptStageTracker()
+    authorization_visible = False
+    official_source_content_accessed = False
+
+    def mark_authorization_visible() -> None:
+        nonlocal authorization_visible
+        authorization_visible = True
+
+    def mark_official_source_content_accessed() -> None:
+        nonlocal official_source_content_accessed
+        official_source_content_accessed = True
+
+    try:
+        tracker.transition("authorization_publication")
+        consume_inventory_builder_authorization(
+            preflight,
+            project_root=project_root,
+            visibility_witness=mark_authorization_visible,
+        )
+        authorization_visible = True
+        tracker.transition("raw_source_binding_verification")
+        verify_inventory_builder_raw_source_bindings(
+            preflight,
+            project_root=project_root,
+            content_access_witness=mark_official_source_content_accessed,
+        )
+        tracker.transition("expectation_materialization")
+        counts = preflight.inventory_counts
+        exclusions = counts.zzu_exclusion_counts
+        expectations = InventoryExpectations(
+            challenge_records=counts.challenge_records,
+            zzu_records=counts.zzu_candidate_records,
+            zzu_patients=counts.zzu_candidate_patients,
+            zzu_twelve_lead_records=counts.zzu_twelve_lead_records,
+            zzu_nine_lead_records=counts.zzu_nine_lead_records,
+            zzu_selected_records=counts.zzu_records,
+            zzu_selected_patients=counts.zzu_patients,
+            total_selected_records=counts.total_records,
+            zzu_duration_under_10_seconds=exclusions["duration_under_10_seconds"],
+            zzu_lead_count_not_12=exclusions["lead_count_not_12"],
+            zzu_noncanonical_lead_set=exclusions["noncanonical_lead_set"],
+            zzu_pediatric_12_lead_flag_false=exclusions["pediatric_12_lead_flag_false"],
+            zzu_sampling_frequency_not_500_hz=exclusions["sampling_frequency_not_500_hz"],
+        )
+        artifacts = build_inventory_artifacts(
+            inputs,
+            zzu_schema=schema,
+            expectations=expectations,
+            stage_callback=tracker.transition,
+        )
+        tracker.transition("canonical_serialization")
+        private_bytes = artifacts.inventory.to_canonical_json_bytes()
+        public_bytes = _canonical_json_bytes(artifacts.public_projection) + b"\n"
+        result = write_inventory_artifacts(
+            artifacts,
+            inputs=inputs,
+            private_output=arguments.private_output,
+            public_output=arguments.public_output,
+            stage_callback=tracker.transition,
+        )
+        tracker.transition("postflight")
+        public_artifact_sha256 = artifacts.public_projection.get("projection_sha256")
+        if not isinstance(public_artifact_sha256, str):
+            raise InventoryCLIError("public projection has no in-memory artifact identity")
+        verify_inventory_builder_postflight(
+            preflight,
+            parent_path=arguments.parent,
+            project_root=project_root,
+            implementation_revision=arguments.implementation_revision,
+            inventory_path=arguments.private_output,
+            public_projection_path=arguments.public_output,
+            expected_inventory_file_sha256=("sha256:" + hashlib.sha256(private_bytes).hexdigest()),
+            expected_inventory_sha256=artifacts.inventory.inventory_sha256,
+            expected_public_projection_file_sha256=(
+                "sha256:" + hashlib.sha256(public_bytes).hexdigest()
+            ),
+            expected_public_projection_artifact_sha256=public_artifact_sha256,
+        )
+        return result
+    except BaseException as error:
+        if not authorization_visible:
+            raise
+        failure_stage = tracker.stage or INVENTORY_BUILDER_ATTEMPT_STAGES[0]
+        output_state = (
+            "UNVERIFIABLE"
+            if isinstance(error, _InventoryOutputCleanupError)
+            else _inventory_output_state(
+                arguments.private_output,
+                arguments.public_output,
+            )
+        )
+        failure_receipt_written = False
+        try:
+            record_inventory_builder_failure(
+                preflight,
+                project_root=project_root,
+                failure_stage=failure_stage,
+                official_source_content_accessed=official_source_content_accessed,
+                output_state=output_state,
+            )
+        except BaseException:
+            pass
+        else:
+            failure_receipt_written = True
+        raise InventoryBuilderAttemptFailure(
+            failure_stage,
+            failure_receipt_written=failure_receipt_written,
+        ) from None
 
 
 def _controls_report(*, status: str, stage: str) -> str:
@@ -1747,6 +2050,23 @@ def _controls_report(*, status: str, stage: str) -> str:
             "protocol_artifact_written": False,
             "stage": stage,
             "status": status,
+        },
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _attempt_failure_report(error: InventoryBuilderAttemptFailure) -> str:
+    if not isinstance(error, InventoryBuilderAttemptFailure):
+        raise TypeError("error must be InventoryBuilderAttemptFailure")
+    return json.dumps(
+        {
+            "authorization_consumed": True,
+            "failure_receipt_written": error.failure_receipt_written,
+            "stage": error.stage,
+            "status": "OOD_V2_INVENTORY_FAILED",
         },
         allow_nan=False,
         ensure_ascii=True,
@@ -1796,6 +2116,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     try:
         result = run_inventory_build(arguments)
+    except InventoryBuilderAttemptFailure as error:
+        print(_attempt_failure_report(error), file=sys.stderr)
+        return 1
     except Exception:
         print(
             "OOD_V2_INVENTORY_FAILED: inspect private local inputs and immutable output state.",

@@ -246,6 +246,40 @@ def test_builds_header_only_private_inventory_and_aggregate_projection(
     assert header_only_wfdb
 
 
+def test_stage_callbacks_preserve_exact_in_memory_success_bytes(
+    tmp_path: Path,
+    header_only_wfdb: list[str],
+) -> None:
+    inputs = _fixture_inputs(tmp_path)
+    unstaged = cli.build_inventory_artifacts(
+        inputs,
+        zzu_schema=cli.ZZUMetadataSchema(),
+        expectations=_expectations(),
+    )
+    observed_stages: list[str] = []
+    staged = cli.build_inventory_artifacts(
+        inputs,
+        zzu_schema=cli.ZZUMetadataSchema(),
+        expectations=_expectations(),
+        stage_callback=observed_stages.append,
+    )
+
+    assert staged.inventory.to_canonical_json_bytes() == (
+        unstaged.inventory.to_canonical_json_bytes()
+    )
+    assert cli._canonical_json_bytes(staged.public_projection) == (
+        cli._canonical_json_bytes(unstaged.public_projection)
+    )
+    assert observed_stages == [
+        "challenge_inventory",
+        "zzu_metadata_parse_and_counts",
+        "zzu_header_selection_and_counts",
+        "inventory_assembly_and_reverification",
+        "public_projection_build_and_verify",
+    ]
+    assert header_only_wfdb
+
+
 def test_writes_create_new_artifacts_then_reloads_and_reverifies(
     tmp_path: Path,
     header_only_wfdb: list[str],
@@ -269,11 +303,13 @@ def test_writes_create_new_artifacts_then_reloads_and_reverifies(
         )
     assert not same_output.exists()
 
+    write_stages: list[str] = []
     result = cli.write_inventory_artifacts(
         artifacts,
         inputs=inputs,
         private_output=private_output,
         public_output=public_output,
+        stage_callback=write_stages.append,
     )
 
     assert result.inventory_sha256 == artifacts.inventory.inventory_sha256
@@ -284,6 +320,11 @@ def test_writes_create_new_artifacts_then_reloads_and_reverifies(
     assert load_external_inventory(private_output) == artifacts.inventory
     assert private_output.read_bytes() == artifacts.inventory.to_canonical_json_bytes()
     assert public_output.read_bytes().endswith(b"\n")
+    assert write_stages == [
+        "precommit_inventory_reverify",
+        "output_transaction",
+        "output_reload_and_verify",
+    ]
     with pytest.raises(cli.InventoryCLIError, match="already exists"):
         cli.write_inventory_artifacts(
             artifacts,
@@ -292,6 +333,128 @@ def test_writes_create_new_artifacts_then_reloads_and_reverifies(
             public_output=public_output,
         )
     assert header_only_wfdb
+
+
+def test_output_transaction_flushes_each_unique_parent_after_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_output = tmp_path / "private" / "inventory.json"
+    public_output = tmp_path / "public" / "projection.json"
+    private_output.parent.mkdir()
+    public_output.parent.mkdir()
+    observed: list[Path] = []
+    monkeypatch.setattr(cli, "_fsync_directory", observed.append)
+
+    cli._commit_new_outputs(
+        {
+            private_output: (b"private\n", 0o600),
+            public_output: (b"public\n", 0o644),
+        }
+    )
+
+    expected_parents = sorted(
+        (private_output.parent.resolve(), public_output.parent.resolve()),
+        key=os.fspath,
+    )
+    assert observed == expected_parents
+    assert private_output.read_bytes() == b"private\n"
+    assert public_output.read_bytes() == b"public\n"
+    assert not tuple(private_output.parent.glob(".*.tmp"))
+    assert not tuple(public_output.parent.glob(".*.tmp"))
+
+
+def test_output_transaction_rolls_back_and_flushes_deletions_after_fsync_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_output = tmp_path / "private" / "inventory.json"
+    public_output = tmp_path / "public" / "projection.json"
+    private_output.parent.mkdir()
+    public_output.parent.mkdir()
+    observed: list[Path] = []
+
+    def fail_first_flush(path: Path) -> None:
+        observed.append(path)
+        if len(observed) == 1:
+            raise OSError("injected output-parent durability failure")
+
+    monkeypatch.setattr(cli, "_fsync_directory", fail_first_flush)
+
+    with pytest.raises(cli.InventoryCLIError, match="parent durability failed"):
+        cli._commit_new_outputs(
+            {
+                private_output: (b"private\n", 0o600),
+                public_output: (b"public\n", 0o644),
+            }
+        )
+
+    expected_parents = sorted(
+        (private_output.parent.resolve(), public_output.parent.resolve()),
+        key=os.fspath,
+    )
+    assert observed == [expected_parents[0], *expected_parents]
+    assert not private_output.exists()
+    assert not public_output.exists()
+    assert not tuple(private_output.parent.glob(".*.tmp"))
+    assert not tuple(public_output.parent.glob(".*.tmp"))
+
+
+def test_output_transaction_durably_creates_every_missing_parent_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_root = tmp_path / "new-output-root"
+    private_output = output_root / "private" / "inventory.json"
+    public_output = output_root / "public" / "projection.json"
+    observed: list[Path] = []
+    monkeypatch.setattr(cli, "_fsync_directory", observed.append)
+
+    cli._commit_new_outputs(
+        {
+            private_output: (b"private\n", 0o600),
+            public_output: (b"public\n", 0o644),
+        }
+    )
+
+    publication_parents = sorted(
+        (private_output.parent.resolve(), public_output.parent.resolve()),
+        key=os.fspath,
+    )
+    assert observed == [
+        tmp_path.resolve(),
+        output_root.resolve(),
+        output_root.resolve(),
+        *publication_parents,
+    ]
+    assert private_output.read_bytes() == b"private\n"
+    assert public_output.read_bytes() == b"public\n"
+
+
+def test_output_transaction_marks_failed_rollback_durability_unverifiable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_output = tmp_path / "private" / "inventory.json"
+    public_output = tmp_path / "public" / "projection.json"
+    private_output.parent.mkdir()
+    public_output.parent.mkdir()
+    monkeypatch.setattr(
+        cli,
+        "_fsync_directory",
+        lambda _path: (_ for _ in ()).throw(OSError("injected persistent failure")),
+    )
+
+    with pytest.raises(cli._InventoryOutputCleanupError):  # noqa: SLF001
+        cli._commit_new_outputs(
+            {
+                private_output: (b"private\n", 0o600),
+                public_output: (b"public\n", 0o644),
+            }
+        )
+
+    assert not private_output.exists()
+    assert not public_output.exists()
 
 
 def test_zzu_metadata_schema_is_explicit_and_preserves_full_mapping(tmp_path: Path) -> None:
@@ -525,6 +688,149 @@ def test_main_failure_message_is_sanitized(
     assert "secret" not in captured.err
 
 
+@pytest.mark.parametrize("receipt_succeeds", (True, False))
+def test_postauthorization_baseexception_records_once_and_emits_sanitized_stage(
+    receipt_succeeds: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class HostileAttemptAbort(BaseException):
+        pass
+
+    arguments = _builder_arguments(tmp_path)
+    arguments.preflight_only = False
+    preflight = _builder_preflight()
+    receipt_calls: list[dict[str, object]] = []
+    consumption_calls = 0
+    monkeypatch.setattr(
+        cli,
+        "_parser",
+        lambda: SimpleNamespace(parse_args=lambda _argv: arguments),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_verify_inventory_preconsumption_controls",
+        lambda _arguments: SimpleNamespace(
+            preflight=preflight,
+            inputs=SimpleNamespace(),
+            schema=SimpleNamespace(),
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_project_layout",
+        lambda: (
+            tmp_path / "scripts" / "inventory.py",
+            tmp_path,
+            tmp_path / ".venv" / "Lib" / "site-packages",
+            tmp_path / "src",
+        ),
+    )
+
+    def consume(*_args: object, **_kwargs: object) -> str:
+        nonlocal consumption_calls
+        consumption_calls += 1
+        witness = _kwargs.get("visibility_witness")
+        assert callable(witness)
+        witness()
+        return "marker"
+
+    monkeypatch.setattr(cli, "consume_inventory_builder_authorization", consume)
+    monkeypatch.setattr(
+        cli,
+        "verify_inventory_builder_raw_source_bindings",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            HostileAttemptAbort("patient p001 at C:/private/source")
+        ),
+    )
+
+    def record(boundary: object, **kwargs: object) -> str:
+        receipt_calls.append({"boundary": boundary, **kwargs})
+        if not receipt_succeeds:
+            raise HostileAttemptAbort("receipt path C:/private/receipt")
+        return "sha256:" + "a" * 64
+
+    monkeypatch.setattr(cli, "record_inventory_builder_failure", record)
+
+    assert cli.main([]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        cli._attempt_failure_report(
+            cli.InventoryBuilderAttemptFailure(
+                "raw_source_binding_verification",
+                failure_receipt_written=receipt_succeeds,
+            )
+        )
+        + "\n"
+    )
+    assert json.loads(captured.err) == {
+        "authorization_consumed": True,
+        "failure_receipt_written": receipt_succeeds,
+        "stage": "raw_source_binding_verification",
+        "status": "OOD_V2_INVENTORY_FAILED",
+    }
+    assert consumption_calls == 1
+    assert receipt_calls == [
+        {
+            "boundary": preflight,
+            "project_root": tmp_path,
+            "failure_stage": "raw_source_binding_verification",
+            "official_source_content_accessed": False,
+            "output_state": "NONE",
+        }
+    ]
+    assert "HostileAttemptAbort" not in captured.err
+    assert "p001" not in captured.err
+    assert "private" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("private_kind", "public_kind", "expected_state"),
+    (
+        ("missing", "missing", "NONE"),
+        ("file", "missing", "PRIVATE_ONLY"),
+        ("missing", "file", "PUBLIC_ONLY"),
+        ("file", "file", "BOTH"),
+        ("directory", "missing", "UNVERIFIABLE"),
+    ),
+)
+def test_inventory_output_state_is_aggregate_only(
+    private_kind: str,
+    public_kind: str,
+    expected_state: str,
+    tmp_path: Path,
+) -> None:
+    private_output = tmp_path / "private" / "inventory.json"
+    public_output = tmp_path / "public" / "projection.json"
+    for path, kind in (
+        (private_output, private_kind),
+        (public_output, public_kind),
+    ):
+        if kind == "file":
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"opaque")
+        elif kind == "directory":
+            path.mkdir(parents=True)
+        else:
+            assert kind == "missing"
+
+    assert cli._inventory_output_state(private_output, public_output) == expected_state
+
+
+def test_attempt_stage_tracker_accepts_only_forward_allowlisted_transitions() -> None:
+    tracker = cli.InventoryBuilderAttemptStageTracker()
+    for stage in cli.INVENTORY_BUILDER_ATTEMPT_STAGES:
+        tracker.transition(stage)
+        assert tracker.stage == stage
+
+    with pytest.raises(cli.InventoryCLIError, match="order changed"):
+        tracker.transition(cli.INVENTORY_BUILDER_ATTEMPT_STAGES[-1])
+    with pytest.raises(cli.InventoryCLIError, match="not allowlisted"):
+        cli.InventoryBuilderAttemptStageTracker().transition("private-path-stage")
+
+
 def test_production_inventory_outputs_require_isolation_and_exact_namespace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -716,9 +1022,7 @@ def test_preflight_only_reuses_controls_and_never_reaches_capabilities(
         monkeypatch.setattr(
             cli,
             name,
-            lambda *_args, _name=name, **_kwargs: pytest.fail(
-                f"preflight-only reached {_name}"
-            ),
+            lambda *_args, _name=name, **_kwargs: pytest.fail(f"preflight-only reached {_name}"),
         )
     for name in ("rdheader", "rdrecord"):
         monkeypatch.setattr(
@@ -731,12 +1035,9 @@ def test_preflight_only_reuses_controls_and_never_reaches_capabilities(
     protected_paths = (
         arguments.private_output,
         arguments.public_output,
-        tmp_path
-        / "artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json",
-        tmp_path
-        / "artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json",
-        tmp_path
-        / "artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json",
+        tmp_path / "artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json",
+        tmp_path / "artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json",
+        tmp_path / "artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json",
         tmp_path / "artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json",
         tmp_path / "artifacts/trust_sentinel/ood_external_v2_1",
     )
@@ -744,14 +1045,18 @@ def test_preflight_only_reuses_controls_and_never_reaches_capabilities(
 
     assert cli.run_inventory_preflight_only(arguments) is preflight
     assert cli.run_inventory_preflight_only(arguments) is preflight
-    assert calls == [
-        "preflight",
-        "destinations",
-        "input_contract",
-        "availability",
-        "destinations",
-        "availability",
-    ] * 2
+    assert (
+        calls
+        == [
+            "preflight",
+            "destinations",
+            "input_contract",
+            "availability",
+            "destinations",
+            "availability",
+        ]
+        * 2
+    )
     assert all(not path.exists() for path in protected_paths)
 
 
@@ -891,9 +1196,7 @@ def test_preflight_only_control_failures_are_staged_and_stop_before_capabilities
         monkeypatch.setattr(
             cli,
             name,
-            lambda *_args, _name=name, **_kwargs: pytest.fail(
-                f"refused preflight reached {_name}"
-            ),
+            lambda *_args, _name=name, **_kwargs: pytest.fail(f"refused preflight reached {_name}"),
         )
 
     with pytest.raises(cli.InventoryControlsStageError) as refusal:
@@ -1011,6 +1314,7 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
             tmp_path / "src",
         ),
     )
+
     def builder_preflight(*_args: object) -> SimpleNamespace:
         calls.append("preflight")
         return preflight
@@ -1037,6 +1341,9 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
 
     def authorize(boundary: object, **kwargs: object) -> str:
         calls.append("authorization")
+        witness = kwargs.pop("visibility_witness")
+        assert callable(witness)
+        witness()
         observed_authorization.update(boundary=boundary, **kwargs)
         return "marker"
 
@@ -1044,6 +1351,9 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
 
     def verify_raw_bindings(boundary: object, **kwargs: object) -> None:
         calls.append("raw_bindings")
+        witness = kwargs.pop("content_access_witness")
+        assert callable(witness)
+        witness()
         observed_raw_bindings.update(boundary=boundary, **kwargs)
 
     monkeypatch.setattr(cli, "consume_inventory_builder_authorization", authorize)
@@ -1057,11 +1367,20 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
     def build(inputs: cli.InventoryInputPaths, **kwargs: object) -> object:
         calls.append("build")
         observed_build.update(inputs=inputs, **kwargs)
+        stage_callback = kwargs["stage_callback"]
+        assert callable(stage_callback)
+        for stage in cli.INVENTORY_BUILDER_ATTEMPT_STAGES[3:16]:
+            stage_callback(stage)
         return artifacts
 
     monkeypatch.setattr(cli, "build_inventory_artifacts", build)
-    def write(*_args: object, **_kwargs: object) -> cli.InventoryCLIResult:
+
+    def write(*_args: object, **kwargs: object) -> cli.InventoryCLIResult:
         calls.append("write")
+        stage_callback = kwargs["stage_callback"]
+        assert callable(stage_callback)
+        for stage in cli.INVENTORY_BUILDER_ATTEMPT_STAGES[17:20]:
+            stage_callback(stage)
         return result
 
     monkeypatch.setattr(cli, "write_inventory_artifacts", write)
@@ -1072,6 +1391,11 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
         observed_postflight.update(boundary=boundary, **kwargs)
 
     monkeypatch.setattr(cli, "verify_inventory_builder_postflight", postflight)
+    monkeypatch.setattr(
+        cli,
+        "record_inventory_builder_failure",
+        lambda *_args, **_kwargs: pytest.fail("successful inventory build wrote a failure receipt"),
+    )
     arguments = _builder_arguments(tmp_path)
 
     assert cli.run_inventory_build(arguments) is result
@@ -1150,6 +1474,7 @@ def test_inventory_builder_rejects_altered_schema_before_contract_or_raw_access(
             tmp_path / "src",
         ),
     )
+
     def builder_preflight(*_args: object) -> SimpleNamespace:
         calls.append("preflight")
         return _builder_preflight()
@@ -1199,6 +1524,7 @@ def test_inventory_builder_rejects_altered_path_before_authorization_or_raw_hash
             tmp_path / "src",
         ),
     )
+
     def builder_preflight(*_args: object) -> SimpleNamespace:
         calls.append("preflight")
         return preflight
@@ -1256,6 +1582,19 @@ def test_inventory_builder_rejects_altered_path_before_authorization_or_raw_hash
             ],
         ),
         (
+            "authorization_after_visibility",
+            [
+                "preflight",
+                "destinations",
+                "input_contract",
+                "availability",
+                "destinations",
+                "availability",
+                "authorization",
+                "failure_receipt",
+            ],
+        ),
+        (
             "raw_bindings",
             [
                 "preflight",
@@ -1266,6 +1605,7 @@ def test_inventory_builder_rejects_altered_path_before_authorization_or_raw_hash
                 "availability",
                 "authorization",
                 "raw_bindings",
+                "failure_receipt",
             ],
         ),
     ),
@@ -1277,6 +1617,7 @@ def test_inventory_builder_boundary_failures_prevent_inventory_build(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
+    receipt_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         cli,
         "_project_layout",
@@ -1287,6 +1628,7 @@ def test_inventory_builder_boundary_failures_prevent_inventory_build(
             tmp_path / "src",
         ),
     )
+
     def builder_preflight(*_args: object) -> SimpleNamespace:
         calls.append("preflight")
         return _builder_preflight()
@@ -1308,10 +1650,15 @@ def test_inventory_builder_boundary_failures_prevent_inventory_build(
         lambda *_args, **_kwargs: calls.append("availability"),
     )
 
-    def authorize(*_args: object, **_kwargs: object) -> str:
+    def authorize(*_args: object, **kwargs: object) -> str:
         calls.append("authorization")
         if failure_stage == "authorization":
             raise cli.InventoryCLIError("boundary refused")
+        witness = kwargs.get("visibility_witness")
+        assert callable(witness)
+        witness()
+        if failure_stage == "authorization_after_visibility":
+            raise cli.InventoryCLIError("boundary refused after visibility")
         return "marker"
 
     def verify_raw(*_args: object, **_kwargs: object) -> None:
@@ -1321,14 +1668,39 @@ def test_inventory_builder_boundary_failures_prevent_inventory_build(
 
     monkeypatch.setattr(cli, "consume_inventory_builder_authorization", authorize)
     monkeypatch.setattr(cli, "verify_inventory_builder_raw_source_bindings", verify_raw)
+    def record_failure(*_args: object, **kwargs: object) -> str:
+        calls.append("failure_receipt")
+        receipt_calls.append(dict(kwargs))
+        return "receipt"
+
+    monkeypatch.setattr(cli, "record_inventory_builder_failure", record_failure)
     monkeypatch.setattr(
         cli,
         "build_inventory_artifacts",
         lambda *_args, **_kwargs: pytest.fail("inventory build ran after boundary refusal"),
     )
 
-    with pytest.raises(cli.InventoryCLIError, match="boundary refused"):
-        cli.run_inventory_build(_builder_arguments(tmp_path))
+    if failure_stage == "authorization":
+        with pytest.raises(cli.InventoryCLIError, match="boundary refused"):
+            cli.run_inventory_build(_builder_arguments(tmp_path))
+    else:
+        with pytest.raises(cli.InventoryBuilderAttemptFailure) as failure:
+            cli.run_inventory_build(_builder_arguments(tmp_path))
+        expected_stage = (
+            "authorization_publication"
+            if failure_stage == "authorization_after_visibility"
+            else "raw_source_binding_verification"
+        )
+        assert failure.value.stage == expected_stage
+        assert failure.value.failure_receipt_written is True
+        assert receipt_calls == [
+            {
+                "project_root": tmp_path,
+                "failure_stage": expected_stage,
+                "official_source_content_accessed": False,
+                "output_state": "NONE",
+            }
+        ]
 
     assert calls == expected_calls
 
@@ -1390,14 +1762,63 @@ def test_cli_archive_closure_requires_exact_full_release_role_counts(
         "build_challenge_tar_extraction_closure",
         lambda *args, **kwargs: challenge_closure,
     )
+
+    def build_zzu_closure(*_args: object, **kwargs: object) -> object:
+        stage_callback = kwargs.get("stage_callback")
+        if stage_callback is not None:
+            assert callable(stage_callback)
+            for stage in cli.INVENTORY_BUILDER_ATTEMPT_STAGES[7:13]:
+                stage_callback(stage)
+        return zzu_closure
+
     monkeypatch.setattr(
         cli,
         "build_zzu_split_zip_extraction_closure",
-        lambda *args, **kwargs: zzu_closure,
+        build_zzu_closure,
     )
 
-    closures = cli._build_archive_closures(inputs, (challenge_record,), (candidate,))
+    observed_stages: list[str] = []
+    closures = cli._build_archive_closures(
+        inputs,
+        (challenge_record,),
+        (candidate,),
+        stage_callback=observed_stages.append,
+    )
     assert closures == (challenge_closure, zzu_closure)
+    assert observed_stages == list(cli.INVENTORY_BUILDER_ATTEMPT_STAGES[6:14])
+
+    class HostileArchiveAbort(BaseException):
+        pass
+
+    def fail_during_zzu_test(*_args: object, **kwargs: object) -> object:
+        stage_callback = kwargs["stage_callback"]
+        assert callable(stage_callback)
+        for stage in cli.INVENTORY_BUILDER_ATTEMPT_STAGES[7:10]:
+            stage_callback(stage)
+        raise HostileArchiveAbort("private archive member")
+
+    monkeypatch.setattr(
+        cli,
+        "build_zzu_split_zip_extraction_closure",
+        fail_during_zzu_test,
+    )
+    tracker = cli.InventoryBuilderAttemptStageTracker()
+    for stage in cli.INVENTORY_BUILDER_ATTEMPT_STAGES[:6]:
+        tracker.transition(stage)
+    with pytest.raises(HostileArchiveAbort):
+        cli._build_archive_closures(
+            inputs,
+            (challenge_record,),
+            (candidate,),
+            stage_callback=tracker.transition,
+        )
+    assert tracker.stage == "zzu_archive_test"
+
+    monkeypatch.setattr(
+        cli,
+        "build_zzu_split_zip_extraction_closure",
+        build_zzu_closure,
+    )
 
     challenge_closure.members = challenge_members[:-1]
     with pytest.raises(cli.InventoryCLIError, match="full official release"):
