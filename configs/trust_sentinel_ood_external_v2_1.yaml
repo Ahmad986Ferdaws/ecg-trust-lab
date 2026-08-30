@@ -2,7 +2,7 @@ schema_version: 1
 protocol_id: trust-sentinel-ood-external-v2-1-parent
 status: frozen_parent_preregistration_pre_waveform
 drafted_on: "2026-08-29"
-frozen_at_utc: "2026-08-29T22:49:01Z"
+frozen_at_utc: "2026-08-30T00:50:40Z"
 research_only: true
 
 purpose: >-
@@ -62,6 +62,44 @@ design_history:
         - tests/unit/test_ood_v2_pipeline.py
         - tests/unit/test_ood_v2_protocol_closure.py
       status_for_every_path: modified
+  private_remote_authentication_preflight:
+    predecessor_amended_implementation_revision: b5727c47dc719a8ec3d51deacad9936fd9df2a50
+    predecessor_amended_parent_config_file_sha256: sha256:33da72f63106f7783ff63bf40f33ca94d55dac457d05bdc551a26fa72d11fac0
+    predecessor_amended_frozen_at_utc: "2026-08-29T22:49:01Z"
+    outcome: refused_before_new_successor_external_source_access
+    reasons:
+      - restricted_execution_network_transport_unavailable
+      - private_remote_required_explicit_credential_helper_under_sanitized_git
+    new_successor_external_source_archive_header_record_metadata_or_waveform_byte_read: false
+    new_successor_trained_checkpoint_or_inference_access_occurred: false
+    preserved_predecessor_metadata_inventory_evidence_reread: true
+    git_runtime_and_project_source_metadata_reread: true
+    successor_inventory_claim_or_output_created: false
+    authenticated_git_metadata_feasibility_probes_observed: true
+    observed_git_metadata:
+      repository_visibility: private
+      anonymous_exact_git_query_denied: true
+      exact_expected_four_ref_lines: true
+      release_asset_fetched_or_authenticated: false
+    credential_observation_boundary:
+      git_and_gcm_process_memory_and_https_exchange: necessarily_contains_secret
+      python_launcher_supplied_secret: forbidden
+      captured_subprocess_streams: streamed_with_fixed_caps_without_logging_hashing_evidence_or_error_disclosure
+      credential_store_contents: intentionally_unbound_and_excluded
+      authorization_scope_runtime_verifiable: false
+    amendment: pin_bound_gcm_wincred_noninteractive_authentication_for_exact_private_remote_only
+    amendment_revision_contract:
+      commit_count_after_predecessor_amendment_revision: 1
+      sole_parent: b5727c47dc719a8ec3d51deacad9936fd9df2a50
+      exact_modified_paths:
+        - configs/trust_sentinel_ood_external_v2_1.yaml
+        - docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md
+        - src/ecg_trust/ood_v2/models.py
+        - src/ecg_trust/ood_v2/pipeline.py
+        - tests/unit/test_ood_v2_models.py
+        - tests/unit/test_ood_v2_pipeline.py
+        - tests/unit/test_ood_v2_protocol_closure.py
+      status_for_every_path: modified
   v1_c_influence:
     allowed:
       - historical_aggregate_context_only
@@ -111,6 +149,111 @@ revision_boundary:
       remote_form: lightweight_direct_commit_without_peeled_line
       local_object_type: commit
       must_be_ancestor_of_every_required_main_revision: true
+    authentication:
+      repository_visibility: private
+      query_scope: exact_hardcoded_https_url_only
+      visibility_proof:
+        method: anonymous_git_denial_then_authenticated_exact_ref_read
+        anonymous_command_local_config_in_exact_order:
+          - "credential.helper="
+          - "credential.interactive=false"
+          - "credential.guiPrompt=false"
+          - "credential.allowUnsafeRemotes=false"
+          - "http.followRedirects=false"
+          - "http.sslVerify=true"
+        anonymous_environment: exact_sanitized_git_environment_without_credential_or_proxy_inputs
+        anonymous_standard_input: exact_os_devnull
+        anonymous_return_code: 128
+        anonymous_standard_output: exact_empty
+        anonymous_standard_error:
+          exact_ascii: "fatal: unable to get password from user\n"
+          size_bytes: 40
+          treatment: byte_compared_then_discarded_without_decoding_or_disclosure
+        authenticated_query_must_follow_and_succeed: true
+      process_boundary:
+        platform: windows
+        launcher: create_process_w_with_startupinfoex
+        creation_flags:
+          extended_startupinfo_present: "0x00080000"
+          create_unicode_environment: "0x00000400"
+          create_no_window: "0x08000000"
+        atomic_process_attributes:
+          handle_list: "0x00020002"
+          job_list: "0x0002000D"
+        inherited_handles_in_exact_order:
+          - os_devnull_standard_input
+          - bounded_standard_output_pipe_writer
+          - bounded_standard_error_pipe_writer
+        job_object:
+          name: unnamed
+          limit_kill_on_job_close: "0x00002000"
+          descendant_breakaway: forbidden
+          active_processes_after_cleanup: 0
+        stream_capture:
+          implementation: concurrent_win32_read_file
+          git_remote_standard_output_limit_bytes: 4096
+          git_remote_standard_error_limit_bytes: 4096
+          gcm_version_standard_output_limit_bytes: 256
+          gcm_version_standard_error_limit_bytes: 256
+          caller_timeouts_seconds:
+            git_remote: 60.0
+            gcm_version: 30.0
+          cleanup_timeout_seconds: 10.0
+          timeout_overflow_or_read_failure: terminate_job_and_require_zero_active_processes
+          execution_failure_mutable_buffers: overwritten_then_cleared
+          completed_stream_bytes: released_after_exact_semantic_validation_without_serialization
+          interrupt_or_other_base_exception: cleanup_wipe_and_fresh_generic_integrity_error
+          temporary_files: forbidden
+          failure_disclosure: generic_without_cause_context_or_captured_bytes
+      credential_helper:
+        implementation: git_credential_manager
+        executable_name: git-credential-manager.exe
+        version: 2.7.3+5fa7116896c82164996a609accd1c5ad90fe730a
+        size_bytes: 133192
+        file_sha256: sha256:b7f0e61535b7bab81ea11126ecf1e7ad4486426df69921a78a680dc40bae2c12
+        covered_by_bound_mingw64_tree: true
+        credential_store: windows_credential_manager
+        namespace: git
+      command_local_config_in_exact_order:
+        - "credential.helper="
+        - "credential.helper=manager"
+        - "credential.interactive=false"
+        - "credential.guiPrompt=false"
+        - "credential.allowUnsafeRemotes=false"
+        - "credential.credentialStore=wincredman"
+        - "credential.namespace=git"
+        - "credential.useHttpPath=false"
+        - "credential.username=Ahmad986Ferdaws"
+        - "credential.https://github.com.provider=github"
+        - "credential.trace=false"
+        - "credential.traceSecrets=false"
+        - "credential.traceMsAuth=false"
+        - "credential.debug=false"
+        - "http.followRedirects=false"
+        - "http.sslVerify=true"
+      gcm_environment_exact:
+        GCM_ALLOW_UNSAFE_REMOTES: "0"
+        GCM_CREDENTIAL_STORE: wincredman
+        GCM_DEBUG: "0"
+        GCM_GUI_PROMPT: "0"
+        GCM_INTERACTIVE: "0"
+        GCM_NAMESPACE: git
+        GCM_PROVIDER: github
+        GCM_TRACE: "0"
+        GCM_TRACE_MSAUTH: "0"
+        GCM_TRACE_SECRETS: "0"
+      standard_input: exact_os_devnull
+      standard_output: exact_raw_utf8_ref_advertisement_only
+      standard_error: exact_empty
+      failure: generic_fail_closed_without_helper_output_or_fallback
+      trusted_os_broker:
+        windows_credential_manager_and_clr: trusted_but_not_path_free_hash_bound
+        credential_contents: operator_managed_unbound_and_excluded
+        credential_authorization_scope_runtime_verifiable: false
+      secret_boundary:
+        git_and_gcm_process_memory_and_https_exchange: necessarily_contains_secret
+        url_argv_environment_python_inputs_logs_hashes_evidence_artifacts: secret_forbidden
+        captured_subprocess_streams: streamed_with_fixed_caps_without_logging_hashing_evidence_or_error_disclosure
     any_other_advertised_remote_ref: forbidden
     must_equal_implementation_revision_at_child_freeze: true
     must_equal_execution_revision_preclaim_and_post_evaluation: true

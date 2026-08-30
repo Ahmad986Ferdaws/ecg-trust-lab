@@ -41,6 +41,31 @@ forbidden. This Git-ref check neither fetches nor authenticates the GitHub
 release asset; asset integrity remains governed separately by
 `TRUST_SENTINEL_PRIVATE_BACKUP.md` and is not an execution dependency.
 
+The resulting tag-amended revision
+`b5727c47dc719a8ec3d51deacad9936fd9df2a50` then refused twice at the same
+pre-inventory remote boundary. The restricted execution could not reach
+GitHub, and the network-enabled execution correctly rejected the private
+repository when the sanitized Git process had no explicit credential helper.
+Both refusals preceded any new-successor external-source archive,
+header/record metadata, waveform, trained-checkpoint, or inference access and
+created no successor inventory, child, claim, or output. They did reread the
+already-frozen predecessor metadata/inventory evidence, Git/runtime metadata,
+and imported project source code.
+
+Before this second amendment was frozen, infrastructure-only probes established
+that the exact four expected Git refs can be read with the already-bound Git
+Credential Manager under a hardened, noninteractive command. Those probes
+observed Git metadata only; they did not fetch or authenticate the release
+asset. Git and GCM necessarily hold the credential in helper-process memory and
+the HTTPS exchange. The launcher never supplies the secret through the URL,
+argv, environment, Python inputs, configuration, logs, hashes, evidence, or
+artifacts. Child stdout and stderr are treated as untrusted: their bytes may
+enter Python memory before validation, but are checked against fixed size
+limits, discarded, and never included in application errors, logs, hashes,
+evidence, or artifacts.
+Credential contents and authorization scope are operator-managed and
+intentionally unbound; the code cannot prove least-privilege token scope.
+
 ## Evidence boundary and v1 history
 
 The aggregate v1 source-support result was already known when both external
@@ -196,14 +221,47 @@ evaluate/verify entrypoints are bound by exact path, size, SHA-256, worktree
 bytes, and X/Y Git blobs. Git itself is the exact 2.53.0 executable and full
 `mingw64` runtime tree, run with a sanitized environment, explicit Git/worktree
 directories, disabled replacement/config redirection, and a strict local-
-config allowlist. The NVIDIA query binds exact `nvidia-smi.exe`, `nvml.dll`,
-and `nvcuda.dll` bytes and driver 596.49. The exact 7-Zip 26.02 executable and
-library are copied into a fresh two-file application directory for every
-call; a separate empty cwd and minimal `PATH` prevent adjacent codecs,
-formats, plugins, caller-directory DLLs, or caller environment from executing.
-All runtime trees and tools are recomputed at child freeze, immediately before
-the claim, after evaluation, and during terminal semantic verification.
-Absolute user paths are never published.
+config allowlist. An anonymous query first clears every credential helper and
+must return code 128, empty stdout, and the exact 40-byte ASCII Git denial
+`fatal: unable to get password from user\n`; the stderr is byte-compared and
+discarded without decoding or disclosure. DNS, TLS, transport, and other Git
+failures therefore cannot substitute for credential denial. The authenticated
+query must then succeed against the same hardcoded URL and return the exact
+frozen refs. This denial-then-success pair is the runtime proof that the
+endpoint is not publicly Git-readable. Only the authenticated query may invoke the exact
+`git-credential-manager.exe` 2.7.3 binary already inside the bound tree. Its
+command-local configuration first clears all helpers, then pins GCM, Windows
+Credential Manager storage, the default `git` namespace, GitHub provider,
+public account name, noninteractive/no-GUI operation, HTTPS certificate
+verification, no redirects, and disabled trace/secret-trace/debug settings.
+An exact nonsecret GCM environment redundantly pins those security-critical
+settings above registry defaults. Standard input is `NUL`; stdout must be the
+exact raw ref advertisement and stderr must be empty. There is no authentication
+fallback. Each GCM or remote process is created with raw Windows
+`CreateProcessW` plus `STARTUPINFOEX`: `PROC_THREAD_ATTRIBUTE_JOB_LIST`
+atomically places it in an unnamed Job Object before it can run, while
+`PROC_THREAD_ATTRIBUTE_HANDLE_LIST` permits exactly `NUL`, the stdout-pipe
+writer, and the stderr-pipe writer to cross the process boundary. The Job uses
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, forbids descendant breakaway, and must
+report zero active processes after cleanup. Concurrent `ReadFile` drains cap
+each Git-remote stream at 4,096 bytes and each GCM-version stream at 256 bytes.
+The GCM and remote caller timeouts are 30 and 60 seconds; timeout, overflow, or
+reader failure terminates the whole Job tree, verifies cleanup within 10
+seconds, overwrites the mutable capture bytearrays, and raises a generic
+context-free error. Normally completed stream bytes are released after exact
+semantic validation without serialization. An interrupt such as `Ctrl+C` or
+any other `BaseException` is normalized only after Job cleanup and buffer
+erasure into the same fresh generic integrity error. No temporary capture files
+are used. Windows Credential Manager and the CLR are explicitly trusted OS
+secret brokers, not falsely claimed as part of the path-free `mingw64` hash
+closure. The NVIDIA query binds
+exact `nvidia-smi.exe`, `nvml.dll`, and `nvcuda.dll` bytes and driver 596.49. The
+exact 7-Zip 26.02 executable and library are copied into a fresh two-file
+application directory for every call; a separate empty cwd and minimal `PATH`
+prevent adjacent codecs, formats, plugins, caller-directory DLLs, or caller
+environment from executing. All runtime trees and tools are recomputed at child
+freeze, immediately before the claim, after evaluation, and during terminal
+semantic verification. Absolute user paths are never published.
 
 ## Five-state decision path
 
@@ -262,15 +320,17 @@ denominator-integrity gates, not additional inferential endpoints.
 
 ## One-shot execution and failure semantics
 
-The parent and exact child must be committed and pushed before access. The
-first frozen successor revision `85b55d0...` and amended implementation
-revision X are consecutive: X has that first freeze as its sole parent and
-modifies exactly the seven declared config, protocol, implementation, and test
-paths. The implementation revision X and child-freeze execution revision Y are
-also consecutive: Y has X as its sole parent, exactly one commit lies in
-`X..Y`, and that commit adds only the tracked child plus its aggregate public
-inventory projection. The private inventory remains ignored and untracked. The only Git
-remote is `origin`, its fetch and push URL are exactly
+The parent and exact child must be committed and pushed before access. The first
+frozen successor revision `85b55d0...`, tag-amended revision `b5727c4...`, and
+final private-auth implementation revision X form two consecutive sole-parent
+amendments. Each amendment modifies exactly the same seven declared config,
+protocol, implementation, and test paths; their historical parent bytes and
+diffs are independently verified. The implementation revision X and
+child-freeze execution revision Y are also consecutive: Y has X as its sole
+parent, exactly one commit lies in `X..Y`, and that commit adds only the tracked
+child plus its aggregate public inventory projection. The private inventory
+remains ignored and untracked. The only Git remote is `origin`, its fetch and
+push URL are exactly
 `https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git`, and
 `refs/remotes/origin/main` must equal X at child freeze and Y immediately
 before the claim and after evaluation. A live `git ls-remote --symref` against
@@ -281,8 +341,13 @@ symref, HEAD and `refs/heads/main` at that revision, plus the required pinned
 forbidden. The tag must remain a lightweight direct-commit ref with no peeled
 line; its local object must be a commit and an ancestor of the current X or Y,
 so it adds no protected-history reachability beyond `main`. The local tracking
-ref alone is not accepted as proof of push.
-Output and claim paths must be absent.
+ref alone is not accepted as proof of push. Because the repository is private,
+the authenticated query uses only the frozen noninteractive GCM/WinCred
+boundary above. Its explicit `credential.useHttpPath=false` lookup is
+host/account-scoped even though the network target is the one exact repository
+URL; credential contents and authorization scope remain operator-managed and
+runtime-unverifiable. The preceding visibility probe and all other Git
+operations remain credentialless. Output and claim paths must be absent.
 
 Shallow repository state (`.git/shallow` or `.git/shallow.lock`), object
 alternates, grafts, replacement refs, sparse checkout, or linked-worktree

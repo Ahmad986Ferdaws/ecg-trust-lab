@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import _thread
 import json
 import os
 import shutil
 import subprocess
+import sys
+import threading
+import time
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -11,6 +15,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import numpy as np
+import psutil  # type: ignore[import-untyped]
 import pytest
 import torch
 import yaml  # type: ignore[import-untyped]
@@ -285,12 +290,55 @@ def test_successor_preflight_rejects_hash_identical_parent_copy(
             "0" * 40,
             "successor pre-inventory amendment declaration differs",
         ),
+        (
+            (
+                "design_history",
+                "private_remote_authentication_preflight",
+                "predecessor_amended_implementation_revision",
+            ),
+            "0" * 40,
+            "successor private-remote authentication amendment declaration differs",
+        ),
+        (
+            (
+                "revision_boundary",
+                "remote",
+                "authentication",
+                "gcm_environment_exact",
+                "GCM_TRACE_SECRETS",
+            ),
+            "1",
+            "successor remote declaration differs",
+        ),
+        (
+            (
+                "revision_boundary",
+                "remote",
+                "authentication",
+                "visibility_proof",
+                "anonymous_return_code",
+            ),
+            0,
+            "successor remote declaration differs",
+        ),
+        (
+            (
+                "revision_boundary",
+                "remote",
+                "authentication",
+                "process_boundary",
+                "stream_capture",
+                "git_remote_standard_output_limit_bytes",
+            ),
+            8_192,
+            "successor remote declaration differs",
+        ),
     ),
 )
 def test_successor_preflight_enforces_remote_and_amendment_semantics(
     tmp_path: Path,
     keys: tuple[str, ...],
-    replacement: str,
+    replacement: object,
     message: str,
 ) -> None:
     isolated = _isolated_successor_preflight_project(tmp_path)
@@ -915,14 +963,6 @@ def test_live_git_remote_state_requires_exact_main_and_backup_tag_lines(
             stdout = pipeline.EXPECTED_GIT_REMOTE_URL + "\n"
         elif arguments[:2] == ("rev-parse", "--verify"):
             stdout = revision + "\n"
-        elif arguments[:2] == ("ls-remote", "--symref"):
-            stdout = (
-                "ref: refs/heads/main\tHEAD\n"
-                f"{revision}\tHEAD\n"
-                f"{revision}\trefs/heads/main\n"
-                f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
-                f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
-            )
         elif arguments[:2] == ("cat-file", "-t"):
             stdout = "commit\n"
         elif arguments[:2] == ("merge-base", "--is-ancestor"):
@@ -931,25 +971,40 @@ def test_live_git_remote_state_requires_exact_main_and_backup_tag_lines(
             raise AssertionError(arguments)
         return SimpleNamespace(stdout=stdout, stderr="", returncode=0)
 
+    exact_remote = (
+        "ref: refs/heads/main\tHEAD\n"
+        f"{revision}\tHEAD\n"
+        f"{revision}\trefs/heads/main\n"
+        f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+        f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+    )
     monkeypatch.setattr(pipeline, "_run_git", exact_git)
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_private_remote_anonymous_denial",
+        lambda _root: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_run_exact_private_live_remote",
+        lambda _root: exact_remote,
+    )
     pipeline._verify_git_remote_state(  # noqa: SLF001
         tmp_path,
         expected_revision=revision,
     )
 
-    def forged_remote(_root: Path, *arguments: str, **kwargs: object) -> Any:
-        result = exact_git(_root, *arguments, **kwargs)
-        if arguments[:2] == ("ls-remote", "--symref"):
-            result.stdout = (
-                "ref: refs/heads/main\tHEAD\n"
-                f"{'b' * 40}\tHEAD\n"
-                f"{'b' * 40}\trefs/heads/main\n"
-                f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
-                f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
-            )
-        return result
-
-    monkeypatch.setattr(pipeline, "_run_git", forged_remote)
+    monkeypatch.setattr(
+        pipeline,
+        "_run_exact_private_live_remote",
+        lambda _root: (
+            "ref: refs/heads/main\tHEAD\n"
+            f"{'b' * 40}\tHEAD\n"
+            f"{'b' * 40}\trefs/heads/main\n"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+        ),
+    )
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
         match="not the exact pushed frozen revision",
@@ -966,6 +1021,11 @@ def test_live_git_remote_state_requires_exact_main_and_backup_tag_lines(
         return result
 
     monkeypatch.setattr(pipeline, "_run_git", non_ancestor_tag)
+    monkeypatch.setattr(
+        pipeline,
+        "_run_exact_private_live_remote",
+        lambda _root: exact_remote,
+    )
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
         match="not the exact pushed frozen revision",
@@ -976,9 +1036,891 @@ def test_live_git_remote_state_requires_exact_main_and_backup_tag_lines(
         )
 
 
+@pytest.mark.parametrize(
+    "malformed_suffix",
+    (
+        "\n",
+        f"{'3' * 40}\trefs/heads/extra\n",
+        "github_pat_synthetic_secret_must_not_surface\n",
+    ),
+)
+def test_live_git_remote_state_rejects_malformed_authenticated_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    malformed_suffix: str,
+) -> None:
+    revision = "a" * 40
+    exact_remote = (
+        "ref: refs/heads/main\tHEAD\n"
+        f"{revision}\tHEAD\n"
+        f"{revision}\trefs/heads/main\n"
+        f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+        f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+    )
+
+    def local_git(_root: Path, *arguments: str, **_kwargs: object) -> Any:
+        if arguments == ("remote",):
+            stdout = "origin\n"
+        elif arguments[:3] == ("remote", "get-url", "--all") or arguments[:4] == (
+            "remote",
+            "get-url",
+            "--push",
+            "--all",
+        ):
+            stdout = pipeline.EXPECTED_GIT_REMOTE_URL + "\n"
+        elif arguments[:2] == ("rev-parse", "--verify"):
+            stdout = revision + "\n"
+        elif arguments[:2] == ("cat-file", "-t"):
+            stdout = "commit\n"
+        elif arguments[:2] == ("merge-base", "--is-ancestor"):
+            stdout = ""
+        else:
+            raise AssertionError(arguments)
+        return SimpleNamespace(stdout=stdout, stderr="", returncode=0)
+
+    monkeypatch.setattr(pipeline, "_run_git", local_git)
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_private_remote_anonymous_denial",
+        lambda _root: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_run_exact_private_live_remote",
+        lambda _root: exact_remote + malformed_suffix,
+    )
+    with pytest.raises(pipeline.OODExternalV2IntegrityError) as captured:
+        pipeline._verify_git_remote_state(  # noqa: SLF001
+            tmp_path,
+            expected_revision=revision,
+        )
+
+    assert "github_pat_synthetic" not in str(captured.value)
+    assert "exact pushed frozen revision" in str(captured.value)
+
+
+def test_private_remote_security_contract_has_literal_exact_values() -> None:
+    assert pipeline.PRIVATE_REMOTE_ANONYMOUS_GIT_CONFIG == (
+        "credential.helper=",
+        "credential.interactive=false",
+        "credential.guiPrompt=false",
+        "credential.allowUnsafeRemotes=false",
+        "http.followRedirects=false",
+        "http.sslVerify=true",
+    )
+    assert pipeline.PRIVATE_REMOTE_GIT_CONFIG == (
+        "credential.helper=",
+        "credential.helper=manager",
+        "credential.interactive=false",
+        "credential.guiPrompt=false",
+        "credential.allowUnsafeRemotes=false",
+        "credential.credentialStore=wincredman",
+        "credential.namespace=git",
+        "credential.useHttpPath=false",
+        "credential.username=Ahmad986Ferdaws",
+        "credential.https://github.com.provider=github",
+        "credential.trace=false",
+        "credential.traceSecrets=false",
+        "credential.traceMsAuth=false",
+        "credential.debug=false",
+        "http.followRedirects=false",
+        "http.sslVerify=true",
+    )
+    assert tuple(pipeline.PRIVATE_REMOTE_GCM_ENVIRONMENT.items()) == (
+        ("GCM_ALLOW_UNSAFE_REMOTES", "0"),
+        ("GCM_CREDENTIAL_STORE", "wincredman"),
+        ("GCM_DEBUG", "0"),
+        ("GCM_GUI_PROMPT", "0"),
+        ("GCM_INTERACTIVE", "0"),
+        ("GCM_NAMESPACE", "git"),
+        ("GCM_PROVIDER", "github"),
+        ("GCM_TRACE", "0"),
+        ("GCM_TRACE_MSAUTH", "0"),
+        ("GCM_TRACE_SECRETS", "0"),
+    )
+    assert pipeline.EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION_STDOUT == (
+        b"2.7.3+5fa7116896c82164996a609accd1c5ad90fe730a\r\n"
+    )
+    assert pipeline.EXPECTED_PRIVATE_REMOTE_ANONYMOUS_STDERR == (
+        b"fatal: unable to get password from user\n"
+    )
+
+
+def _process_ids_with_command_marker(marker: str) -> set[int]:
+    observed: set[int] = set()
+    for process in psutil.process_iter(("pid", "cmdline")):
+        try:
+            command_line = process.cmdline()
+        except (OSError, psutil.Error):
+            continue
+        if marker in command_line:
+            observed.add(process.pid)
+    return observed
+
+
+def _observe_process_marker(
+    marker: str,
+    stop: threading.Event,
+    observed: set[int],
+) -> None:
+    while not stop.wait(0.01):
+        observed.update(_process_ids_with_command_marker(marker))
+
+
+def _tree_probe_command(marker: str, *, overflow_stream: int | None) -> list[str]:
+    overflow = ""
+    if overflow_stream is not None:
+        overflow = f"os.write({overflow_stream},b'x'*65536);"
+    child = (
+        "import os,subprocess,sys,time;"
+        "subprocess.Popen([sys.executable,'-c',"
+        "'import time;time.sleep(60)',sys.argv[1]]);"
+        "print(sys.argv[1],flush=True);"
+        "time.sleep(0.3);"
+        f"{overflow}"
+        "time.sleep(60)"
+    )
+    return [sys.executable, "-c", child, marker]
+
+
+def test_bounded_windows_process_contract_has_exact_atomic_job_values() -> None:
+    assert pipeline.WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE == 0x00002000
+    assert pipeline.WINDOWS_PROCESS_ATTRIBUTE_HANDLE_LIST == 0x00020002
+    assert pipeline.WINDOWS_PROCESS_ATTRIBUTE_JOB_LIST == 0x0002000D
+    assert pipeline.WINDOWS_EXTENDED_STARTUPINFO_PRESENT == 0x00080000
+    assert pipeline.WINDOWS_CREATE_UNICODE_ENVIRONMENT == 0x00000400
+    assert pipeline.WINDOWS_CREATE_NO_WINDOW == 0x08000000
+    assert pipeline.PRIVATE_REMOTE_STDOUT_LIMIT_BYTES == 4_096
+    assert pipeline.PRIVATE_REMOTE_STDERR_LIMIT_BYTES == 4_096
+    assert pipeline.GCM_VERSION_STDOUT_LIMIT_BYTES == 256
+    assert pipeline.GCM_VERSION_STDERR_LIMIT_BYTES == 256
+    assert pipeline.PRIVATE_REMOTE_TIMEOUT_SECONDS == 60.0
+    assert pipeline.GCM_VERSION_TIMEOUT_SECONDS == 30.0
+    assert pipeline.WINDOWS_PRIVATE_PROCESS_CLEANUP_TIMEOUT_SECONDS == 10.0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="exact frozen Windows process contract")
+def test_bounded_windows_process_returns_exact_streams_status_env_cwd_and_devnull(
+    tmp_path: Path,
+) -> None:
+    environment = {
+        "BOUND_PROCESS_EXACT": "synthetic-value",
+        "PATH": os.fspath(Path(sys.executable).parent),
+        "SYSTEMROOT": os.environ["SYSTEMROOT"],
+    }
+    child = (
+        "import os,sys;"
+        "stdin_bytes=sys.stdin.buffer.read();"
+        "sys.stdout.write(os.getcwd()+'|'+os.environ['BOUND_PROCESS_EXACT']+'|'"
+        "+str(len(stdin_bytes)));"
+        "sys.stderr.write('synthetic-stderr');"
+        "raise SystemExit(7)"
+    )
+
+    completed = pipeline._run_bounded_windows_process(  # noqa: SLF001
+        [sys.executable, "-c", child],
+        cwd=tmp_path,
+        environment=environment,
+        timeout_seconds=5,
+        stdout_limit_bytes=1_024,
+        stderr_limit_bytes=1_024,
+        failure_message="synthetic bounded process failed",
+    )
+
+    assert completed.returncode == 7
+    assert completed.stdout.decode() == f"{tmp_path}|synthetic-value|0"
+    assert completed.stderr == b"synthetic-stderr"
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="exact frozen Windows process contract")
+def test_bounded_windows_process_timeout_kills_child_and_grandchild(
+    tmp_path: Path,
+) -> None:
+    marker = f"ecg-bounded-timeout-{os.getpid()}-{time.time_ns()}"
+    observed_pids: set[int] = set()
+    stop_observer = threading.Event()
+    observer = threading.Thread(
+        target=_observe_process_marker,
+        args=(marker, stop_observer, observed_pids),
+        daemon=True,
+    )
+    observer.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(pipeline.OODExternalV2IntegrityError) as captured:
+            pipeline._run_bounded_windows_process(  # noqa: SLF001
+                _tree_probe_command(marker, overflow_stream=None),
+                cwd=tmp_path,
+                environment=dict(os.environ),
+                timeout_seconds=1.5,
+                stdout_limit_bytes=4_096,
+                stderr_limit_bytes=4_096,
+                failure_message="synthetic bounded process failed",
+            )
+    finally:
+        stop_observer.set()
+        observer.join(2)
+
+    assert str(captured.value) == "synthetic bounded process failed"
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert len(observed_pids) >= 2
+    assert _process_ids_with_command_marker(marker) == set()
+    assert time.monotonic() - started < 12
+    assert not observer.is_alive()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="exact frozen Windows process contract")
+@pytest.mark.parametrize("overflow_stream", (1, 2))
+def test_bounded_windows_process_overflow_kills_child_and_grandchild(
+    tmp_path: Path,
+    overflow_stream: int,
+) -> None:
+    marker = (
+        f"ecg-bounded-overflow-{overflow_stream}-{os.getpid()}-{time.time_ns()}"
+    )
+    observed_pids: set[int] = set()
+    stop_observer = threading.Event()
+    observer = threading.Thread(
+        target=_observe_process_marker,
+        args=(marker, stop_observer, observed_pids),
+        daemon=True,
+    )
+    observer.start()
+    try:
+        with pytest.raises(pipeline.OODExternalV2IntegrityError) as captured:
+            pipeline._run_bounded_windows_process(  # noqa: SLF001
+                _tree_probe_command(marker, overflow_stream=overflow_stream),
+                cwd=tmp_path,
+                environment=dict(os.environ),
+                timeout_seconds=5,
+                stdout_limit_bytes=1_024,
+                stderr_limit_bytes=1_024,
+                failure_message="synthetic bounded process failed",
+            )
+    finally:
+        stop_observer.set()
+        observer.join(2)
+
+    assert str(captured.value) == "synthetic bounded process failed"
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert len(observed_pids) >= 2
+    assert _process_ids_with_command_marker(marker) == set()
+    assert not observer.is_alive()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="exact frozen Windows process contract")
+def test_bounded_windows_process_interrupt_wipes_buffers_and_kills_tree(
+    tmp_path: Path,
+) -> None:
+    marker = f"SYNTHETIC_INTERRUPT_CAPTURE_SECRET_{os.getpid()}_{time.time_ns()}"
+    child = (
+        "import subprocess,sys,time;"
+        "subprocess.Popen([sys.executable,'-c',"
+        "'import time;time.sleep(60)',sys.argv[1]]);"
+        "print(sys.argv[1],flush=True);"
+        "time.sleep(60)"
+    )
+    command = [sys.executable, "-c", child, marker]
+    observed_pids: set[int] = set()
+    stop_observer = threading.Event()
+    observer = threading.Thread(
+        target=_observe_process_marker,
+        args=(marker, stop_observer, observed_pids),
+        daemon=True,
+    )
+    observer.start()
+    interrupt_requested = threading.Event()
+    interrupt_abort = threading.Event()
+
+    def request_interrupt_after_tree_observed() -> None:
+        deadline = time.monotonic() + 3
+        while len(observed_pids) < 2 and time.monotonic() < deadline:
+            if interrupt_abort.wait(0.01):
+                return
+        interrupt_requested.set()
+        _thread.interrupt_main()
+
+    interrupt = threading.Thread(
+        target=request_interrupt_after_tree_observed,
+        daemon=True,
+    )
+    interrupt.start()
+    try:
+        with pytest.raises(pipeline.OODExternalV2IntegrityError) as captured:
+            pipeline._run_bounded_windows_process(  # noqa: SLF001
+                command,
+                cwd=tmp_path,
+                environment=dict(os.environ),
+                timeout_seconds=4,
+                stdout_limit_bytes=4_096,
+                stderr_limit_bytes=4_096,
+                failure_message="synthetic bounded process failed",
+            )
+    finally:
+        interrupt_abort.set()
+        interrupt.join(4)
+        stop_observer.set()
+        observer.join(2)
+
+    assert str(captured.value) == "synthetic bounded process failed"
+    assert marker not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    traceback = captured.value.__traceback__
+    while traceback is not None:
+        for value in traceback.tb_frame.f_locals.values():
+            if isinstance(value, bytearray):
+                assert marker.encode() not in bytes(value)
+        traceback = traceback.tb_next
+    assert len(observed_pids) >= 2
+    assert interrupt_requested.is_set()
+    assert _process_ids_with_command_marker(marker) == set()
+    assert not interrupt.is_alive()
+    assert not observer.is_alive()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_private_live_remote_environment_overrides_gcm_and_discards_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    inherited = (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GIT_ASKPASS",
+        "SSH_ASKPASS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "GCM_AUTHORITY",
+        "GCM_CREDENTIAL_STORE",
+        "GCM_DEBUG",
+        "GCM_INTERACTIVE",
+        "GCM_PROVIDER",
+        "GCM_TRACE",
+        "GCM_TRACE_SECRETS",
+    )
+    for name in inherited:
+        monkeypatch.setenv(name, "synthetic-secret-or-control")
+
+    base = pipeline._sanitized_git_environment(executable)  # noqa: SLF001
+    observed = pipeline._private_live_remote_environment(executable)  # noqa: SLF001
+
+    expected = dict(base)
+    expected.update(pipeline.PRIVATE_REMOTE_GCM_ENVIRONMENT)
+    assert observed == expected
+    assert not {
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GIT_ASKPASS",
+        "SSH_ASKPASS",
+    }.intersection(observed)
+    assert observed["GCM_CREDENTIAL_STORE"] == "wincredman"
+    assert observed["GCM_INTERACTIVE"] == "0"
+    assert observed["GCM_TRACE_SECRETS"] == "0"
+
+
+def test_private_remote_anonymous_denial_is_exact_and_credentialless(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    base_environment = {"PATH": os.fspath(executable.parent)}
+    observed: dict[str, object] = {}
+    monkeypatch.setattr(
+        pipeline,
+        "_git_executable_paths",
+        lambda: (tmp_path / "cmd" / "git.exe", executable, tmp_path),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_runtime_tree_before_provenance",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_repository_controls",
+        lambda root: observed.setdefault("controls_root", root),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_sanitized_git_environment",
+        lambda value: dict(base_environment) if value == executable else {},
+    )
+
+    def denied_run(
+        command: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[bytes]:
+        observed.update(command=command, **kwargs)
+        return subprocess.CompletedProcess(
+            command,
+            128,
+            b"",
+            pipeline.EXPECTED_PRIVATE_REMOTE_ANONYMOUS_STDERR,
+        )
+
+    monkeypatch.setattr(pipeline, "_run_bounded_windows_process", denied_run)
+    pipeline._verify_private_remote_anonymous_denial(tmp_path)  # noqa: SLF001
+
+    anonymous_arguments = [
+        item
+        for config_entry in pipeline.PRIVATE_REMOTE_ANONYMOUS_GIT_CONFIG
+        for item in ("-c", config_entry)
+    ]
+    assert observed["command"] == pipeline._bound_git_command(  # noqa: SLF001
+        tmp_path,
+        executable,
+        *anonymous_arguments,
+        "ls-remote",
+        "--symref",
+        pipeline.EXPECTED_GIT_REMOTE_URL,
+    )
+    assert "credential.helper=manager" not in cast(list[str], observed["command"])
+    assert observed["controls_root"] == tmp_path
+    assert observed["cwd"] == executable.parent
+    assert observed["environment"] == base_environment
+    assert observed["timeout_seconds"] == 60
+    assert observed["stdout_limit_bytes"] == pipeline.PRIVATE_REMOTE_STDOUT_LIMIT_BYTES
+    assert observed["stderr_limit_bytes"] == pipeline.PRIVATE_REMOTE_STDERR_LIMIT_BYTES
+    assert observed["failure_message"] == (
+        "private Git remote anonymous-access probe failed"
+    )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr"),
+    (
+        (0, b"public refs\n", b""),
+        (128, b"partial refs\n", b"denied\n"),
+        (128, b"", b""),
+        (128, b"", b"network failure\n"),
+        (1, b"", b"denied\n"),
+    ),
+)
+def test_private_remote_anonymous_denial_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    returncode: int,
+    stdout: bytes,
+    stderr: bytes,
+) -> None:
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    monkeypatch.setattr(
+        pipeline,
+        "_git_executable_paths",
+        lambda: (tmp_path / "cmd" / "git.exe", executable, tmp_path),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_runtime_tree_before_provenance",
+        lambda: None,
+    )
+    monkeypatch.setattr(pipeline, "_verify_git_repository_controls", lambda _root: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_sanitized_git_environment",
+        lambda _value: {"PATH": os.fspath(executable.parent)},
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_run_bounded_windows_process",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command,
+            returncode,
+            stdout,
+            stderr,
+        ),
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="anonymous-access denial was not proven",
+    ):
+        pipeline._verify_private_remote_anonymous_denial(tmp_path)  # noqa: SLF001
+
+
+def test_private_remote_command_rejects_userinfo_and_ambient_secret_carriers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    monkeypatch.setattr(
+        pipeline,
+        "EXPECTED_GIT_REMOTE_URL",
+        "https://token@github.com/Ahmad986Ferdaws/ecg-trust-lab.git",
+    )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="URL boundary differs",
+    ):
+        pipeline._private_remote_command(  # noqa: SLF001
+            tmp_path,
+            executable,
+            authenticated=True,
+        )
+
+    monkeypatch.setattr(
+        pipeline,
+        "EXPECTED_GIT_REMOTE_URL",
+        "https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git",
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_sanitized_git_environment",
+        lambda _value: {
+            "PATH": os.fspath(executable.parent),
+            "GITHUB_TOKEN": "github_pat_synthetic",
+        },
+    )
+    with pytest.raises(pipeline.OODExternalV2IntegrityError) as captured:
+        pipeline._private_remote_command(  # noqa: SLF001
+            tmp_path,
+            executable,
+            authenticated=False,
+        )
+    assert "github_pat_synthetic" not in str(captured.value)
+
+
+def test_git_credential_manager_rejects_missing_or_wrong_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    executable.parent.mkdir(parents=True)
+    monkeypatch.setattr(
+        pipeline,
+        "_assert_direct_ancestry",
+        lambda path, *, context: path,
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="credential manager is unavailable",
+    ):
+        pipeline._git_credential_manager_path(executable)  # noqa: SLF001
+
+    helper = executable.parent / pipeline.EXPECTED_GIT_CREDENTIAL_MANAGER_NAME
+    helper.write_bytes(b"wrong helper bytes")
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="credential manager differs",
+    ):
+        pipeline._git_credential_manager_path(executable)  # noqa: SLF001
+
+
+def test_git_credential_manager_version_probe_is_exact_and_noninteractive(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    helper = executable.parent / pipeline.EXPECTED_GIT_CREDENTIAL_MANAGER_NAME
+    observed: dict[str, object] = {}
+    environment = {"GCM_INTERACTIVE": "0", "PATH": os.fspath(executable.parent)}
+
+    def helper_path(value: Path) -> Path:
+        assert value == executable
+        return helper
+
+    monkeypatch.setattr(pipeline, "_git_credential_manager_path", helper_path)
+    monkeypatch.setattr(
+        pipeline,
+        "_private_live_remote_environment",
+        lambda value: environment if value == executable else {},
+    )
+
+    def fake_run(
+        command: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[bytes]:
+        observed.update(command=command, **kwargs)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            pipeline.EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION_STDOUT,
+            b"",
+        )
+
+    monkeypatch.setattr(pipeline, "_run_bounded_windows_process", fake_run)
+    pipeline._verify_git_credential_manager(executable)  # noqa: SLF001
+
+    assert observed == {
+        "command": [os.fspath(helper), "--version"],
+        "cwd": helper.parent,
+        "environment": environment,
+        "failure_message": "frozen Git credential manager probe failed",
+        "stderr_limit_bytes": pipeline.GCM_VERSION_STDERR_LIMIT_BYTES,
+        "stdout_limit_bytes": pipeline.GCM_VERSION_STDOUT_LIMIT_BYTES,
+        "timeout_seconds": 30,
+    }
+
+    for invalid_stdout in (
+        b" " + pipeline.EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION_STDOUT,
+        pipeline.EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION_STDOUT + b"\r\n",
+        pipeline.EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION_STDOUT.replace(
+            b"\r\n", b"\n"
+        ),
+        b"2.7.3-forged\r\n",
+    ):
+        monkeypatch.setattr(
+            pipeline,
+            "_run_bounded_windows_process",
+            lambda *_args, _stdout=invalid_stdout, **_kwargs: (
+                subprocess.CompletedProcess([], 0, _stdout, b"")
+            ),
+        )
+        with pytest.raises(
+            pipeline.OODExternalV2IntegrityError,
+            match="credential manager differs",
+        ):
+            pipeline._verify_git_credential_manager(executable)  # noqa: SLF001
+
+
+def test_private_live_remote_uses_exact_argv_env_and_devnull(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    launcher = tmp_path / "cmd" / "git.exe"
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    install_root = tmp_path
+    base_environment = {"PATH": os.fspath(executable.parent)}
+    environment = dict(base_environment)
+    environment.update(pipeline.PRIVATE_REMOTE_GCM_ENVIRONMENT)
+    observed: dict[str, object] = {}
+    monkeypatch.setattr(
+        pipeline,
+        "_git_executable_paths",
+        lambda: (launcher, executable, install_root),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_runtime_tree_before_provenance",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_repository_controls",
+        lambda root: observed.setdefault("controls_root", root),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_credential_manager",
+        lambda value: observed.setdefault("gcm_executable", value),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_sanitized_git_environment",
+        lambda value: dict(base_environment) if value == executable else {},
+    )
+
+    def fake_run(
+        command: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[bytes]:
+        observed.update(command=command, **kwargs)
+        return subprocess.CompletedProcess(command, 0, b"synthetic refs\n", b"")
+
+    monkeypatch.setattr(pipeline, "_run_bounded_windows_process", fake_run)
+    assert pipeline._run_exact_private_live_remote(tmp_path) == "synthetic refs\n"
+
+    credential_arguments = [
+        item
+        for config_entry in pipeline.PRIVATE_REMOTE_GIT_CONFIG
+        for item in ("-c", config_entry)
+    ]
+    assert observed["command"] == [
+        os.fspath(executable),
+        "--no-pager",
+        "--no-replace-objects",
+        f"--git-dir={tmp_path / '.git'}",
+        f"--work-tree={tmp_path}",
+        "-c",
+        "core.hooksPath=NUL",
+        "-c",
+        "protocol.file.allow=never",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.untrackedCache=false",
+        "-c",
+        "core.ignoreStat=false",
+        "-c",
+        "core.preloadIndex=false",
+        "-c",
+        "core.checkStat=default",
+        "-c",
+        "core.trustctime=true",
+        "-c",
+        "core.sparseCheckout=false",
+        "-c",
+        "core.sparseCheckoutCone=false",
+        "-c",
+        "extensions.worktreeConfig=false",
+        *credential_arguments,
+        "ls-remote",
+        "--symref",
+        pipeline.EXPECTED_GIT_REMOTE_URL,
+    ]
+    assert observed["controls_root"] == tmp_path
+    assert observed["gcm_executable"] == executable
+    assert observed["cwd"] == executable.parent
+    assert observed["environment"] == environment
+    assert observed["timeout_seconds"] == 60
+    assert observed["stdout_limit_bytes"] == pipeline.PRIVATE_REMOTE_STDOUT_LIMIT_BYTES
+    assert observed["stderr_limit_bytes"] == pipeline.PRIVATE_REMOTE_STDERR_LIMIT_BYTES
+    assert observed["failure_message"] == (
+        "private Git remote preflight could not be executed"
+    )
+
+
+def test_private_live_remote_failure_is_single_attempt_and_never_surfaces_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        pipeline,
+        "_git_executable_paths",
+        lambda: (tmp_path / "cmd" / "git.exe", executable, tmp_path),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_runtime_tree_before_provenance",
+        lambda: None,
+    )
+    monkeypatch.setattr(pipeline, "_verify_git_repository_controls", lambda _root: None)
+    monkeypatch.setattr(pipeline, "_verify_git_credential_manager", lambda _value: None)
+    base_environment = {"PATH": os.fspath(executable.parent)}
+    monkeypatch.setattr(
+        pipeline,
+        "_sanitized_git_environment",
+        lambda _value: dict(base_environment),
+    )
+    secret = "github_pat_synthetic_secret_must_not_surface"
+
+    def failed_run(
+        command: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[bytes]:
+        calls.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            128,
+            f"username=owner password={secret}\n".encode(),
+            f"credential failure {secret}\n".encode(),
+        )
+
+    monkeypatch.setattr(pipeline, "_run_bounded_windows_process", failed_run)
+    with pytest.raises(pipeline.OODExternalV2IntegrityError) as captured:
+        pipeline._run_exact_private_live_remote(tmp_path)
+
+    assert len(calls) == 1
+    assert secret not in str(captured.value)
+    assert secret not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert pipeline.EXPECTED_GIT_REMOTE_URL in calls[0]
+
+
+def test_private_live_remote_timeout_discards_partial_secret_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    command = [os.fspath(executable), "ls-remote", pipeline.EXPECTED_GIT_REMOTE_URL]
+    monkeypatch.setattr(
+        pipeline,
+        "_git_executable_paths",
+        lambda: (tmp_path / "cmd" / "git.exe", executable, tmp_path),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_runtime_tree_before_provenance",
+        lambda: None,
+    )
+    monkeypatch.setattr(pipeline, "_verify_git_repository_controls", lambda _root: None)
+    monkeypatch.setattr(pipeline, "_verify_git_credential_manager", lambda _value: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_private_remote_command",
+        lambda _root, _executable, *, authenticated: (command, {})
+        if authenticated
+        else ([], {}),
+    )
+    secret = b"github_pat_synthetic_timeout_secret"
+
+    def timeout_run(*_args: object, **_kwargs: object) -> None:
+        raise pipeline.OODExternalV2IntegrityError(
+            "private Git remote preflight could not be executed"
+        ) from None
+
+    monkeypatch.setattr(pipeline, "_run_bounded_windows_process", timeout_run)
+    with pytest.raises(pipeline.OODExternalV2IntegrityError) as captured:
+        pipeline._run_exact_private_live_remote(tmp_path)
+
+    assert secret.decode() not in str(captured.value)
+    assert secret.decode() not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
+def test_private_live_remote_invalid_utf8_has_no_retained_exception_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "mingw64" / "bin" / "git.exe"
+    command = [os.fspath(executable), "ls-remote", pipeline.EXPECTED_GIT_REMOTE_URL]
+    monkeypatch.setattr(
+        pipeline,
+        "_git_executable_paths",
+        lambda: (tmp_path / "cmd" / "git.exe", executable, tmp_path),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_git_runtime_tree_before_provenance",
+        lambda: None,
+    )
+    monkeypatch.setattr(pipeline, "_verify_git_repository_controls", lambda _root: None)
+    monkeypatch.setattr(pipeline, "_verify_git_credential_manager", lambda _value: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_private_remote_command",
+        lambda _root, _executable, *, authenticated: (command, {})
+        if authenticated
+        else ([], {}),
+    )
+    secret = b"github_pat_synthetic_invalid_utf8_\xff"
+    monkeypatch.setattr(
+        pipeline,
+        "_run_bounded_windows_process",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            command,
+            0,
+            secret,
+            b"",
+        ),
+    )
+
+    with pytest.raises(pipeline.OODExternalV2IntegrityError) as captured:
+        pipeline._run_exact_private_live_remote(tmp_path)
+
+    assert "github_pat_synthetic" not in str(captured.value)
+    assert "github_pat_synthetic" not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
 def _amendment_git_runner(
     implementation_revision: str,
     *,
+    first_revision_line: str | None = None,
+    first_commit_count: str = "1",
+    first_diff_stdout: str | None = None,
     revision_line: str | None = None,
     commit_count: str = "1",
     diff_stdout: str | None = None,
@@ -986,9 +1928,40 @@ def _amendment_git_runner(
     resolved_diff = diff_stdout
     if resolved_diff is None:
         resolved_diff = "".join(
+            f"M\t{path}\n"
+            for path in pipeline.SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS
+        )
+    first_diff = first_diff_stdout
+    if first_diff is None:
+        first_diff = "".join(
             f"M\t{path}\n" for path in pipeline.SUCCESSOR_AMENDMENT_MODIFIED_PATHS
         )
     responses = {
+        (
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        ): first_revision_line
+        or (
+            f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
+            f"{pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
+        ),
+        (
+            "rev-list",
+            "--count",
+            f"{pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+        ): f"{first_commit_count}\n",
+        (
+            "diff",
+            "--name-status",
+            "--no-renames",
+            f"{pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+            "--",
+        ): first_diff,
         (
             "rev-list",
             "--parents",
@@ -998,19 +1971,19 @@ def _amendment_git_runner(
         ): revision_line
         or (
             f"{implementation_revision} "
-            f"{pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
+            f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
         ),
         (
             "rev-list",
             "--count",
-            f"{pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
         ): f"{commit_count}\n",
         (
             "diff",
             "--name-status",
             "--no-renames",
-            f"{pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
             "--",
         ): resolved_diff,
@@ -1033,14 +2006,14 @@ def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
     tmp_path: Path,
 ) -> None:
     revision = "d" * 40
-    observed: dict[str, object] = {}
+    observed: list[dict[str, object]] = []
     monkeypatch.setattr(pipeline, "_run_git", _amendment_git_runner(revision))
 
     def verify_old_parent(
         _root: Path,
         **kwargs: object,
     ) -> None:
-        observed.update(kwargs)
+        observed.append(dict(kwargs))
 
     monkeypatch.setattr(pipeline, "_verify_historical_revision_blob", verify_old_parent)
     pipeline._verify_successor_amendment_revision(  # noqa: SLF001
@@ -1048,12 +2021,64 @@ def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
         implementation_revision=revision,
     )
 
-    assert observed == {
-        "context": "first frozen successor parent",
-        "expected_file_sha256": pipeline.FIRST_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
-        "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
-        "revision": pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
-    }
+    assert observed == [
+        {
+            "context": "first frozen successor parent",
+            "expected_file_sha256": (
+                pipeline.FIRST_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+            ),
+            "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
+            "revision": pipeline.FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        },
+        {
+            "context": "second frozen successor parent",
+            "expected_file_sha256": (
+                pipeline.SECOND_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+            ),
+            "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
+            "revision": pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "runner_kwargs",
+    (
+        {
+            "first_revision_line": (
+                f"{pipeline.SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
+                f"{'e' * 40}\n"
+            )
+        },
+        {"first_commit_count": "2"},
+        {"first_diff_stdout": "A\tunexpected.txt\n"},
+    ),
+)
+def test_successor_amendment_revision_rejects_x1_to_x2_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runner_kwargs: dict[str, str],
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        _amendment_git_runner(revision, **runner_kwargs),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="first successor amendment",
+    ):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1069,7 +2094,9 @@ def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
             {
                 "diff_stdout": "".join(
                     f"M\t{path}\n"
-                    for path in pipeline.SUCCESSOR_AMENDMENT_MODIFIED_PATHS[:-1]
+                    for path in (
+                        pipeline.SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS[:-1]
+                    )
                 )
             },
             "paths differ",
@@ -1078,7 +2105,7 @@ def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
             {
                 "diff_stdout": "".join(
                     f"M\t{path}\n"
-                    for path in pipeline.SUCCESSOR_AMENDMENT_MODIFIED_PATHS
+                    for path in pipeline.SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS
                 )
                 + "M\textra.txt\n"
             },
@@ -1126,6 +2153,35 @@ def test_successor_amendment_revision_rejects_old_parent_blob_drift(
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
         match="old parent blob differs",
+    ):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+def test_successor_amendment_revision_rejects_x2_parent_blob_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(pipeline, "_run_git", _amendment_git_runner(revision))
+
+    def reject_second_parent(
+        _root: Path,
+        **kwargs: object,
+    ) -> None:
+        if kwargs.get("context") == "second frozen successor parent":
+            raise pipeline.OODExternalV2IntegrityError("X2 parent blob differs")
+
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        reject_second_parent,
+    )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="X2 parent blob differs",
     ):
         pipeline._verify_successor_amendment_revision(  # noqa: SLF001
             tmp_path,

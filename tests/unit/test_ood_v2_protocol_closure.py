@@ -233,7 +233,6 @@ def _private_row(
 def _remote_git_runner(
     revision: str,
     *,
-    live_stdout: str | None = None,
     backup_tag_type: str = "commit",
     backup_tag_ancestor_returncode: int = 0,
     observed: list[tuple[str, ...]] | None = None,
@@ -258,19 +257,6 @@ def _remote_git_runner(
             "--verify",
             pipeline.EXPECTED_GIT_REMOTE_MAIN_REF,
         ): f"{revision}\n",
-        (
-            "ls-remote",
-            "--symref",
-            pipeline.EXPECTED_GIT_REMOTE_URL,
-        ): live_stdout
-        if live_stdout is not None
-        else (
-            "ref: refs/heads/main\tHEAD\n"
-            f"{revision}\tHEAD\n"
-            f"{revision}\trefs/heads/main\n"
-            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
-            f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
-        ),
         (
             "cat-file",
             "-t",
@@ -304,6 +290,16 @@ def _remote_git_runner(
         )
 
     return runner
+
+
+def _exact_live_remote_stdout(revision: str) -> str:
+    return (
+        "ref: refs/heads/main\tHEAD\n"
+        f"{revision}\tHEAD\n"
+        f"{revision}\trefs/heads/main\n"
+        f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
+        f"{pipeline.EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
+    )
 
 
 @pytest.mark.parametrize("relative_path", _ISOLATED_ENTRYPOINTS)
@@ -803,6 +799,16 @@ def test_live_remote_query_requires_exact_main_and_backup_tag_state(
         "_run_git",
         _remote_git_runner(revision, observed=observed),
     )
+    monkeypatch.setattr(
+        pipeline,
+        "_run_exact_private_live_remote",
+        lambda _root: _exact_live_remote_stdout(revision),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_private_remote_anonymous_denial",
+        lambda _root: None,
+    )
 
     pipeline._verify_git_remote_state(tmp_path, expected_revision=revision)
 
@@ -817,11 +823,6 @@ def test_live_remote_query_requires_exact_main_and_backup_tag_state(
             pipeline.EXPECTED_GIT_REMOTE_NAME,
         ),
         ("rev-parse", "--verify", pipeline.EXPECTED_GIT_REMOTE_MAIN_REF),
-        (
-            "ls-remote",
-            "--symref",
-            pipeline.EXPECTED_GIT_REMOTE_URL,
-        ),
         (
             "cat-file",
             "-t",
@@ -855,6 +856,16 @@ def test_live_remote_query_rejects_noncommit_or_nonancestor_backup_tag(
             backup_tag_type=backup_tag_type,
             backup_tag_ancestor_returncode=ancestor_returncode,
         ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_run_exact_private_live_remote",
+        lambda _root: _exact_live_remote_stdout(revision),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_private_remote_anonymous_denial",
+        lambda _root: None,
     )
 
     with pytest.raises(
@@ -1080,7 +1091,17 @@ def test_live_remote_query_rejects_forged_or_ambiguous_output(
     monkeypatch.setattr(
         pipeline,
         "_run_git",
-        _remote_git_runner(revision, live_stdout=live_stdout),
+        _remote_git_runner(revision),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_run_exact_private_live_remote",
+        lambda _root: live_stdout,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_private_remote_anonymous_denial",
+        lambda _root: None,
     )
 
     with pytest.raises(

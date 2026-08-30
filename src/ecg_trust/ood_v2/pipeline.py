@@ -23,6 +23,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import zipfile
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -33,6 +35,7 @@ from fractions import Fraction
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType, ModuleType
 from typing import Any, Final, cast
+from urllib.parse import urlsplit
 
 import numpy as np
 import torch
@@ -184,7 +187,7 @@ EXPECTED_PARENT_CONFIG_SHA256: Final = (
     "sha256:3aacb31be939d1a2bea96bb29f193d60a4b54c38a40a1a7e2a490cfe60c3b0d9"
 )
 EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256: Final[str | None] = (
-    "sha256:33da72f63106f7783ff63bf40f33ca94d55dac457d05bdc551a26fa72d11fac0"
+    "sha256:9b0358be1d4a12ca1771c57d8387c1b332bbef5698e01d3da2707f59157a586c"
 )
 SUCCESSOR_PROTOCOL_ID: Final = PROTOCOL_ID
 PREDECESSOR_TERMINATION_PATH: Final = (
@@ -351,6 +354,17 @@ EXPECTED_GIT_EXECUTABLE_SIZE_BYTES: Final = 4_344_192
 EXPECTED_GIT_EXECUTABLE_SHA256: Final = (
     "sha256:c39b1b4f7a57935bbeadf246dc2466316619453a6a9da77c4a9c6bd6d8fb21d3"
 )
+EXPECTED_GIT_CREDENTIAL_MANAGER_NAME: Final = "git-credential-manager.exe"
+EXPECTED_GIT_CREDENTIAL_MANAGER_SIZE_BYTES: Final = 133_192
+EXPECTED_GIT_CREDENTIAL_MANAGER_SHA256: Final = (
+    "sha256:b7f0e61535b7bab81ea11126ecf1e7ad4486426df69921a78a680dc40bae2c12"
+)
+EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION: Final = (
+    "2.7.3+5fa7116896c82164996a609accd1c5ad90fe730a"
+)
+EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION_STDOUT: Final = (
+    EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION + "\r\n"
+).encode("ascii")
 EXPECTED_GIT_RUNTIME_FILE_COUNT: Final = 4_565
 EXPECTED_GIT_RUNTIME_DIRECTORY_COUNT: Final = 194
 EXPECTED_GIT_RUNTIME_TOTAL_BYTES: Final = 224_959_003
@@ -537,13 +551,97 @@ EXPECTED_GIT_REMOTE_BACKUP_TAG_REF: Final = (
 EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION: Final = (
     "a88ef86e8e0b28dd6f162cda88e16b4159d195d8"
 )
+PRIVATE_REMOTE_GIT_CONFIG: Final[tuple[str, ...]] = (
+    "credential.helper=",
+    "credential.helper=manager",
+    "credential.interactive=false",
+    "credential.guiPrompt=false",
+    "credential.allowUnsafeRemotes=false",
+    "credential.credentialStore=wincredman",
+    "credential.namespace=git",
+    "credential.useHttpPath=false",
+    "credential.username=Ahmad986Ferdaws",
+    "credential.https://github.com.provider=github",
+    "credential.trace=false",
+    "credential.traceSecrets=false",
+    "credential.traceMsAuth=false",
+    "credential.debug=false",
+    "http.followRedirects=false",
+    "http.sslVerify=true",
+)
+PRIVATE_REMOTE_ANONYMOUS_GIT_CONFIG: Final[tuple[str, ...]] = (
+    "credential.helper=",
+    "credential.interactive=false",
+    "credential.guiPrompt=false",
+    "credential.allowUnsafeRemotes=false",
+    "http.followRedirects=false",
+    "http.sslVerify=true",
+)
+EXPECTED_PRIVATE_REMOTE_ANONYMOUS_STDERR: Final = (
+    b"fatal: unable to get password from user\n"
+)
+PRIVATE_REMOTE_GCM_ENVIRONMENT: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "GCM_ALLOW_UNSAFE_REMOTES": "0",
+        "GCM_CREDENTIAL_STORE": "wincredman",
+        "GCM_DEBUG": "0",
+        "GCM_GUI_PROMPT": "0",
+        "GCM_INTERACTIVE": "0",
+        "GCM_NAMESPACE": "git",
+        "GCM_PROVIDER": "github",
+        "GCM_TRACE": "0",
+        "GCM_TRACE_MSAUTH": "0",
+        "GCM_TRACE_SECRETS": "0",
+    }
+)
+PRIVATE_REMOTE_FORBIDDEN_ENVIRONMENT_KEYS: Final[tuple[str, ...]] = (
+    "ALL_PROXY",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GIT_ASKPASS",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "SSH_ASKPASS",
+)
+PRIVATE_REMOTE_STDOUT_LIMIT_BYTES: Final = 4_096
+PRIVATE_REMOTE_STDERR_LIMIT_BYTES: Final = 4_096
+GCM_VERSION_STDOUT_LIMIT_BYTES: Final = 256
+GCM_VERSION_STDERR_LIMIT_BYTES: Final = 256
+PRIVATE_REMOTE_TIMEOUT_SECONDS: Final = 60.0
+GCM_VERSION_TIMEOUT_SECONDS: Final = 30.0
+WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: Final = 0x00002000
+WINDOWS_PROCESS_ATTRIBUTE_HANDLE_LIST: Final = 0x00020002
+WINDOWS_PROCESS_ATTRIBUTE_JOB_LIST: Final = 0x0002000D
+WINDOWS_EXTENDED_STARTUPINFO_PRESENT: Final = 0x00080000
+WINDOWS_CREATE_UNICODE_ENVIRONMENT: Final = 0x00000400
+WINDOWS_CREATE_NO_WINDOW: Final = 0x08000000
+WINDOWS_PRIVATE_PROCESS_CLEANUP_TIMEOUT_SECONDS: Final = 10.0
 FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
     "85b55d0f358e12052b23c8afa7468f2285342181"
 )
 FIRST_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
     "sha256:b60c757c5da69ec0a0929c5d503d434302b406fd35c0d6237aaf23f3ea243f98"
 )
+SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
+    "b5727c47dc719a8ec3d51deacad9936fd9df2a50"
+)
+SECOND_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
+    "sha256:33da72f63106f7783ff63bf40f33ca94d55dac457d05bdc551a26fa72d11fac0"
+)
 SUCCESSOR_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
+    "configs/trust_sentinel_ood_external_v2_1.yaml",
+    "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+    "src/ecg_trust/ood_v2/models.py",
+    "src/ecg_trust/ood_v2/pipeline.py",
+    "tests/unit/test_ood_v2_models.py",
+    "tests/unit/test_ood_v2_pipeline.py",
+    "tests/unit/test_ood_v2_protocol_closure.py",
+)
+SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "configs/trust_sentinel_ood_external_v2_1.yaml",
     "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
     "src/ecg_trust/ood_v2/models.py",
@@ -1243,6 +1341,65 @@ def verify_successor_parent_preflight(
         raise OODExternalV2ConfigError(
             "successor pre-inventory amendment declaration differs"
         )
+    private_remote_amendment = _mapping(
+        design.get("private_remote_authentication_preflight"),
+        "successor private-remote authentication amendment",
+    )
+    expected_private_remote_amendment = {
+        "amendment": (
+            "pin_bound_gcm_wincred_noninteractive_authentication_for_exact_private_remote_only"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_predecessor_amendment_revision": 1,
+            "exact_modified_paths": list(
+                SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS
+            ),
+            "sole_parent": SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+            "status_for_every_path": "modified",
+        },
+        "authenticated_git_metadata_feasibility_probes_observed": True,
+        "credential_observation_boundary": {
+            "authorization_scope_runtime_verifiable": False,
+            "captured_subprocess_streams": (
+                "streamed_with_fixed_caps_without_"
+                "logging_hashing_evidence_or_error_disclosure"
+            ),
+            "credential_store_contents": "intentionally_unbound_and_excluded",
+            "git_and_gcm_process_memory_and_https_exchange": (
+                "necessarily_contains_secret"
+            ),
+            "python_launcher_supplied_secret": "forbidden",
+        },
+        "git_runtime_and_project_source_metadata_reread": True,
+        "new_successor_external_source_archive_header_record_metadata_or_waveform_byte_read": (
+            False
+        ),
+        "new_successor_trained_checkpoint_or_inference_access_occurred": False,
+        "observed_git_metadata": {
+            "anonymous_exact_git_query_denied": True,
+            "exact_expected_four_ref_lines": True,
+            "release_asset_fetched_or_authenticated": False,
+            "repository_visibility": "private",
+        },
+        "outcome": "refused_before_new_successor_external_source_access",
+        "predecessor_amended_frozen_at_utc": "2026-08-29T22:49:01Z",
+        "predecessor_amended_implementation_revision": (
+            SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+        ),
+        "predecessor_amended_parent_config_file_sha256": (
+            SECOND_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+        ),
+        "preserved_predecessor_metadata_inventory_evidence_reread": True,
+        "reasons": [
+            "restricted_execution_network_transport_unavailable",
+            "private_remote_required_explicit_credential_helper_under_sanitized_git",
+        ],
+        "successor_inventory_claim_or_output_created": False,
+    }
+    if private_remote_amendment != expected_private_remote_amendment:
+        raise OODExternalV2ConfigError(
+            "successor private-remote authentication amendment declaration differs"
+        )
     revision_boundary = _mapping(
         payload.get("revision_boundary"),
         "successor revision boundary",
@@ -1256,6 +1413,133 @@ def verify_successor_parent_preflight(
             "purpose": "encrypted_v1_private_evidence_backup",
             "remote_form": "lightweight_direct_commit_without_peeled_line",
             "revision": EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION,
+        },
+        "authentication": {
+            "command_local_config_in_exact_order": list(PRIVATE_REMOTE_GIT_CONFIG),
+            "credential_helper": {
+                "covered_by_bound_mingw64_tree": True,
+                "credential_store": "windows_credential_manager",
+                "executable_name": EXPECTED_GIT_CREDENTIAL_MANAGER_NAME,
+                "file_sha256": EXPECTED_GIT_CREDENTIAL_MANAGER_SHA256,
+                "implementation": "git_credential_manager",
+                "namespace": "git",
+                "size_bytes": EXPECTED_GIT_CREDENTIAL_MANAGER_SIZE_BYTES,
+                "version": EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION,
+            },
+            "failure": "generic_fail_closed_without_helper_output_or_fallback",
+            "gcm_environment_exact": dict(PRIVATE_REMOTE_GCM_ENVIRONMENT),
+            "process_boundary": {
+                "atomic_process_attributes": {
+                    "handle_list": f"0x{WINDOWS_PROCESS_ATTRIBUTE_HANDLE_LIST:08X}",
+                    "job_list": f"0x{WINDOWS_PROCESS_ATTRIBUTE_JOB_LIST:08X}",
+                },
+                "creation_flags": {
+                    "create_no_window": f"0x{WINDOWS_CREATE_NO_WINDOW:08X}",
+                    "create_unicode_environment": (
+                        f"0x{WINDOWS_CREATE_UNICODE_ENVIRONMENT:08X}"
+                    ),
+                    "extended_startupinfo_present": (
+                        f"0x{WINDOWS_EXTENDED_STARTUPINFO_PRESENT:08X}"
+                    ),
+                },
+                "inherited_handles_in_exact_order": [
+                    "os_devnull_standard_input",
+                    "bounded_standard_output_pipe_writer",
+                    "bounded_standard_error_pipe_writer",
+                ],
+                "job_object": {
+                    "active_processes_after_cleanup": 0,
+                    "descendant_breakaway": "forbidden",
+                    "limit_kill_on_job_close": (
+                        f"0x{WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE:08X}"
+                    ),
+                    "name": "unnamed",
+                },
+                "launcher": "create_process_w_with_startupinfoex",
+                "platform": "windows",
+                "stream_capture": {
+                    "caller_timeouts_seconds": {
+                        "gcm_version": GCM_VERSION_TIMEOUT_SECONDS,
+                        "git_remote": PRIVATE_REMOTE_TIMEOUT_SECONDS,
+                    },
+                    "cleanup_timeout_seconds": (
+                        WINDOWS_PRIVATE_PROCESS_CLEANUP_TIMEOUT_SECONDS
+                    ),
+                    "completed_stream_bytes": (
+                        "released_after_exact_semantic_validation_without_serialization"
+                    ),
+                    "execution_failure_mutable_buffers": "overwritten_then_cleared",
+                    "failure_disclosure": (
+                        "generic_without_cause_context_or_captured_bytes"
+                    ),
+                    "gcm_version_standard_error_limit_bytes": (
+                        GCM_VERSION_STDERR_LIMIT_BYTES
+                    ),
+                    "gcm_version_standard_output_limit_bytes": (
+                        GCM_VERSION_STDOUT_LIMIT_BYTES
+                    ),
+                    "git_remote_standard_error_limit_bytes": (
+                        PRIVATE_REMOTE_STDERR_LIMIT_BYTES
+                    ),
+                    "git_remote_standard_output_limit_bytes": (
+                        PRIVATE_REMOTE_STDOUT_LIMIT_BYTES
+                    ),
+                    "implementation": "concurrent_win32_read_file",
+                    "interrupt_or_other_base_exception": (
+                        "cleanup_wipe_and_fresh_generic_integrity_error"
+                    ),
+                    "temporary_files": "forbidden",
+                    "timeout_overflow_or_read_failure": (
+                        "terminate_job_and_require_zero_active_processes"
+                    ),
+                },
+            },
+            "query_scope": "exact_hardcoded_https_url_only",
+            "repository_visibility": "private",
+            "secret_boundary": {
+                "captured_subprocess_streams": (
+                    "streamed_with_fixed_caps_without_"
+                    "logging_hashing_evidence_or_error_disclosure"
+                ),
+                "git_and_gcm_process_memory_and_https_exchange": (
+                    "necessarily_contains_secret"
+                ),
+                "url_argv_environment_python_inputs_logs_hashes_evidence_artifacts": (
+                    "secret_forbidden"
+                ),
+            },
+            "standard_error": "exact_empty",
+            "standard_input": "exact_os_devnull",
+            "standard_output": "exact_raw_utf8_ref_advertisement_only",
+            "trusted_os_broker": {
+                "credential_authorization_scope_runtime_verifiable": False,
+                "credential_contents": "operator_managed_unbound_and_excluded",
+                "windows_credential_manager_and_clr": (
+                    "trusted_but_not_path_free_hash_bound"
+                ),
+            },
+            "visibility_proof": {
+                "anonymous_command_local_config_in_exact_order": list(
+                    PRIVATE_REMOTE_ANONYMOUS_GIT_CONFIG
+                ),
+                "anonymous_environment": (
+                    "exact_sanitized_git_environment_without_credential_or_proxy_inputs"
+                ),
+                "anonymous_return_code": 128,
+                "anonymous_standard_error": {
+                    "exact_ascii": EXPECTED_PRIVATE_REMOTE_ANONYMOUS_STDERR.decode(
+                        "ascii"
+                    ),
+                    "size_bytes": len(EXPECTED_PRIVATE_REMOTE_ANONYMOUS_STDERR),
+                    "treatment": (
+                        "byte_compared_then_discarded_without_decoding_or_disclosure"
+                    ),
+                },
+                "anonymous_standard_input": "exact_os_devnull",
+                "anonymous_standard_output": "exact_empty",
+                "authenticated_query_must_follow_and_succeed": True,
+                "method": "anonymous_git_denial_then_authenticated_exact_ref_read",
+            },
         },
         "any_other_advertised_remote_ref": "forbidden",
         "fetch_url": EXPECTED_GIT_REMOTE_URL,
@@ -2735,12 +3019,8 @@ def _verify_git_remote_state(
         "--verify",
         EXPECTED_GIT_REMOTE_MAIN_REF,
     ).stdout.strip().casefold()
-    live_remote_stdout = _run_git(
-        project_root,
-        "ls-remote",
-        "--symref",
-        EXPECTED_GIT_REMOTE_URL,
-    ).stdout
+    _verify_private_remote_anonymous_denial(project_root)
+    live_remote_stdout = _run_exact_private_live_remote(project_root)
     backup_tag_type = _run_git(
         project_root,
         "cat-file",
@@ -2762,12 +3042,14 @@ def _verify_git_remote_state(
         f"{EXPECTED_GIT_REMOTE_BACKUP_TAG_REVISION}\t"
         f"{EXPECTED_GIT_REMOTE_BACKUP_TAG_REF}\n"
     )
+    live_remote_matches = live_remote_stdout == expected_live_stdout
+    live_remote_stdout = ""
     if (
         remotes != (EXPECTED_GIT_REMOTE_NAME,)
         or fetch_urls != (EXPECTED_GIT_REMOTE_URL,)
         or push_urls != (EXPECTED_GIT_REMOTE_URL,)
         or remote_revision != expected_revision
-        or live_remote_stdout != expected_live_stdout
+        or not live_remote_matches
         or backup_tag_type != "commit\n"
         or backup_tag_ancestor.returncode != 0
         or backup_tag_ancestor.stdout != ""
@@ -2777,51 +3059,40 @@ def _verify_git_remote_state(
         )
 
 
-def _verify_successor_amendment_revision(
+def _verify_exact_modification_child(
     project_root: Path,
     *,
-    implementation_revision: str,
+    child_revision: str,
+    parent_revision: str,
+    modified_paths: tuple[str, ...],
+    context: str,
 ) -> None:
-    """Bind the sole pre-inventory amendment to its first frozen parent."""
-
-    revision = _revision(
-        implementation_revision,
-        "amended successor implementation revision",
-    )
+    child = _revision(child_revision, f"{context} child revision")
+    parent = _revision(parent_revision, f"{context} parent revision")
     revision_line = _run_git(
         project_root,
         "rev-list",
         "--parents",
         "-n",
         "1",
-        revision,
+        child,
     ).stdout.strip().casefold()
     commit_count = _run_git(
         project_root,
         "rev-list",
         "--count",
-        f"{FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}..{revision}",
+        f"{parent}..{child}",
     ).stdout.strip()
-    if revision_line.split() != [
-        revision,
-        FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
-    ] or commit_count != "1":
+    if revision_line.split() != [child, parent] or commit_count != "1":
         raise OODExternalV2IntegrityError(
-            "successor amendment is not the sole direct child of its first freeze"
+            f"{context} is not the sole direct child of its frozen parent"
         )
-    _verify_historical_revision_blob(
-        project_root,
-        revision=FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
-        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
-        expected_file_sha256=FIRST_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
-        context="first frozen successor parent",
-    )
     diff = _run_git(
         project_root,
         "diff",
         "--name-status",
         "--no-renames",
-        f"{FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}..{revision}",
+        f"{parent}..{child}",
         "--",
     )
     changed: dict[str, str] = {}
@@ -2829,13 +3100,57 @@ def _verify_successor_amendment_revision(
         parts = line.split("\t")
         if len(parts) != 2 or parts[0] != "M":
             raise OODExternalV2IntegrityError(
-                "successor amendment contains a non-modification change"
+                f"{context} contains a non-modification change"
             )
-        changed[parts[1].replace("\\", "/")] = parts[0]
-    if changed != {path: "M" for path in SUCCESSOR_AMENDMENT_MODIFIED_PATHS}:
+        path = parts[1].replace("\\", "/")
+        if path in changed:
+            raise OODExternalV2IntegrityError(f"{context} contains a duplicate path")
+        changed[path] = parts[0]
+    if changed != {path: "M" for path in modified_paths}:
         raise OODExternalV2IntegrityError(
-            "successor amendment paths differ from the frozen allowlist"
+            f"{context} paths differ from the frozen allowlist"
         )
+
+
+def _verify_successor_amendment_revision(
+    project_root: Path,
+    *,
+    implementation_revision: str,
+) -> None:
+    """Bind both pre-inventory amendments to their consecutive frozen parents."""
+
+    revision = _revision(
+        implementation_revision,
+        "private-remote successor implementation revision",
+    )
+    _verify_exact_modification_child(
+        project_root,
+        child_revision=SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        parent_revision=FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        modified_paths=SUCCESSOR_AMENDMENT_MODIFIED_PATHS,
+        context="first successor amendment",
+    )
+    _verify_historical_revision_blob(
+        project_root,
+        revision=FIRST_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=FIRST_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        context="first frozen successor parent",
+    )
+    _verify_exact_modification_child(
+        project_root,
+        child_revision=revision,
+        parent_revision=SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        modified_paths=SUCCESSOR_PRIVATE_REMOTE_AMENDMENT_MODIFIED_PATHS,
+        context="private-remote successor amendment",
+    )
+    _verify_historical_revision_blob(
+        project_root,
+        revision=SECOND_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=SECOND_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        context="second frozen successor parent",
+    )
 
 
 def _verify_private_history_absent(project_root: Path) -> None:
@@ -7684,6 +7999,27 @@ def _git_executable_paths() -> tuple[Path, Path, Path]:
     return launcher, executable, install_root
 
 
+def _git_credential_manager_path(executable: Path) -> Path:
+    helper = _assert_direct_ancestry(
+        executable.parent / EXPECTED_GIT_CREDENTIAL_MANAGER_NAME,
+        context="Git credential manager",
+    )
+    if not helper.is_file():
+        raise OODExternalV2IntegrityError("frozen Git credential manager is unavailable")
+    helper_entry = _stable_runtime_file_entry(
+        helper,
+        context="Git credential manager",
+    )
+    if (
+        helper.name != EXPECTED_GIT_CREDENTIAL_MANAGER_NAME
+        or helper_entry["size_bytes"]
+        != EXPECTED_GIT_CREDENTIAL_MANAGER_SIZE_BYTES
+        or helper_entry["sha256"] != EXPECTED_GIT_CREDENTIAL_MANAGER_SHA256
+    ):
+        raise OODExternalV2IntegrityError("frozen Git credential manager differs")
+    return helper
+
+
 def _sanitized_git_environment(executable: Path) -> dict[str, str]:
     environment: dict[str, str] = {
         "GIT_CONFIG_COUNT": "0",
@@ -7704,6 +8040,971 @@ def _sanitized_git_environment(executable: Path) -> dict[str, str]:
         if value:
             environment[name] = value
     return environment
+
+
+def _private_live_remote_environment(executable: Path) -> dict[str, str]:
+    environment = _sanitized_git_environment(executable)
+    environment.update(PRIVATE_REMOTE_GCM_ENVIRONMENT)
+    return environment
+
+
+def _private_remote_command(
+    project_root: Path,
+    executable: Path,
+    *,
+    authenticated: bool,
+) -> tuple[list[str], dict[str, str]]:
+    """Build and immediately validate the sole exact private-remote command."""
+
+    parsed_url = urlsplit(EXPECTED_GIT_REMOTE_URL)
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname != "github.com"
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+        or parsed_url.port is not None
+        or parsed_url.path != "/Ahmad986Ferdaws/ecg-trust-lab.git"
+        or parsed_url.query
+        or parsed_url.fragment
+    ):
+        raise OODExternalV2IntegrityError("private Git remote URL boundary differs")
+    config = (
+        PRIVATE_REMOTE_GIT_CONFIG
+        if authenticated
+        else PRIVATE_REMOTE_ANONYMOUS_GIT_CONFIG
+    )
+    config_arguments = tuple(
+        argument
+        for config_entry in config
+        for argument in ("-c", config_entry)
+    )
+    command = _bound_git_command(
+        project_root,
+        executable,
+        *config_arguments,
+        "ls-remote",
+        "--symref",
+        EXPECTED_GIT_REMOTE_URL,
+    )
+    environment = (
+        _private_live_remote_environment(executable)
+        if authenticated
+        else _sanitized_git_environment(executable)
+    )
+    expected_environment = _sanitized_git_environment(executable)
+    if authenticated:
+        expected_environment.update(PRIVATE_REMOTE_GCM_ENVIRONMENT)
+    if (
+        environment != expected_environment
+        or any(
+            name in environment for name in PRIVATE_REMOTE_FORBIDDEN_ENVIRONMENT_KEYS
+        )
+        or (not authenticated and any(name.startswith("GCM_") for name in environment))
+    ):
+        raise OODExternalV2IntegrityError(
+            "private Git remote environment boundary differs"
+        )
+    return command, environment
+
+
+def _run_bounded_windows_process_inner(
+    command: list[str],
+    *,
+    cwd: Path,
+    environment: Mapping[str, str],
+    timeout_seconds: float,
+    stdout_limit_bytes: int,
+    stderr_limit_bytes: int,
+    failure_message: str,
+    stdout_buffer: bytearray,
+    stderr_buffer: bytearray,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run one private probe in an atomically assigned, kill-on-close job.
+
+    The raw Win32 launch is intentional.  ``subprocess.Popen`` cannot attach a
+    process to a Job Object atomically, leaving a pre-assignment window in
+    which a credential helper could create an uncontained descendant.  The
+    STARTUPINFOEX job-list attribute closes that window, while the handle-list
+    attribute ensures that only NUL/stdout/stderr cross into the child.
+    """
+
+    class _SecurityAttributes(ctypes.Structure):
+        _fields_ = [
+            ("nLength", ctypes.c_uint32),
+            ("lpSecurityDescriptor", ctypes.c_void_p),
+            ("bInheritHandle", ctypes.c_int),
+        ]
+
+    class _StartupInfo(ctypes.Structure):
+        _fields_ = [
+            ("cb", ctypes.c_uint32),
+            ("lpReserved", ctypes.c_wchar_p),
+            ("lpDesktop", ctypes.c_wchar_p),
+            ("lpTitle", ctypes.c_wchar_p),
+            ("dwX", ctypes.c_uint32),
+            ("dwY", ctypes.c_uint32),
+            ("dwXSize", ctypes.c_uint32),
+            ("dwYSize", ctypes.c_uint32),
+            ("dwXCountChars", ctypes.c_uint32),
+            ("dwYCountChars", ctypes.c_uint32),
+            ("dwFillAttribute", ctypes.c_uint32),
+            ("dwFlags", ctypes.c_uint32),
+            ("wShowWindow", ctypes.c_uint16),
+            ("cbReserved2", ctypes.c_uint16),
+            ("lpReserved2", ctypes.POINTER(ctypes.c_ubyte)),
+            ("hStdInput", ctypes.c_void_p),
+            ("hStdOutput", ctypes.c_void_p),
+            ("hStdError", ctypes.c_void_p),
+        ]
+
+    class _StartupInfoEx(ctypes.Structure):
+        _fields_ = [
+            ("StartupInfo", _StartupInfo),
+            ("lpAttributeList", ctypes.c_void_p),
+        ]
+
+    class _ProcessInformation(ctypes.Structure):
+        _fields_ = [
+            ("hProcess", ctypes.c_void_p),
+            ("hThread", ctypes.c_void_p),
+            ("dwProcessId", ctypes.c_uint32),
+            ("dwThreadId", ctypes.c_uint32),
+        ]
+
+    class _JobBasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", ctypes.c_uint32),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", ctypes.c_uint32),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", ctypes.c_uint32),
+            ("SchedulingClass", ctypes.c_uint32),
+        ]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_uint64),
+            ("WriteOperationCount", ctypes.c_uint64),
+            ("OtherOperationCount", ctypes.c_uint64),
+            ("ReadTransferCount", ctypes.c_uint64),
+            ("WriteTransferCount", ctypes.c_uint64),
+            ("OtherTransferCount", ctypes.c_uint64),
+        ]
+
+    class _JobExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _JobBasicLimitInformation),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    class _JobBasicAccountingInformation(ctypes.Structure):
+        _fields_ = [
+            ("TotalUserTime", ctypes.c_int64),
+            ("TotalKernelTime", ctypes.c_int64),
+            ("ThisPeriodTotalUserTime", ctypes.c_int64),
+            ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+            ("TotalPageFaultCount", ctypes.c_uint32),
+            ("TotalProcesses", ctypes.c_uint32),
+            ("ActiveProcesses", ctypes.c_uint32),
+            ("TotalTerminatedProcesses", ctypes.c_uint32),
+        ]
+
+    invalid_handle_value = ctypes.c_void_p(-1).value
+    wait_object_0 = 0
+    wait_timeout = 258
+    startf_use_std_handles = 0x00000100
+    handle_flag_inherit = 0x00000001
+    generic_read = 0x80000000
+    file_share_all = 0x00000001 | 0x00000002 | 0x00000004
+    open_existing = 3
+    file_attribute_normal = 0x00000080
+    error_broken_pipe = 109
+    error_insufficient_buffer = 122
+    job_object_basic_accounting_information = 1
+    job_object_extended_limit_information = 9
+    terminate_exit_code = 0xFFFFFFFF
+
+    kernel32: Any | None = None
+    close_handle: Any | None = None
+    delete_attribute_list: Any | None = None
+    terminate_job: Any | None = None
+    wait_for_single_object: Any | None = None
+    query_job: Any | None = None
+    cancel_synchronous_io: Any | None = None
+    job_handle: Any | None = None
+    process_handle: Any | None = None
+    thread_handle: Any | None = None
+    signal_handle: Any | None = None
+    stdout_read_handle: Any | None = None
+    stdout_write_handle: Any | None = None
+    stderr_read_handle: Any | None = None
+    stderr_write_handle: Any | None = None
+    stdin_handle: Any | None = None
+    attribute_pointer: Any | None = None
+    attribute_buffer: Any | None = None
+    attribute_initialized = False
+    process_created = False
+    operation_failed = False
+    cleanup_complete = True
+    process_returncode: int | None = None
+    reader_threads: list[tuple[int, threading.Thread]] = []
+    reader_thread_handles: list[Any | None] = [None, None]
+    reader_handle_ready = [threading.Event(), threading.Event()]
+    reader_cancel_requested = [threading.Event(), threading.Event()]
+    output_overflow = threading.Event()
+    reader_failure = threading.Event()
+
+    def _release_owned_handle(handle: Any | None) -> tuple[Any | None, bool]:
+        if handle is None or handle == invalid_handle_value:
+            return None, True
+        if close_handle is None:
+            return handle, False
+        try:
+            if close_handle(handle) != 0:
+                return None, True
+        except Exception:
+            pass
+        return handle, False
+
+    try:
+        if (
+            os.name != "nt"
+            or not command
+            or not failure_message
+            or timeout_seconds <= 0
+            or not math.isfinite(timeout_seconds)
+            or stdout_limit_bytes < 0
+            or stderr_limit_bytes < 0
+            or not Path(command[0]).is_absolute()
+            or not cwd.is_absolute()
+            or any(not isinstance(argument, str) or "\x00" in argument for argument in command)
+        ):
+            raise RuntimeError
+        environment_entries: list[str] = []
+        folded_environment_names: set[str] = set()
+        for name, value in environment.items():
+            folded_name = name.casefold()
+            if (
+                not name
+                or "=" in name
+                or "\x00" in name
+                or "\x00" in value
+                or folded_name in folded_environment_names
+            ):
+                raise RuntimeError
+            folded_environment_names.add(folded_name)
+            environment_entries.append(f"{name}={value}")
+        environment_entries.sort(key=str.casefold)
+        command_line_text = subprocess.list2cmdline(command)
+        cwd_text = os.fspath(cwd)
+        if (
+            len(command_line_text) >= 32_767
+            or "\x00" in cwd_text
+            or sum(len(entry) + 1 for entry in environment_entries) > 1_000_000
+        ):
+            raise RuntimeError
+        command_line = ctypes.create_unicode_buffer(command_line_text)
+        environment_block = ctypes.create_unicode_buffer(
+            "\x00".join(environment_entries) + "\x00"
+        )
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create_job = kernel32.CreateJobObjectW
+        create_job.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+        create_job.restype = ctypes.c_void_p
+        set_job_information = kernel32.SetInformationJobObject
+        set_job_information.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        ]
+        set_job_information.restype = ctypes.c_int
+        initialize_attribute_list = kernel32.InitializeProcThreadAttributeList
+        initialize_attribute_list.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        initialize_attribute_list.restype = ctypes.c_int
+        update_attribute = kernel32.UpdateProcThreadAttribute
+        update_attribute.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_size_t,
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+        ]
+        update_attribute.restype = ctypes.c_int
+        delete_attribute_list = kernel32.DeleteProcThreadAttributeList
+        delete_attribute_list.argtypes = [ctypes.c_void_p]
+        delete_attribute_list.restype = None
+        create_pipe = kernel32.CreatePipe
+        create_pipe.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(_SecurityAttributes),
+            ctypes.c_uint32,
+        ]
+        create_pipe.restype = ctypes.c_int
+        set_handle_information = kernel32.SetHandleInformation
+        set_handle_information.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        ]
+        set_handle_information.restype = ctypes.c_int
+        create_file = kernel32.CreateFileW
+        create_file.argtypes = [
+            ctypes.c_wchar_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.POINTER(_SecurityAttributes),
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+        ]
+        create_file.restype = ctypes.c_void_p
+        create_event = kernel32.CreateEventW
+        create_event.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_wchar_p,
+        ]
+        create_event.restype = ctypes.c_void_p
+        set_event = kernel32.SetEvent
+        set_event.argtypes = [ctypes.c_void_p]
+        set_event.restype = ctypes.c_int
+        create_process = kernel32.CreateProcessW
+        create_process.argtypes = [
+            ctypes.c_wchar_p,
+            ctypes.c_wchar_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_wchar_p,
+            ctypes.c_void_p,
+            ctypes.POINTER(_ProcessInformation),
+        ]
+        create_process.restype = ctypes.c_int
+        wait_for_multiple_objects = kernel32.WaitForMultipleObjects
+        wait_for_multiple_objects.argtypes = [
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_int,
+            ctypes.c_uint32,
+        ]
+        wait_for_multiple_objects.restype = ctypes.c_uint32
+        wait_for_single_object = kernel32.WaitForSingleObject
+        wait_for_single_object.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        wait_for_single_object.restype = ctypes.c_uint32
+        get_exit_code = kernel32.GetExitCodeProcess
+        get_exit_code.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint32),
+        ]
+        get_exit_code.restype = ctypes.c_int
+        read_file = kernel32.ReadFile
+        read_file.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.c_void_p,
+        ]
+        read_file.restype = ctypes.c_int
+        terminate_job = kernel32.TerminateJobObject
+        terminate_job.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        terminate_job.restype = ctypes.c_int
+        query_job = kernel32.QueryInformationJobObject
+        query_job.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+        ]
+        query_job.restype = ctypes.c_int
+        get_current_process = kernel32.GetCurrentProcess
+        get_current_process.argtypes = []
+        get_current_process.restype = ctypes.c_void_p
+        get_current_thread = kernel32.GetCurrentThread
+        get_current_thread.argtypes = []
+        get_current_thread.restype = ctypes.c_void_p
+        duplicate_handle = kernel32.DuplicateHandle
+        duplicate_handle.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_uint32,
+            ctypes.c_int,
+            ctypes.c_uint32,
+        ]
+        duplicate_handle.restype = ctypes.c_int
+        cancel_synchronous_io = kernel32.CancelSynchronousIo
+        cancel_synchronous_io.argtypes = [ctypes.c_void_p]
+        cancel_synchronous_io.restype = ctypes.c_int
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [ctypes.c_void_p]
+        close_handle.restype = ctypes.c_int
+
+        job_handle = create_job(None, None)
+        if not job_handle:
+            raise RuntimeError
+        job_limits = _JobExtendedLimitInformation()
+        job_limits.BasicLimitInformation.LimitFlags = (
+            WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        )
+        if (
+            set_job_information(
+                job_handle,
+                job_object_extended_limit_information,
+                ctypes.byref(job_limits),
+                ctypes.sizeof(job_limits),
+            )
+            == 0
+        ):
+            raise RuntimeError
+
+        security = _SecurityAttributes()
+        security.nLength = ctypes.sizeof(security)
+        security.bInheritHandle = 1
+        stdout_read = ctypes.c_void_p()
+        stdout_write = ctypes.c_void_p()
+        stderr_read = ctypes.c_void_p()
+        stderr_write = ctypes.c_void_p()
+        if (
+            create_pipe(
+                ctypes.byref(stdout_read),
+                ctypes.byref(stdout_write),
+                ctypes.byref(security),
+                0,
+            )
+            == 0
+        ):
+            raise RuntimeError
+        stdout_read_handle = stdout_read.value
+        stdout_write_handle = stdout_write.value
+        if (
+            create_pipe(
+                ctypes.byref(stderr_read),
+                ctypes.byref(stderr_write),
+                ctypes.byref(security),
+                0,
+            )
+            == 0
+        ):
+            raise RuntimeError
+        stderr_read_handle = stderr_read.value
+        stderr_write_handle = stderr_write.value
+        if (
+            not stdout_read_handle
+            or not stdout_write_handle
+            or not stderr_read_handle
+            or not stderr_write_handle
+            or set_handle_information(stdout_read_handle, handle_flag_inherit, 0) == 0
+            or set_handle_information(stderr_read_handle, handle_flag_inherit, 0) == 0
+        ):
+            raise RuntimeError
+        stdin_handle = create_file(
+            "NUL",
+            generic_read,
+            file_share_all,
+            ctypes.byref(security),
+            open_existing,
+            file_attribute_normal,
+            None,
+        )
+        if not stdin_handle or stdin_handle == invalid_handle_value:
+            raise RuntimeError
+        signal_handle = create_event(None, 1, 0, None)
+        if not signal_handle:
+            raise RuntimeError
+
+        attribute_size = ctypes.c_size_t(0)
+        ctypes.set_last_error(0)
+        first_initialize = initialize_attribute_list(
+            None,
+            2,
+            0,
+            ctypes.byref(attribute_size),
+        )
+        if (
+            first_initialize != 0
+            or ctypes.get_last_error() != error_insufficient_buffer
+            or attribute_size.value == 0
+        ):
+            raise RuntimeError
+        attribute_buffer = ctypes.create_string_buffer(attribute_size.value)
+        attribute_pointer = ctypes.cast(attribute_buffer, ctypes.c_void_p)
+        if (
+            initialize_attribute_list(
+                attribute_pointer,
+                2,
+                0,
+                ctypes.byref(attribute_size),
+            )
+            == 0
+        ):
+            raise RuntimeError
+        attribute_initialized = True
+        job_list = (ctypes.c_void_p * 1)(job_handle)
+        inherited_handles = (ctypes.c_void_p * 3)(
+            stdin_handle,
+            stdout_write_handle,
+            stderr_write_handle,
+        )
+        if (
+            update_attribute(
+                attribute_pointer,
+                0,
+                WINDOWS_PROCESS_ATTRIBUTE_JOB_LIST,
+                ctypes.cast(job_list, ctypes.c_void_p),
+                ctypes.sizeof(job_list),
+                None,
+                None,
+            )
+            == 0
+            or update_attribute(
+                attribute_pointer,
+                0,
+                WINDOWS_PROCESS_ATTRIBUTE_HANDLE_LIST,
+                ctypes.cast(inherited_handles, ctypes.c_void_p),
+                ctypes.sizeof(inherited_handles),
+                None,
+                None,
+            )
+            == 0
+        ):
+            raise RuntimeError
+
+        startup = _StartupInfoEx()
+        startup.StartupInfo.cb = ctypes.sizeof(startup)
+        startup.StartupInfo.dwFlags = startf_use_std_handles
+        startup.StartupInfo.hStdInput = stdin_handle
+        startup.StartupInfo.hStdOutput = stdout_write_handle
+        startup.StartupInfo.hStdError = stderr_write_handle
+        startup.lpAttributeList = attribute_pointer
+        process_information = _ProcessInformation()
+        creation_flags = (
+            WINDOWS_EXTENDED_STARTUPINFO_PRESENT
+            | WINDOWS_CREATE_UNICODE_ENVIRONMENT
+            | WINDOWS_CREATE_NO_WINDOW
+        )
+        if (
+            create_process(
+                command[0],
+                command_line,
+                None,
+                None,
+                1,
+                creation_flags,
+                ctypes.cast(environment_block, ctypes.c_void_p),
+                cwd_text,
+                ctypes.byref(startup),
+                ctypes.byref(process_information),
+            )
+            == 0
+        ):
+            raise RuntimeError
+        process_created = True
+        process_handle = process_information.hProcess
+        thread_handle = process_information.hThread
+        if not process_handle or not thread_handle:
+            raise RuntimeError
+        deadline = time.monotonic() + timeout_seconds
+
+        delete_attribute_list(attribute_pointer)
+        attribute_initialized = False
+        attribute_pointer = None
+        attribute_buffer = None
+        thread_handle, thread_closed = _release_owned_handle(thread_handle)
+        stdout_write_handle, stdout_write_closed = _release_owned_handle(
+            stdout_write_handle
+        )
+        stderr_write_handle, stderr_write_closed = _release_owned_handle(
+            stderr_write_handle
+        )
+        stdin_handle, stdin_closed = _release_owned_handle(stdin_handle)
+        if not all(
+            (
+                thread_closed,
+                stdout_write_closed,
+                stderr_write_closed,
+                stdin_closed,
+            )
+        ):
+            raise RuntimeError
+
+        def _bounded_reader(
+            index: int,
+            handle: Any,
+            sink: bytearray,
+            limit: int,
+        ) -> None:
+            try:
+                duplicated_thread = ctypes.c_void_p()
+                current_process = get_current_process()
+                if (
+                    duplicate_handle(
+                        current_process,
+                        get_current_thread(),
+                        current_process,
+                        ctypes.byref(duplicated_thread),
+                        0x00000001 | 0x00100000,
+                        0,
+                        0,
+                    )
+                    == 0
+                    or not duplicated_thread.value
+                ):
+                    reader_failure.set()
+                    set_event(signal_handle)
+                    return
+                reader_thread_handles[index] = duplicated_thread.value
+                reader_handle_ready[index].set()
+                while True:
+                    if reader_cancel_requested[index].is_set():
+                        return
+                    remaining = limit - len(sink)
+                    read_size = min(4_096, remaining + 1)
+                    chunk = ctypes.create_string_buffer(read_size)
+                    transferred = ctypes.c_uint32(0)
+                    if (
+                        read_file(
+                            handle,
+                            chunk,
+                            read_size,
+                            ctypes.byref(transferred),
+                            None,
+                        )
+                        == 0
+                    ):
+                        read_error = ctypes.get_last_error()
+                        if read_error == error_broken_pipe or (
+                            read_error == 995
+                            and reader_cancel_requested[index].is_set()
+                        ):
+                            return
+                        reader_failure.set()
+                        set_event(signal_handle)
+                        return
+                    if transferred.value == 0:
+                        return
+                    if transferred.value > remaining:
+                        output_overflow.set()
+                        set_event(signal_handle)
+                        return
+                    sink.extend(ctypes.string_at(chunk, transferred.value))
+            except Exception:
+                reader_failure.set()
+                with suppress(Exception):
+                    set_event(signal_handle)
+            finally:
+                reader_handle_ready[index].set()
+
+        reader_specs = (
+            (
+                0,
+                _bounded_reader,
+                (0, stdout_read_handle, stdout_buffer, stdout_limit_bytes),
+                "private-probe-stdout-reader",
+            ),
+            (
+                1,
+                _bounded_reader,
+                (1, stderr_read_handle, stderr_buffer, stderr_limit_bytes),
+                "private-probe-stderr-reader",
+            ),
+        )
+        for index, reader_target, reader_arguments, reader_name in reader_specs:
+            reader_thread = threading.Thread(
+                target=reader_target,
+                args=reader_arguments,
+                name=reader_name,
+                daemon=True,
+            )
+            reader_thread.start()
+            reader_threads.append((index, reader_thread))
+        for ready in reader_handle_ready:
+            if not ready.wait(max(0.0, deadline - time.monotonic())):
+                operation_failed = True
+                break
+
+        if not operation_failed:
+            wait_handles = (ctypes.c_void_p * 2)(process_handle, signal_handle)
+            while True:
+                remaining_seconds = deadline - time.monotonic()
+                if remaining_seconds <= 0:
+                    operation_failed = True
+                    break
+                remaining_milliseconds = max(
+                    1,
+                    math.ceil(remaining_seconds * 1_000),
+                )
+                wait_result = wait_for_multiple_objects(
+                    2,
+                    wait_handles,
+                    0,
+                    remaining_milliseconds,
+                )
+                if wait_result == wait_object_0:
+                    exit_code = ctypes.c_uint32(0)
+                    if get_exit_code(process_handle, ctypes.byref(exit_code)) == 0:
+                        operation_failed = True
+                    else:
+                        process_returncode = int(exit_code.value)
+                    break
+                if wait_result == wait_object_0 + 1 or wait_result == wait_timeout:
+                    operation_failed = True
+                    break
+                operation_failed = True
+                break
+    except Exception:
+        operation_failed = True
+    finally:
+        stdout_write_handle, stdout_write_closed = _release_owned_handle(
+            stdout_write_handle
+        )
+        stderr_write_handle, stderr_write_closed = _release_owned_handle(
+            stderr_write_handle
+        )
+        stdin_handle, stdin_closed = _release_owned_handle(stdin_handle)
+        if not all((stdout_write_closed, stderr_write_closed, stdin_closed)):
+            cleanup_complete = False
+        if attribute_initialized and delete_attribute_list is not None:
+            try:
+                delete_attribute_list(attribute_pointer)
+            except Exception:
+                cleanup_complete = False
+            attribute_initialized = False
+        attribute_pointer = None
+        attribute_buffer = None
+        thread_handle, thread_closed = _release_owned_handle(thread_handle)
+        if not thread_closed:
+            cleanup_complete = False
+
+        cleanup_deadline = (
+            time.monotonic() + WINDOWS_PRIVATE_PROCESS_CLEANUP_TIMEOUT_SECONDS
+        )
+        if process_created and (job_handle is None or terminate_job is None):
+            cleanup_complete = False
+        if process_created and job_handle is not None and terminate_job is not None:
+            try:
+                termination_requested = (
+                    terminate_job(job_handle, terminate_exit_code) != 0
+                )
+            except Exception:
+                termination_requested = False
+            if not termination_requested:
+                cleanup_complete = False
+            if process_handle is None or wait_for_single_object is None:
+                cleanup_complete = False
+            else:
+                remaining_cleanup_ms = max(
+                    1,
+                    math.ceil((cleanup_deadline - time.monotonic()) * 1_000),
+                )
+                try:
+                    root_stopped = (
+                        wait_for_single_object(
+                            process_handle,
+                            remaining_cleanup_ms,
+                        )
+                        == wait_object_0
+                    )
+                except Exception:
+                    root_stopped = False
+                if not root_stopped:
+                    cleanup_complete = False
+            active_processes_zero = False
+            if query_job is not None:
+                while time.monotonic() < cleanup_deadline:
+                    accounting = _JobBasicAccountingInformation()
+                    try:
+                        query_succeeded = (
+                            query_job(
+                                job_handle,
+                                job_object_basic_accounting_information,
+                                ctypes.byref(accounting),
+                                ctypes.sizeof(accounting),
+                                None,
+                            )
+                            != 0
+                        )
+                    except Exception:
+                        query_succeeded = False
+                    if not query_succeeded:
+                        break
+                    if accounting.ActiveProcesses == 0:
+                        active_processes_zero = True
+                        break
+                    time.sleep(0.001)
+            if not active_processes_zero:
+                cleanup_complete = False
+        job_handle, job_closed = _release_owned_handle(job_handle)
+        if not job_closed:
+            cleanup_complete = False
+
+        for _, reader_thread in reader_threads:
+            reader_thread.join(
+                min(0.25, max(0.0, cleanup_deadline - time.monotonic()))
+            )
+        while (
+            any(reader_thread.is_alive() for _, reader_thread in reader_threads)
+            and time.monotonic() < cleanup_deadline
+        ):
+            for index, reader_thread in reader_threads:
+                if not reader_thread.is_alive():
+                    continue
+                duplicated_thread = reader_thread_handles[index]
+                if cancel_synchronous_io is None or duplicated_thread is None:
+                    cleanup_complete = False
+                    continue
+                reader_cancel_requested[index].set()
+                ctypes.set_last_error(0)
+                try:
+                    cancellation_result = cancel_synchronous_io(duplicated_thread)
+                    cancellation_error = ctypes.get_last_error()
+                except Exception:
+                    cancellation_result = 0
+                    cancellation_error = 0
+                if cancellation_result == 0 and cancellation_error != 1168:
+                    cleanup_complete = False
+            for _, reader_thread in reader_threads:
+                reader_thread.join(
+                    min(0.05, max(0.0, cleanup_deadline - time.monotonic()))
+                )
+        readers_stopped = not any(
+            reader_thread.is_alive() for _, reader_thread in reader_threads
+        )
+        if not readers_stopped:
+            cleanup_complete = False
+        if readers_stopped:
+            stdout_read_handle, stdout_read_closed = _release_owned_handle(
+                stdout_read_handle
+            )
+            stderr_read_handle, stderr_read_closed = _release_owned_handle(
+                stderr_read_handle
+            )
+            signal_handle, signal_closed = _release_owned_handle(signal_handle)
+            if not all(
+                (stdout_read_closed, stderr_read_closed, signal_closed)
+            ):
+                cleanup_complete = False
+            for index, duplicated_thread in enumerate(reader_thread_handles):
+                (
+                    reader_thread_handles[index],
+                    duplicated_thread_closed,
+                ) = _release_owned_handle(duplicated_thread)
+                if not duplicated_thread_closed:
+                    cleanup_complete = False
+        process_handle, process_closed = _release_owned_handle(process_handle)
+        if not process_closed:
+            cleanup_complete = False
+        for remaining_handle in (
+            stdout_write_handle,
+            stderr_write_handle,
+            stdin_handle,
+            thread_handle,
+            job_handle,
+            process_handle,
+        ):
+            _, retry_closed = _release_owned_handle(remaining_handle)
+            if not retry_closed:
+                cleanup_complete = False
+
+    if (
+        not operation_failed
+        and cleanup_complete
+        and process_returncode is not None
+        and not output_overflow.is_set()
+        and not reader_failure.is_set()
+    ):
+        return subprocess.CompletedProcess(
+            args=list(command),
+            returncode=process_returncode,
+            stdout=bytes(stdout_buffer),
+            stderr=bytes(stderr_buffer),
+        )
+    stdout_buffer[:] = b"\x00" * len(stdout_buffer)
+    stderr_buffer[:] = b"\x00" * len(stderr_buffer)
+    stdout_buffer.clear()
+    stderr_buffer.clear()
+    raise OODExternalV2IntegrityError(failure_message) from None
+
+
+def _run_bounded_windows_process(
+    command: list[str],
+    *,
+    cwd: Path,
+    environment: Mapping[str, str],
+    timeout_seconds: float,
+    stdout_limit_bytes: int,
+    stderr_limit_bytes: int,
+    failure_message: str,
+) -> subprocess.CompletedProcess[bytes]:
+    """Erase bounded streams and normalize every executor exit, including Ctrl+C."""
+
+    stdout_buffer = bytearray()
+    stderr_buffer = bytearray()
+    completed: subprocess.CompletedProcess[bytes] | None = None
+    try:
+        with suppress(BaseException):
+            completed = _run_bounded_windows_process_inner(
+                command,
+                cwd=cwd,
+                environment=environment,
+                timeout_seconds=timeout_seconds,
+                stdout_limit_bytes=stdout_limit_bytes,
+                stderr_limit_bytes=stderr_limit_bytes,
+                failure_message=failure_message,
+                stdout_buffer=stdout_buffer,
+                stderr_buffer=stderr_buffer,
+            )
+    finally:
+        stdout_buffer[:] = b"\x00" * len(stdout_buffer)
+        stderr_buffer[:] = b"\x00" * len(stderr_buffer)
+        stdout_buffer.clear()
+        stderr_buffer.clear()
+    if completed is None:
+        raise OODExternalV2IntegrityError(failure_message) from None
+    return completed
+
+
+def _verify_git_credential_manager(executable: Path) -> None:
+    helper = _git_credential_manager_path(executable)
+    completed = _run_bounded_windows_process(
+        [os.fspath(helper), "--version"],
+        cwd=helper.parent,
+        environment=_private_live_remote_environment(executable),
+        timeout_seconds=GCM_VERSION_TIMEOUT_SECONDS,
+        stdout_limit_bytes=GCM_VERSION_STDOUT_LIMIT_BYTES,
+        stderr_limit_bytes=GCM_VERSION_STDERR_LIMIT_BYTES,
+        failure_message="frozen Git credential manager probe failed",
+    )
+    differs = (
+        completed.returncode != 0
+        or completed.stderr != b""
+        or completed.stdout != EXPECTED_GIT_CREDENTIAL_MANAGER_VERSION_STDOUT
+    )
+    del completed
+    if differs:
+        raise OODExternalV2IntegrityError("frozen Git credential manager differs")
 
 
 def _verify_git_runtime_tree_before_provenance() -> None:
@@ -7823,15 +9124,13 @@ def _verify_git_repository_controls(project_root: Path) -> None:
         )
 
 
-def _execute_bound_git(
+def _bound_git_command(
     project_root: Path,
+    executable: Path,
     *arguments: str,
-) -> subprocess.CompletedProcess[bytes]:
-    _verify_git_runtime_tree_before_provenance()
-    _, executable, _ = _git_executable_paths()
-    _verify_git_repository_controls(project_root)
+) -> list[str]:
     git_directory = project_root / ".git"
-    command = [
+    return [
         os.fspath(executable),
         "--no-pager",
         "--no-replace-objects",
@@ -7861,6 +9160,16 @@ def _execute_bound_git(
         "extensions.worktreeConfig=false",
         *arguments,
     ]
+
+
+def _execute_bound_git(
+    project_root: Path,
+    *arguments: str,
+) -> subprocess.CompletedProcess[bytes]:
+    _verify_git_runtime_tree_before_provenance()
+    _, executable, _ = _git_executable_paths()
+    _verify_git_repository_controls(project_root)
+    command = _bound_git_command(project_root, executable, *arguments)
     try:
         completed = subprocess.run(
             command,
@@ -7877,6 +9186,87 @@ def _execute_bound_git(
     if len(completed.stdout) > 8_000_000:
         raise OODExternalV2IntegrityError("Git preflight output exceeds its bound")
     return completed
+
+
+def _verify_private_remote_anonymous_denial(project_root: Path) -> None:
+    """Require the exact HTTPS Git endpoint to reject a credentialless read."""
+
+    _verify_git_runtime_tree_before_provenance()
+    _, executable, _ = _git_executable_paths()
+    _verify_git_repository_controls(project_root)
+    command, environment = _private_remote_command(
+        project_root,
+        executable,
+        authenticated=False,
+    )
+    completed = _run_bounded_windows_process(
+        command,
+        cwd=executable.parent,
+        environment=environment,
+        timeout_seconds=PRIVATE_REMOTE_TIMEOUT_SECONDS,
+        stdout_limit_bytes=PRIVATE_REMOTE_STDOUT_LIMIT_BYTES,
+        stderr_limit_bytes=PRIVATE_REMOTE_STDERR_LIMIT_BYTES,
+        failure_message="private Git remote anonymous-access probe failed",
+    )
+    denied = (
+        completed.returncode == 128
+        and completed.stdout == b""
+        and completed.stderr == EXPECTED_PRIVATE_REMOTE_ANONYMOUS_STDERR
+    )
+    del completed
+    if not denied:
+        raise OODExternalV2IntegrityError(
+            "private Git remote anonymous-access denial was not proven"
+        )
+
+
+def _run_exact_private_live_remote(project_root: Path) -> str:
+    """Read the one exact private GitHub ref advertisement without exposing auth."""
+
+    _verify_git_runtime_tree_before_provenance()
+    _, executable, _ = _git_executable_paths()
+    _verify_git_repository_controls(project_root)
+    _verify_git_credential_manager(executable)
+    command, environment = _private_remote_command(
+        project_root,
+        executable,
+        authenticated=True,
+    )
+    completed = _run_bounded_windows_process(
+        command,
+        cwd=executable.parent,
+        environment=environment,
+        timeout_seconds=PRIVATE_REMOTE_TIMEOUT_SECONDS,
+        stdout_limit_bytes=PRIVATE_REMOTE_STDOUT_LIMIT_BYTES,
+        stderr_limit_bytes=PRIVATE_REMOTE_STDERR_LIMIT_BYTES,
+        failure_message="private Git remote preflight could not be executed",
+    )
+    returncode = completed.returncode
+    stderr_empty = completed.stderr == b""
+    stdout = completed.stdout
+    del completed
+    if not stderr_empty:
+        stdout = b""
+        raise OODExternalV2IntegrityError(
+            "private Git remote preflight emitted unexpected stderr"
+        )
+    if returncode != 0:
+        stdout = b""
+        raise OODExternalV2IntegrityError("private Git remote preflight failed")
+    if len(stdout) > 4_096:
+        stdout = b""
+        raise OODExternalV2IntegrityError(
+            "private Git remote preflight output exceeds its bound"
+        )
+    decoded: str | None = None
+    with suppress(UnicodeError):
+        decoded = stdout.decode("utf-8", errors="strict")
+    stdout = b""
+    if decoded is None:
+        raise OODExternalV2IntegrityError(
+            "private Git remote preflight output is not UTF-8"
+        ) from None
+    return decoded
 
 
 def _run_git(
