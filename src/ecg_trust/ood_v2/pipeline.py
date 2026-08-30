@@ -187,7 +187,7 @@ EXPECTED_PARENT_CONFIG_SHA256: Final = (
     "sha256:3aacb31be939d1a2bea96bb29f193d60a4b54c38a40a1a7e2a490cfe60c3b0d9"
 )
 EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256: Final[str | None] = (
-    "sha256:725619c224569fb13fbe2a5d4a79b5a84fd607f6bc12ae34ef74aecb8db73c93"
+    "sha256:790251613a94052a88eb9f8598021d9bb3684707cd0a865c74b62dcb76c8417b"
 )
 SUCCESSOR_PROTOCOL_ID: Final = PROTOCOL_ID
 PREDECESSOR_TERMINATION_PATH: Final = (
@@ -257,17 +257,59 @@ HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_FILE_SHA256: Final = (
 HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_ARTIFACT_SHA256: Final = (
     "sha256:02c2d212a1ff4108c9dd10bd67095a94727d5aabb68e0c1e94a2ed9d4304d7d3"
 )
-SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
+HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
     "artifacts/trust_sentinel/.ood_external_v2_1.x8-inventory-build-attempt.json"
+)
+HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256: Final = (
+    "sha256:3b9f418f63bc9d868f338af50f8c98635a32d701070faccec6c38363d2067aeb"
+)
+HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256: Final = (
+    "sha256:58d5c5785d30f5708ee65b387ba623aa0d6d6dd382fd51dd95c0b9690763f2b6"
+)
+HISTORICAL_X8_INVENTORY_BUILDER_PROJECT_SOURCE_TREE_SHA256: Final = (
+    "sha256:2d28663c1af1e10ccb46b91b30a3715fecd3911e17020d24243ba2ddd04f1976"
+)
+HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256: Final = (
+    "sha256:424e0b09f3cb700e95ca202af7e42bc676ec903b74ac2cfaff3769444038f59c"
+)
+HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256: Final = (
+    "sha256:c58f46fcfc34b711a0c847fcdc48fe0c1b92b8bcb31d9d94fdc950169eb1cb24"
+)
+HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256: Final = (
+    "sha256:02ad715dc9db3b92e3a4a6e32193d07f8c1f37c3de5668186eb6790bc75fcdcc"
+)
+HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256: Final = (
+    "sha256:e7d91f13000dc5b5fa5bd874f72ef4ba9e81e13446acd2d4673efb7e77dcace6"
+)
+# The inventory builder is permanently retired after the successful X8 run.
+# This compatibility name remains because the child schema historically used
+# it; every X9/Y verifier treats the target as immutable X8 evidence.
+SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
+    HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH
 )
 SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE: Final = (
     "ecg_trust.ood_external_v2_1_inventory_builder_attempt"
 )
-SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH: Final = (
+HISTORICAL_X8_INVENTORY_BUILDER_FAILURE_PATH: Final = (
     "artifacts/trust_sentinel/.ood_external_v2_1.x8-inventory-build-failure.json"
+)
+SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH: Final = (
+    HISTORICAL_X8_INVENTORY_BUILDER_FAILURE_PATH
 )
 SUCCESSOR_INVENTORY_BUILDER_FAILURE_ARTIFACT_TYPE: Final = (
     "ecg_trust.ood_external_v2_1_inventory_builder_failure"
+)
+SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH: Final = (
+    "artifacts/trust_sentinel/.ood_external_v2_1.x9-child-freeze-attempt.json"
+)
+SUCCESSOR_CHILD_FREEZE_ATTEMPT_ARTIFACT_TYPE: Final = (
+    "ecg_trust.ood_external_v2_1_child_freeze_attempt"
+)
+SUCCESSOR_CHILD_FREEZE_FAILURE_PATH: Final = (
+    "artifacts/trust_sentinel/.ood_external_v2_1.x9-child-freeze-failure.json"
+)
+SUCCESSOR_CHILD_FREEZE_FAILURE_ARTIFACT_TYPE: Final = (
+    "ecg_trust.ood_external_v2_1_child_freeze_failure"
 )
 FORBIDDEN_GIT_HISTORY_PATHS: Final[tuple[str, ...]] = (
     ":(glob)data/raw/external-ood/**",
@@ -284,6 +326,8 @@ FORBIDDEN_GIT_HISTORY_PATHS: Final[tuple[str, ...]] = (
     HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH,
     SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
     SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH,
+    SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+    SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
     ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
     ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**",
     ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.runtime-*/**",
@@ -770,6 +814,14 @@ SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
 SEVENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
     "sha256:1da505b37d64dec804f147fa8cfd43a5029fe2ee7d92d1666177d490ea7016e1"
 )
+EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
+    "f0e91538bf374ca7bb2579a4689f4e70648776f2"
+)
+EIGHTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
+    "sha256:725619c224569fb13fbe2a5d4a79b5a84fd607f6bc12ae34ef74aecb8db73c93"
+)
+EIGHTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC: Final = "2026-08-30T07:48:31Z"
+NINTH_SUCCESSOR_AMENDMENT_PLANNED_AT_UTC: Final = "2026-08-30T09:49:39Z"
 SUCCESSOR_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "configs/trust_sentinel_ood_external_v2_1.yaml",
     "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
@@ -851,6 +903,17 @@ SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "tests/unit/test_ood_v2_pipeline.py",
     "tests/unit/test_ood_v2_protocol_closure.py",
 )
+SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
+    "configs/trust_sentinel_ood_external_v2_1.yaml",
+    "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+    "scripts/freeze_trust_sentinel_ood_external_v2.py",
+    "src/ecg_trust/ood_v2/models.py",
+    "src/ecg_trust/ood_v2/pipeline.py",
+    "tests/unit/test_ood_v2_cli.py",
+    "tests/unit/test_ood_v2_models.py",
+    "tests/unit/test_ood_v2_pipeline.py",
+    "tests/unit/test_ood_v2_protocol_closure.py",
+)
 _ARCHIVE_MEMBER_ROLES: Final[tuple[str, ...]] = (
     "ignored_release_file",
     "quality_reference",
@@ -915,6 +978,53 @@ INVENTORY_BUILDER_OUTPUT_STATES: Final[tuple[str, ...]] = (
     "BOTH",
     "UNVERIFIABLE",
 )
+CHILD_FREEZE_PREFLIGHT_STAGES: Final[tuple[str, ...]] = (
+    "parent_lineage",
+    "runtime_environment",
+    "git_source_provenance",
+    "x8_inventory_evidence",
+    "namespace_and_timestamp",
+    "closing_control_state",
+)
+CHILD_FREEZE_ATTEMPT_STAGES: Final[tuple[str, ...]] = (
+    "authorization_publication",
+    "raw_source_binding_verification",
+    "challenge_archive_closure",
+    "zzu_tool_resolution",
+    "zzu_archive_listing",
+    "zzu_archive_test",
+    "zzu_evaluated_tree_snapshot",
+    "zzu_isolated_extraction",
+    "zzu_archive_comparison",
+    "decision_and_child_materialization",
+    "prepublication_control_reverification",
+    "child_publication",
+    "child_reload_and_postflight",
+)
+CHILD_FREEZE_FAILURE_REASONS: Final[tuple[str, ...]] = (
+    "STAGE_REFUSED",
+    "DESTINATION_PREEXISTED",
+    "PUBLICATION_FAILED_BEFORE_VISIBILITY",
+    "PUBLICATION_FAILED_AFTER_VISIBILITY",
+    "POSTPUBLICATION_RELOAD_REFUSED",
+    "UNEXPECTED_INTERNAL_FAILURE",
+)
+CHILD_FREEZE_OUTPUT_STATES: Final[tuple[str, ...]] = (
+    "NONE",
+    "VISIBLE_EXACT_DURABILITY_UNCONFIRMED",
+    "DURABLE_EXACT",
+    "PRESENT_UNVERIFIABLE",
+)
+CHILD_FREEZE_AUTHORIZATION_STATES: Final[tuple[str, ...]] = (
+    "NOT_CONSUMED",
+    "CONSUMED",
+    "UNVERIFIABLE",
+)
+CHILD_FREEZE_CLEANUP_STATES: Final[tuple[str, ...]] = (
+    "NOT_REACHED",
+    "CLEAN",
+    "FAILED",
+)
 
 
 class InventoryBuilderPreflightStageError(OODExternalV2IntegrityError):
@@ -925,6 +1035,47 @@ class InventoryBuilderPreflightStageError(OODExternalV2IntegrityError):
             raise ValueError("inventory builder preflight stage is not allowlisted")
         self.stage = stage
         super().__init__(f"inventory builder preflight refused at stage {stage}")
+
+
+class ChildFreezePreflightStageError(OODExternalV2IntegrityError):
+    """Sanitized, controls-only X9 child-freeze preflight refusal."""
+
+    def __init__(self, stage: str) -> None:
+        if stage not in CHILD_FREEZE_PREFLIGHT_STAGES:
+            raise ValueError("child freeze preflight stage is not allowlisted")
+        self.stage = stage
+        super().__init__(f"child freeze preflight refused at stage {stage}")
+
+
+class ChildFreezeAttemptError(OODExternalV2ExecutionError):
+    """Sanitized terminal refusal after the X9 marker became visible."""
+
+    def __init__(
+        self,
+        *,
+        stage: str,
+        reason: str,
+        output_state: str,
+        official_source_content_accessed: bool,
+        failure_receipt_written: bool,
+    ) -> None:
+        if stage not in CHILD_FREEZE_ATTEMPT_STAGES:
+            raise ValueError("child freeze attempt stage is not allowlisted")
+        if reason not in CHILD_FREEZE_FAILURE_REASONS:
+            raise ValueError("child freeze failure reason is not allowlisted")
+        if output_state not in CHILD_FREEZE_OUTPUT_STATES:
+            raise ValueError("child freeze output state is not allowlisted")
+        if type(official_source_content_accessed) is not bool:
+            raise TypeError("official_source_content_accessed must be bool")
+        if type(failure_receipt_written) is not bool:
+            raise TypeError("failure_receipt_written must be bool")
+        self.authorization_consumed = True
+        self.stage = stage
+        self.reason = reason
+        self.output_state = output_state
+        self.official_source_content_accessed = official_source_content_accessed
+        self.failure_receipt_written = failure_receipt_written
+        super().__init__("X9 child freeze failed after authorization consumption")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1163,6 +1314,28 @@ class InventoryBuilderPostflight:
 
 
 @dataclass(frozen=True, slots=True)
+class ChildFreezePreflight:
+    """Content-free proof that the single X9 child-freeze attempt may begin."""
+
+    status: str
+    parent: OODExternalV2ParentConfig
+    project_root: Path
+    implementation_revision: str
+    project_source_tree: ProjectSourceTreeBinding
+    runtime_environment: RuntimeEnvironmentBinding
+    frozen_at_utc: datetime
+    inventory_path: Path
+    public_projection_path: Path
+    challenge_root: Path
+    zzu_root: Path
+    declared_counts: tuple[int, int, int, int]
+    output_path: Path
+    output_parent_identity: _OwnedDirectoryIdentity
+    protocol_artifact_parent_identity: _OwnedDirectoryIdentity
+    seven_zip_executable: Path
+
+
+@dataclass(frozen=True, slots=True)
 class ArchiveClosureSummaryBinding:
     dataset: str
     archive_format: str
@@ -1200,6 +1373,7 @@ class OODExternalV2ChildContract:
     decision_bindings: Mapping[str, BoundFile]
     raw_source_bindings: Mapping[str, RawSourceBinding]
     inventory_builder_attempt: BoundFile
+    child_freeze_attempt: BoundFile
     runtime_environment: RuntimeEnvironmentBinding
     runtime_bindings: Mapping[str, str]
     project_source_tree: ProjectSourceTreeBinding
@@ -2199,6 +2373,105 @@ def verify_successor_parent_preflight(
         raise OODExternalV2ConfigError(
             "successor X7 archive-operand amendment declaration differs"
         )
+    child_freeze_amendment = _mapping(
+        design.get("x8_inventory_build_success_and_pre_x9_child_freeze_failures"),
+        "successor X8 inventory success and X9 child-freeze amendment",
+    )
+    expected_child_freeze_amendment = {
+        "amendment": (
+            "preserve_exact_successful_x8_inventory_add_single_use_x9_child_freeze_"
+            "stage_reason_publication_and_failure_observability"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_x8_implementation_revision": 1,
+            "exact_modified_paths": list(
+                SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS
+            ),
+            "sole_parent": EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+            "status_for_every_path": "modified",
+        },
+        "frozen_at_utc": EIGHTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC,
+        "implementation_revision": EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        "new_x9_child_freeze_authorization_id": "x9_child_freeze_attempt_1",
+        "new_x9_child_freeze_authorization_path": (
+            SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+        ),
+        "new_x9_child_freeze_failure_receipt_path": (
+            SUCCESSOR_CHILD_FREEZE_FAILURE_PATH
+        ),
+        "operational_amendment_only": True,
+        "parent_config_file_sha256": EIGHTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        "pre_x9_child_freeze_attempts": {
+            "count": 2,
+            "evaluation_or_metric_execution_occurred": False,
+            "exact_failure_stage": "UNKNOWN",
+            "external_one_shot_claim_created": False,
+            "failure_receipt_created": False,
+            "generic_failure_status": "OOD_EXTERNAL_V2_CHILD_FREEZE_FAILED",
+            "observed_child_state_after_each_attempt": "ABSENT",
+            "official_source_content_accessed": "UNKNOWN",
+            "retrospective_failure_receipt_fabrication": "forbidden",
+            "runtime_cleanup_state_after_each_attempt": "CLEAN",
+            "successor_output_root_created": False,
+            "trained_checkpoint_or_model_access_occurred": False,
+        },
+        "production_inventory_build": {
+            "authorization_consumed": True,
+            "authorization_id": "x8_inventory_build_attempt_1",
+            "authorization_marker_artifact_sha256": (
+                HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+            ),
+            "authorization_marker_created": True,
+            "authorization_marker_file_sha256": (
+                HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+            ),
+            "authorization_path": HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH,
+            "authorization_state": "CONSUMED_SUCCEEDED_RETAINED",
+            "evaluation_or_metric_execution_occurred": False,
+            "exact_archive_closure_summaries_revalidated_privately": True,
+            "exact_selected_counts": {
+                "challenge_records": 1_000,
+                "total_records": 13_328,
+                "zzu_patients": 10_350,
+                "zzu_records": 12_328,
+            },
+            "external_one_shot_claim_created": False,
+            "failure_receipt_created": False,
+            "failure_receipt_must_remain_absent": True,
+            "failure_receipt_path": HISTORICAL_X8_INVENTORY_BUILDER_FAILURE_PATH,
+            "outcome": "INVENTORY_BUILDER_COMPLETED",
+            "private_inventory": {
+                "artifact_sha256": HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256,
+                "file_sha256": HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256,
+                "path": SUCCESSOR_PRIVATE_INVENTORY_PATH,
+            },
+            "project_source_tree_sha256": (
+                HISTORICAL_X8_INVENTORY_BUILDER_PROJECT_SOURCE_TREE_SHA256
+            ),
+            "public_projection": {
+                "artifact_sha256": (
+                    HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
+                ),
+                "file_sha256": HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256,
+                "path": SUCCESSOR_PUBLIC_PROJECTION_PATH,
+            },
+            "quality_policy_execution_occurred": False,
+            "runtime_cleanup_succeeded": True,
+            "successor_output_root_created": False,
+            "trained_checkpoint_or_model_access_occurred": False,
+            "waveform_sample_decode_occurred": False,
+        },
+        "scientific_protocol_change": False,
+        "x8_failure_receipt_absence": "required",
+        "x8_inventory_retention": (
+            "exact_private_inventory_public_projection_and_authorization_marker_"
+            "preserved_without_rebuild_mutation_or_reuse"
+        ),
+    }
+    if child_freeze_amendment != expected_child_freeze_amendment:
+        raise OODExternalV2ConfigError(
+            "successor X8/X9 child-freeze amendment declaration differs"
+        )
     revision_boundary = _mapping(
         payload.get("revision_boundary"),
         "successor revision boundary",
@@ -2526,6 +2799,10 @@ def verify_successor_parent_preflight(
         one_shot.get("inventory_build_authorization"),
         "successor inventory build authorization",
     )
+    child_freeze_authorization = _mapping(
+        one_shot.get("child_freeze_authorization"),
+        "successor child freeze authorization",
+    )
     postclaim_no_retry = _mapping(
         one_shot.get("postclaim_no_retry"),
         "successor postclaim no-retry contract",
@@ -2684,6 +2961,142 @@ def verify_successor_parent_preflight(
         raise OODExternalV2ConfigError(
             "successor inventory build authorization differs"
         )
+    if child_freeze_authorization != {
+        "artifact_type": SUCCESSOR_CHILD_FREEZE_ATTEMPT_ARTIFACT_TYPE,
+        "authorization_id": "x9_child_freeze_attempt_1",
+        "child_contract_binding": {
+            "field": "child_freeze_attempt",
+            "inventory_builder_attempt_remains_exact_x8_marker": True,
+            "x9_failure_receipt_must_be_absent": True,
+        },
+        "contains_external_source_bytes_or_identifiers": False,
+        "contains_model_outputs_embeddings_or_scores": False,
+        "create_new": "immutable_atomic_create_new_no_overwrite",
+        "distinct_from_external_waveform_one_shot_claim": True,
+        "durability": (
+            "exact_file_flush_and_parent_directory_durability_or_fail_closed"
+        ),
+        "external_one_shot_claim_consumed_at_marker_creation": False,
+        "failure_after_consumption_requires_new_frozen_amendment_and_new_"
+        "authorization_id": True,
+        "failure_receipt": {
+            "absolute_or_relative_paths_and_timestamps": "forbidden",
+            "any_retry_requires_future_frozen_amendment_and_new_authorization_id": (
+                True
+            ),
+            "artifact_type": SUCCESSOR_CHILD_FREEZE_FAILURE_ARTIFACT_TYPE,
+            "canonical_json": "utf8_sorted_keys_compact_separators_single_lf",
+            "create_new": "immutable_atomic_create_new_no_overwrite",
+            "durability": (
+                "exact_file_flush_and_parent_directory_durability_or_fail_closed"
+            ),
+            "exact_ordered_failure_stages": list(CHILD_FREEZE_ATTEMPT_STAGES),
+            "exact_top_level_fields": [
+                "artifact_type",
+                "authorization_consumed",
+                "authorization_id",
+                "authorization_marker_artifact_sha256",
+                "authorization_marker_file_sha256",
+                "contains_external_source_bytes_or_identifiers",
+                "contains_model_outputs_embeddings_or_scores",
+                "external_one_shot_claim_consumed",
+                "failure_reason",
+                "failure_requires_new_frozen_amendment_and_authorization_id",
+                "failure_stage",
+                "failure_stage_ordinal",
+                "implementation_revision",
+                "official_source_content_accessed",
+                "output_state",
+                "parent_config_file_sha256",
+                "protocol_id",
+                "quality_model_score_logit_probability_or_metric_observed",
+                "retry_resume_or_reuse_authorized",
+                "schema_version",
+                "state",
+                "waveform_sample_decode_occurred",
+                "artifact_sha256",
+            ],
+            "exception_class_message_traceback_errno_and_process_output": "forbidden",
+            "external_source_bytes_or_identifiers": "forbidden",
+            "external_source_record_patient_archive_member_or_file_identifiers": (
+                "forbidden"
+            ),
+            "external_waveform_one_shot_claim_consumed": False,
+            "failure_reason_allowlist": list(CHILD_FREEZE_FAILURE_REASONS),
+            "failure_stage_ordinal": (
+                "zero_based_index_in_exact_ordered_failure_stages"
+            ),
+            "git_ignored_and_untracked": True,
+            "logical_self_hash_field": "artifact_sha256",
+            "model_outputs_embeddings_or_scores": "forbidden",
+            "output_state_allowlist": list(CHILD_FREEZE_OUTPUT_STATES),
+            "path": SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
+            "retention": "permanent",
+            "retry_resume_or_reuse_authorized": False,
+            "schema_version": 1,
+            "state": "PRECLAIM_CHILD_FREEZE_FAILED",
+            "waveform_quality_model_score_logit_probability_or_metric_observation": (
+                "forbidden"
+            ),
+            "write_failure_does_not_restore_or_repeat_authorization": True,
+        },
+        "first_official_source_content_reverification_requires_durable_marker": True,
+        "git_ignored_and_untracked": True,
+        "maximum_consumptions": 1,
+        "path": SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+        "preconsumption_requirements": [
+            "exact_x9_parent_lineage_clean_head_live_remote_history_runtime_and_"
+            "source_tree_verified",
+            "exact_historical_x8_inventory_authorization_marker_verified",
+            "x8_inventory_build_failure_receipt_absent",
+            "exact_x8_private_inventory_and_public_projection_hashes_counts_and_"
+            "semantics_verified",
+            "exact_x8_archive_closure_summaries_revalidated_without_inventory_rebuild",
+            "exact_child_timestamp_destination_decisions_and_runtime_bindings_materialized",
+            "x9_child_freeze_attempt_marker_failure_receipt_and_child_destination_absent",
+            "external_waveform_one_shot_claim_and_successor_output_root_absent",
+        ],
+        "private_inventory_artifact_sha256": (
+            HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256
+        ),
+        "private_inventory_file_sha256": HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256,
+        "private_inventory_path": SUCCESSOR_PRIVATE_INVENTORY_PATH,
+        "public_projection_artifact_sha256": (
+            HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
+        ),
+        "public_projection_file_sha256": HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256,
+        "public_projection_path": SUCCESSOR_PUBLIC_PROJECTION_PATH,
+        "retention": "permanent",
+        "retry_resume_or_reuse": "forbidden_after_marker_visibility",
+        "scope": "sole_x9_child_freeze_attempt_using_exact_successful_x8_inventory",
+        "timing": (
+            "after_repeatable_controls_only_preflight_before_first_official_source_"
+            "content_reverification"
+        ),
+        "visibility_consumes_authorization_before_durability_completion": True,
+        "x8_frozen_at_utc": EIGHTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC,
+        "x8_implementation_revision": EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        "x8_inventory_build_authorization_marker_artifact_sha256": (
+            HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "x8_inventory_build_authorization_marker_file_sha256": (
+            HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+        ),
+        "x8_inventory_build_authorization_path": (
+            HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH
+        ),
+        "x8_inventory_build_failure_receipt_path": (
+            HISTORICAL_X8_INVENTORY_BUILDER_FAILURE_PATH
+        ),
+        "x8_inventory_build_failure_receipt_required_absent": True,
+        "x8_parent_config_file_sha256": EIGHTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        "x8_project_source_tree_sha256": (
+            HISTORICAL_X8_INVENTORY_BUILDER_PROJECT_SOURCE_TREE_SHA256
+        ),
+    }:
+        raise OODExternalV2ConfigError(
+            "successor child freeze authorization differs"
+        )
     if (
         postclaim_no_retry
         != {
@@ -2708,6 +3121,8 @@ def verify_successor_parent_preflight(
             "and_failure_receipt_verified",
             "durable_x8_inventory_build_authorization_marker_verified",
             "x8_inventory_build_failure_receipt_absent",
+            "durable_x9_child_freeze_authorization_marker_verified",
+            "x9_child_freeze_failure_receipt_absent",
             "output_root_absent",
             "clean_committed_revision",
         ]
@@ -3397,7 +3812,10 @@ def _verify_archive_closure_rebuilds(
     raw_source_paths: Mapping[str, Path],
     seven_zip_executable: str | Path,
     expected_seven_zip_tool: SevenZipToolBinding | None = None,
+    stage_callback: Callable[[str], None] | None = None,
 ) -> None:
+    if stage_callback is not None and not callable(stage_callback):
+        raise TypeError("stage_callback must be callable or None")
     summaries = _assert_production_archive_closures(
         inventory.archive_closures,
         expected_seven_zip_tool=expected_seven_zip_tool,
@@ -3413,19 +3831,35 @@ def _verify_archive_closure_rebuilds(
         raise OODExternalV2IntegrityError(
             "ZZU closure tool differs from the successor-parent 7-Zip binding"
         )
+    current_stage: str | None = None
+
+    def transition(stage: str) -> None:
+        nonlocal current_stage
+        if stage not in CHILD_FREEZE_ATTEMPT_STAGES:
+            raise OODExternalV2IntegrityError(
+                "archive closure emitted an invalid child-freeze stage"
+            )
+        if stage != current_stage:
+            current_stage = stage
+            if stage_callback is not None:
+                stage_callback(stage)
+
     try:
-        verify_seven_zip_tool_binding(requested_tool, zzu.tool_binding)
+        transition("challenge_archive_closure")
         challenge_hash = verify_challenge_tar_extraction_closure(
             raw_source_paths["challenge_archive"],
             dataset_roots[CHALLENGE_2011_DATASET],
             challenge,
         )
+        transition("zzu_tool_resolution")
+        verify_seven_zip_tool_binding(requested_tool, zzu.tool_binding)
         zzu_hash = verify_zzu_split_zip_extraction_closure(
             raw_source_paths["zzu_archive_z01"],
             raw_source_paths["zzu_archive_zip"],
             dataset_roots[ZZU_PEDIATRIC_DATASET],
             requested_tool,
             zzu,
+            stage_callback=transition,
         )
     except Exception as error:
         raise OODExternalV2IntegrityError(
@@ -3437,11 +3871,11 @@ def _verify_archive_closure_rebuilds(
         raise OODExternalV2IntegrityError("rebuilt archive closure hashes differ")
 
 
-def load_child_contract(path: str | Path) -> OODExternalV2ChildContract:
-    """Load the canonical, self-hashed child execution contract."""
+def _decode_child_contract_payload(raw: bytes) -> dict[str, object]:
+    """Strictly validate canonical child bytes before any publication."""
 
-    source = Path(os.path.abspath(os.fspath(path)))
-    raw = _read_bounded(source, _CHILD_MAX_BYTES, "child execution contract")
+    if not isinstance(raw, bytes) or not raw or len(raw) > _CHILD_MAX_BYTES:
+        raise OODExternalV2ConfigError("child contract byte size is invalid")
     try:
         decoded: object = json.loads(
             raw[:-1].decode("ascii") if raw.endswith(b"\n") else b"".decode(),
@@ -3465,6 +3899,7 @@ def load_child_contract(path: str | Path) -> OODExternalV2ChildContract:
         "implementation_revision",
         "inventory",
         "inventory_builder_attempt",
+        "child_freeze_attempt",
         "output_root",
         "parent_config_file_sha256",
         "project_source_tree",
@@ -3488,6 +3923,16 @@ def load_child_contract(path: str | Path) -> OODExternalV2ChildContract:
         {key: value for key, value in payload.items() if key != "artifact_sha256"}
     ):
         raise OODExternalV2ConfigError("child contract logical hash differs")
+    return payload
+
+
+def load_child_contract(path: str | Path) -> OODExternalV2ChildContract:
+    """Load the canonical, self-hashed child execution contract."""
+
+    source = Path(os.path.abspath(os.fspath(path)))
+    raw = _read_bounded(source, _CHILD_MAX_BYTES, "child execution contract")
+    payload = _decode_child_contract_payload(raw)
+    artifact_sha256 = _digest(payload.get("artifact_sha256"), "child artifact")
     frozen = _utc_datetime(payload.get("frozen_at_utc"), "child frozen_at_utc")
     implementation_revision = _revision(
         payload.get("implementation_revision"),
@@ -3512,10 +3957,31 @@ def load_child_contract(path: str | Path) -> OODExternalV2ChildContract:
     )
     if (
         inventory_builder_attempt.relative_path
-        != SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH
+        != HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH
     ):
         raise OODExternalV2ConfigError(
             "child inventory builder attempt path differs from protocol"
+        )
+    raw_child_freeze_attempt = _mapping(
+        payload.get("child_freeze_attempt"),
+        "child freeze attempt",
+    )
+    if set(raw_child_freeze_attempt) != {
+        "artifact_sha256",
+        "file_sha256",
+        "relative_path",
+    }:
+        raise OODExternalV2ConfigError(
+            "child freeze attempt fields differ from protocol"
+        )
+    child_freeze_attempt = _bound_file(
+        raw_child_freeze_attempt,
+        "child freeze attempt",
+        require_artifact=True,
+    )
+    if child_freeze_attempt.relative_path != SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH:
+        raise OODExternalV2ConfigError(
+            "child freeze attempt path differs from protocol"
         )
     raw_inventory = _mapping(payload.get("inventory"), "child inventory")
     inventory_expected = {
@@ -3657,6 +4123,7 @@ def load_child_contract(path: str | Path) -> OODExternalV2ChildContract:
         decision_bindings=decision_bindings,
         raw_source_bindings=raw_source_bindings,
         inventory_builder_attempt=inventory_builder_attempt,
+        child_freeze_attempt=child_freeze_attempt,
         runtime_environment=runtime_environment,
         runtime_bindings=runtime_bindings,
         project_source_tree=project_source_tree,
@@ -4516,7 +4983,7 @@ def _verify_successor_amendment_revision(
     )
     _verify_exact_modification_child(
         project_root,
-        child_revision=revision,
+        child_revision=EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         parent_revision=SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         modified_paths=SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS,
         context="archive-operand successor amendment",
@@ -4527,6 +4994,20 @@ def _verify_successor_amendment_revision(
         relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
         expected_file_sha256=SEVENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
         context="seventh frozen successor parent",
+    )
+    _verify_exact_modification_child(
+        project_root,
+        child_revision=revision,
+        parent_revision=EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        modified_paths=SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS,
+        context="child-freeze observability successor amendment",
+    )
+    _verify_historical_revision_blob(
+        project_root,
+        revision=EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=EIGHTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        context="eighth frozen successor parent",
     )
 
 
@@ -7143,6 +7624,467 @@ def _verify_historical_x7_inventory_builder_artifacts(
     return (hashes[0], hashes[1])
 
 
+def _historical_x8_inventory_builder_attempt_bytes() -> bytes:
+    """Reconstruct the successful X8 marker without using X9 runtime identity."""
+
+    body: dict[str, object] = {
+        "archive_operand_normalization": {
+            "applies_to_commands": [
+                "listing",
+                "archive_test",
+                "isolated_extraction",
+            ],
+            "input": "already_bound_project_relative_ZZU_terminal_zip_path",
+            "output": "exact_absolute_direct_archive_path",
+            "scientific_protocol_change": False,
+        },
+        "artifact_type": SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE,
+        "authorization_consumption_ordinal": 1,
+        "authorization_id": "x8_inventory_build_attempt_1",
+        "contains_external_source_bytes_or_identifiers": False,
+        "contains_model_outputs_embeddings_or_scores": False,
+        "external_one_shot_claim_consumed_at_marker_creation": False,
+        "fresh_frozen_amendment_authorization": True,
+        "git_runtime_tree_sha256": EXPECTED_GIT_RUNTIME_TREE_SHA256,
+        "historical_x6_authorization_artifact_sha256": (
+            HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "historical_x6_authorization_file_sha256": (
+            HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+        ),
+        "historical_x6_authorization_path": (
+            HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_PATH
+        ),
+        "historical_x6_authorization_state": "CONSUMED_FAILED_RETAINED",
+        "implementation_revision": EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        "maximum_consumptions": 1,
+        "parent_config_file_sha256": EIGHTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        "predecessor_authorization_artifact_sha256": (
+            HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "predecessor_authorization_consumed": True,
+        "predecessor_authorization_file_sha256": (
+            HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+        ),
+        "predecessor_authorization_id": "x7_inventory_build_attempt_1",
+        "predecessor_authorization_must_remain_present": True,
+        "predecessor_authorization_path": (
+            HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH
+        ),
+        "predecessor_authorization_state": "CONSUMED_FAILED_RETAINED",
+        "predecessor_failure_output_state": "NONE",
+        "predecessor_failure_receipt_artifact_sha256": (
+            HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_ARTIFACT_SHA256
+        ),
+        "predecessor_failure_receipt_file_sha256": (
+            HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_FILE_SHA256
+        ),
+        "predecessor_failure_receipt_must_remain_present": True,
+        "predecessor_failure_receipt_path": (
+            HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH
+        ),
+        "predecessor_failure_stage": "zzu_archive_listing",
+        "predecessor_failure_stage_ordinal": 8,
+        "predecessor_official_source_content_accessed": True,
+        "project_source_tree_sha256": (
+            HISTORICAL_X8_INVENTORY_BUILDER_PROJECT_SOURCE_TREE_SHA256
+        ),
+        "protocol_inventory_build_attempt_ordinal": 3,
+        "protocol_id": PROTOCOL_ID,
+        "python_environment_sha256": (
+            "sha256:d834e2cf3e6cf1ec7fbf09607cb6fb8b5a05824dfdfba15445e2e5dad74c9188"
+        ),
+        "retry_resume_or_reuse_of_predecessor": False,
+        "schema_version": 4,
+        "state": "PRECLAIM_INVENTORY_BUILD_AUTHORIZATION_CONSUMED",
+    }
+    if canonical_sha256(body) != HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256:
+        raise OODExternalV2IntegrityError(
+            "frozen X8 inventory builder attempt artifact constants are inconsistent"
+        )
+    body["artifact_sha256"] = HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+    payload = canonical_json_bytes(body)
+    if sha256_bytes(payload) != HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256:
+        raise OODExternalV2IntegrityError(
+            "frozen X8 inventory builder attempt file constants are inconsistent"
+        )
+    return payload
+
+
+def _verify_historical_x8_inventory_builder_evidence(project_root: Path) -> str:
+    """Verify the complete retained inventory-attempt lineage through X8."""
+
+    for relative_path, label in (
+        (HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH, "X4"),
+        (HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH, "X5"),
+    ):
+        retired = _resolve_project_relative(
+            project_root,
+            relative_path,
+            require_file=False,
+        )
+        if retired.exists() or _is_indirect(retired):
+            raise OODExternalV2IntegrityError(
+                f"retired {label} inventory builder authorization path must remain absent"
+            )
+        _require_git_ignored_and_untracked(
+            project_root,
+            relative_path,
+            context=f"retired {label} inventory builder authorization",
+        )
+    _verify_historical_x6_inventory_builder_attempt(project_root)
+    _verify_historical_x7_inventory_builder_artifacts(project_root)
+    marker = _resolve_project_relative(
+        project_root,
+        HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH,
+        require_file=True,
+    )
+    observed = _read_bounded(
+        marker,
+        _CHILD_MAX_BYTES,
+        "historical X8 inventory builder attempt marker",
+    )
+    if observed != _historical_x8_inventory_builder_attempt_bytes():
+        raise OODExternalV2IntegrityError(
+            "historical X8 inventory builder attempt marker differs"
+        )
+    _require_git_ignored_and_untracked(
+        project_root,
+        HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH,
+        context="historical X8 inventory builder attempt marker",
+    )
+    failure = _resolve_project_relative(
+        project_root,
+        HISTORICAL_X8_INVENTORY_BUILDER_FAILURE_PATH,
+        require_file=False,
+    )
+    if failure.exists() or _is_indirect(failure):
+        raise OODExternalV2IntegrityError(
+            "X8 inventory builder failure receipt must remain absent"
+        )
+    _require_git_ignored_and_untracked(
+        project_root,
+        HISTORICAL_X8_INVENTORY_BUILDER_FAILURE_PATH,
+        context="absent X8 inventory builder failure receipt",
+    )
+    return sha256_bytes(observed)
+
+
+def _child_freeze_attempt_body_from_identity(
+    *,
+    parent_config_file_sha256: str,
+    implementation_revision: str,
+    project_source_tree_sha256: str,
+    python_environment_sha256: str,
+    git_runtime_tree_sha256: str,
+    frozen_at_utc: datetime,
+    counts: tuple[int, int, int, int],
+) -> dict[str, object]:
+    challenge_records, zzu_records, zzu_patients, selected_records_total = counts
+    body: dict[str, object] = {
+        "artifact_type": SUCCESSOR_CHILD_FREEZE_ATTEMPT_ARTIFACT_TYPE,
+        "authorization_consumption_ordinal": 1,
+        "authorization_id": "x9_child_freeze_attempt_1",
+        "child_contract_relative_path": SUCCESSOR_CHILD_CONFIG_PATH,
+        "child_frozen_at_utc": frozen_at_utc.astimezone(UTC)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "contains_external_source_bytes_or_identifiers": False,
+        "contains_model_outputs_embeddings_or_scores": False,
+        "declared_counts": {
+            "challenge_records": challenge_records,
+            "selected_records_total": selected_records_total,
+            "zzu_patients": zzu_patients,
+            "zzu_records": zzu_records,
+        },
+        "external_one_shot_claim_consumed_at_marker_creation": False,
+        "git_runtime_tree_sha256": git_runtime_tree_sha256,
+        "historical_x8_failure_receipt_required_absent": True,
+        "historical_x8_inventory_builder_attempt_artifact_sha256": (
+            HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "historical_x8_inventory_builder_attempt_file_sha256": (
+            HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+        ),
+        "historical_x8_inventory_builder_attempt_path": (
+            HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH
+        ),
+        "historical_x8_private_inventory_artifact_sha256": (
+            HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256
+        ),
+        "historical_x8_private_inventory_file_sha256": (
+            HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256
+        ),
+        "historical_x8_public_projection_artifact_sha256": (
+            HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
+        ),
+        "historical_x8_public_projection_file_sha256": (
+            HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256
+        ),
+        "implementation_revision": implementation_revision,
+        "inventory_builder_authorization_reused": False,
+        "maximum_consumptions": 1,
+        "parent_config_file_sha256": parent_config_file_sha256,
+        "project_source_tree_sha256": project_source_tree_sha256,
+        "protocol_child_freeze_attempt_ordinal": 1,
+        "protocol_id": PROTOCOL_ID,
+        "python_environment_sha256": python_environment_sha256,
+        "schema_version": 1,
+        "state": "PRECLAIM_CHILD_FREEZE_AUTHORIZATION_CONSUMED",
+    }
+    body["artifact_sha256"] = canonical_sha256(body)
+    return body
+
+
+def _child_freeze_attempt_body(preflight: ChildFreezePreflight) -> dict[str, object]:
+    if not isinstance(preflight, ChildFreezePreflight):
+        raise TypeError("preflight must be ChildFreezePreflight")
+    return _child_freeze_attempt_body_from_identity(
+        parent_config_file_sha256=preflight.parent.file_sha256,
+        implementation_revision=preflight.implementation_revision,
+        project_source_tree_sha256=preflight.project_source_tree.tree_sha256,
+        python_environment_sha256=(
+            preflight.runtime_environment.python_environment_sha256
+        ),
+        git_runtime_tree_sha256=(
+            preflight.runtime_environment.git_tool.runtime_tree.tree_sha256
+        ),
+        frozen_at_utc=preflight.frozen_at_utc,
+        counts=preflight.declared_counts,
+    )
+
+
+def _child_freeze_attempt_bytes(preflight: ChildFreezePreflight) -> bytes:
+    return canonical_json_bytes(_child_freeze_attempt_body(preflight))
+
+
+def _child_freeze_failure_body(
+    preflight: ChildFreezePreflight,
+    *,
+    failure_stage: str,
+    reason: str,
+    official_source_content_accessed: bool,
+    output_state: str,
+) -> dict[str, object]:
+    if not isinstance(preflight, ChildFreezePreflight):
+        raise TypeError("preflight must be ChildFreezePreflight")
+    if failure_stage not in CHILD_FREEZE_ATTEMPT_STAGES:
+        raise OODExternalV2IntegrityError("child freeze failure stage is invalid")
+    if reason not in CHILD_FREEZE_FAILURE_REASONS:
+        raise OODExternalV2IntegrityError("child freeze failure reason is invalid")
+    if output_state not in CHILD_FREEZE_OUTPUT_STATES:
+        raise OODExternalV2IntegrityError("child freeze output state is invalid")
+    if type(official_source_content_accessed) is not bool:
+        raise TypeError("official_source_content_accessed must be bool")
+    attempt = _child_freeze_attempt_body(preflight)
+    body: dict[str, object] = {
+        "artifact_type": SUCCESSOR_CHILD_FREEZE_FAILURE_ARTIFACT_TYPE,
+        "authorization_consumed": True,
+        "authorization_id": "x9_child_freeze_attempt_1",
+        "authorization_marker_artifact_sha256": attempt["artifact_sha256"],
+        "authorization_marker_file_sha256": sha256_bytes(
+            _child_freeze_attempt_bytes(preflight)
+        ),
+        "contains_external_source_bytes_or_identifiers": False,
+        "contains_model_outputs_embeddings_or_scores": False,
+        "external_one_shot_claim_consumed": False,
+        "failure_reason": reason,
+        "failure_requires_new_frozen_amendment_and_authorization_id": True,
+        "failure_stage": failure_stage,
+        "failure_stage_ordinal": CHILD_FREEZE_ATTEMPT_STAGES.index(failure_stage),
+        "implementation_revision": preflight.implementation_revision,
+        "official_source_content_accessed": official_source_content_accessed,
+        "output_state": output_state,
+        "parent_config_file_sha256": preflight.parent.file_sha256,
+        "protocol_id": PROTOCOL_ID,
+        "quality_model_score_logit_probability_or_metric_observed": False,
+        "retry_resume_or_reuse_authorized": False,
+        "schema_version": 1,
+        "state": "PRECLAIM_CHILD_FREEZE_FAILED",
+        "waveform_sample_decode_occurred": False,
+    }
+    body["artifact_sha256"] = canonical_sha256(body)
+    return body
+
+
+def _child_freeze_failure_bytes(
+    preflight: ChildFreezePreflight,
+    *,
+    failure_stage: str,
+    reason: str,
+    official_source_content_accessed: bool,
+    output_state: str,
+) -> bytes:
+    return canonical_json_bytes(
+        _child_freeze_failure_body(
+            preflight,
+            failure_stage=failure_stage,
+            reason=reason,
+            official_source_content_accessed=official_source_content_accessed,
+            output_state=output_state,
+        )
+    )
+
+
+def _verify_child_freeze_marker(
+    expected_bytes: bytes,
+    *,
+    project_root: Path,
+) -> str:
+    marker = _resolve_project_relative(
+        project_root,
+        SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+        require_file=True,
+    )
+    observed = _read_bounded(
+        marker,
+        _CHILD_MAX_BYTES,
+        "X9 child freeze attempt marker",
+    )
+    if observed != expected_bytes:
+        raise OODExternalV2IntegrityError("X9 child freeze attempt marker differs")
+    _require_git_ignored_and_untracked(
+        project_root,
+        SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+        context="X9 child freeze attempt marker",
+    )
+    return sha256_bytes(observed)
+
+
+def verify_child_freeze_authorization_available(
+    preflight: ChildFreezePreflight,
+    *,
+    project_root: str | Path,
+) -> None:
+    if not isinstance(preflight, ChildFreezePreflight):
+        raise TypeError("preflight must be ChildFreezePreflight")
+    root = _strict_project_root(project_root)
+    if root != preflight.project_root:
+        raise OODExternalV2IntegrityError("child freeze preflight project root differs")
+    _verify_historical_x8_inventory_builder_evidence(root)
+    for relative_path, context in (
+        (SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH, "X9 child freeze authorization"),
+        (SUCCESSOR_CHILD_FREEZE_FAILURE_PATH, "X9 child freeze failure receipt"),
+    ):
+        candidate = _resolve_project_relative(root, relative_path, require_file=False)
+        if candidate.exists() or _is_indirect(candidate):
+            raise OODExternalV2IntegrityError(f"{context} is unavailable")
+        _require_git_ignored_and_untracked(root, relative_path, context=context)
+    if preflight.output_path.exists() or _is_indirect(preflight.output_path):
+        raise OODExternalV2IntegrityError("child contract destination is unavailable")
+
+
+def consume_child_freeze_authorization(
+    preflight: ChildFreezePreflight,
+    *,
+    project_root: str | Path,
+    visibility_witness: Callable[[], None] | None = None,
+) -> str:
+    if visibility_witness is not None and not callable(visibility_witness):
+        raise TypeError("visibility_witness must be callable or None")
+    root = _strict_project_root(project_root)
+    verify_child_freeze_authorization_available(preflight, project_root=root)
+    marker = _resolve_project_relative(
+        root,
+        SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+        require_file=False,
+    )
+    _atomic_write_new(
+        marker,
+        _child_freeze_attempt_bytes(preflight),
+        visibility_witness=visibility_witness,
+        expected_parent_identity=preflight.protocol_artifact_parent_identity,
+    )
+    return _verify_child_freeze_marker(
+        _child_freeze_attempt_bytes(preflight),
+        project_root=root,
+    )
+
+
+def record_child_freeze_failure(
+    preflight: ChildFreezePreflight,
+    *,
+    project_root: str | Path,
+    failure_stage: str,
+    reason: str,
+    official_source_content_accessed: bool,
+    output_state: str,
+    visibility_witness: Callable[[], None] | None = None,
+    publication_witness: Callable[[], None] | None = None,
+) -> str:
+    for callback, context in (
+        (visibility_witness, "visibility_witness"),
+        (publication_witness, "publication_witness"),
+    ):
+        if callback is not None and not callable(callback):
+            raise TypeError(f"{context} must be callable or None")
+    root = _strict_project_root(project_root)
+    _verify_child_freeze_marker(
+        _child_freeze_attempt_bytes(preflight),
+        project_root=root,
+    )
+    receipt = _resolve_project_relative(
+        root,
+        SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
+        require_file=False,
+    )
+    if receipt.exists() or _is_indirect(receipt):
+        raise OODExternalV2IntegrityError(
+            "X9 child freeze failure receipt already exists"
+        )
+    _require_git_ignored_and_untracked(
+        root,
+        SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
+        context="X9 child freeze failure receipt",
+    )
+    payload = _child_freeze_failure_bytes(
+        preflight,
+        failure_stage=failure_stage,
+        reason=reason,
+        official_source_content_accessed=official_source_content_accessed,
+        output_state=output_state,
+    )
+    visible = False
+    published = False
+
+    def mark_visible() -> None:
+        nonlocal visible
+        visible = True
+        if visibility_witness is not None:
+            visibility_witness()
+
+    def mark_published() -> None:
+        nonlocal published
+        published = True
+        if publication_witness is not None:
+            publication_witness()
+
+    _atomic_write_new(
+        receipt,
+        payload,
+        visibility_witness=mark_visible,
+        publication_witness=mark_published,
+        expected_parent_identity=preflight.protocol_artifact_parent_identity,
+    )
+    if not visible or not published:
+        raise OODExternalV2IntegrityError(
+            "X9 child freeze failure receipt publication was not witnessed"
+        )
+    observed = _read_bounded(
+        receipt,
+        _CHILD_MAX_BYTES,
+        "X9 child freeze failure receipt",
+    )
+    if observed != payload:
+        raise OODExternalV2IntegrityError("X9 child freeze failure receipt differs")
+    _require_git_ignored_and_untracked(
+        root,
+        SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
+        context="X9 child freeze failure receipt",
+    )
+    return sha256_bytes(observed)
+
+
 def _inventory_builder_failure_body(
     preflight: InventoryBuilderPreflight,
     *,
@@ -7246,33 +8188,76 @@ def _verify_child_inventory_builder_attempt(
     project_root: str | Path,
 ) -> None:
     root = _strict_project_root(project_root)
-    failure_receipt = _resolve_project_relative(
-        root,
-        SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH,
-        require_file=False,
-    )
-    if failure_receipt.exists() or _is_indirect(failure_receipt):
-        raise OODExternalV2IntegrityError(
-            "child freeze is forbidden after an X8 inventory builder failure"
-        )
-    preflight = _inventory_builder_preflight_from_contract(parent, child)
-    observed_file_sha256 = verify_inventory_builder_attempt_marker(
-        preflight,
-        project_root=root,
-    )
-    expected_body = _inventory_builder_attempt_body(preflight)
-    expected_artifact_sha256 = _digest(
-        expected_body.get("artifact_sha256"),
-        "inventory builder attempt artifact",
-    )
+    observed_file_sha256 = _verify_historical_x8_inventory_builder_evidence(root)
     if (
         child.inventory_builder_attempt.file_sha256 != observed_file_sha256
         or child.inventory_builder_attempt.artifact_sha256
-        != expected_artifact_sha256
+        != HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+        or child.inventory_builder_attempt.relative_path
+        != HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH
     ):
         raise OODExternalV2IntegrityError(
             "child inventory builder attempt binding differs"
         )
+    if (
+        child.inventory.file_sha256 != HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256
+        or child.inventory.inventory_sha256
+        != HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256
+        or child.public_inventory_projection is None
+        or child.public_inventory_projection.file_sha256
+        != HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256
+        or child.public_inventory_projection.artifact_sha256
+        != HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
+    ):
+        raise OODExternalV2IntegrityError(
+            "child successful X8 inventory evidence binding differs"
+        )
+    expected_attempt_body = _child_freeze_attempt_body_from_identity(
+        parent_config_file_sha256=parent.file_sha256,
+        implementation_revision=child.implementation_revision,
+        project_source_tree_sha256=child.project_source_tree.tree_sha256,
+        python_environment_sha256=(
+            child.runtime_environment.python_environment_sha256
+        ),
+        git_runtime_tree_sha256=(
+            child.runtime_environment.git_tool.runtime_tree.tree_sha256
+        ),
+        frozen_at_utc=child.frozen_at_utc,
+        counts=(
+            child.inventory.challenge_records,
+            child.inventory.zzu_records,
+            child.inventory.zzu_patients,
+            child.inventory.selected_records_total,
+        ),
+    )
+    expected_attempt_bytes = canonical_json_bytes(expected_attempt_body)
+    observed_child_freeze_file_sha256 = _verify_child_freeze_marker(
+        expected_attempt_bytes,
+        project_root=root,
+    )
+    if (
+        child.child_freeze_attempt.relative_path
+        != SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+        or child.child_freeze_attempt.file_sha256
+        != observed_child_freeze_file_sha256
+        or child.child_freeze_attempt.artifact_sha256
+        != expected_attempt_body["artifact_sha256"]
+    ):
+        raise OODExternalV2IntegrityError("child freeze attempt binding differs")
+    child_freeze_failure = _resolve_project_relative(
+        root,
+        SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
+        require_file=False,
+    )
+    if child_freeze_failure.exists() or _is_indirect(child_freeze_failure):
+        raise OODExternalV2IntegrityError(
+            "child verification is forbidden after an X9 child freeze failure"
+        )
+    _require_git_ignored_and_untracked(
+        root,
+        SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
+        context="absent X9 child freeze failure receipt",
+    )
 
 
 def verify_inventory_builder_attempt_marker(
@@ -7743,7 +8728,21 @@ def verify_inventory_builder_postflight(
     )
 
 
-def freeze_external_v2_child_contract(
+def _child_freeze_preflight_stage(
+    stage: str,
+    operation: Callable[[], Any],
+) -> Any:
+    if stage not in CHILD_FREEZE_PREFLIGHT_STAGES:
+        raise ValueError("child freeze preflight stage is not allowlisted")
+    try:
+        return operation()
+    except ChildFreezePreflightStageError:
+        raise
+    except BaseException:
+        raise ChildFreezePreflightStageError(stage) from None
+
+
+def verify_child_freeze_preflight(
     *,
     parent_path: str | Path,
     project_root: str | Path,
@@ -7759,86 +8758,375 @@ def freeze_external_v2_child_contract(
     selected_records_total: int,
     output_path: str | Path,
     seven_zip_executable: str | Path = "7z",
+) -> ChildFreezePreflight:
+    """Verify X9 controls without reading official/private content or writing state."""
+
+    def parent_lineage() -> tuple[Path, OODExternalV2ParentConfig, str]:
+        root_value = _strict_project_root(project_root)
+        parent_value = _load_parent_for_operation(parent_path, project_root=root_value)
+        assert_external_v2_parent_executable(parent_value)
+        revision_value = _revision(
+            implementation_revision,
+            "implementation revision",
+        )
+        if _verify_clean_git_revision(root_value) != revision_value:
+            raise OODExternalV2IntegrityError(
+                "child freeze must run at the implementation revision"
+            )
+        _verify_successor_amendment_revision(
+            root_value,
+            implementation_revision=revision_value,
+        )
+        return root_value, parent_value, revision_value
+
+    root, parent, revision = cast(
+        tuple[Path, OODExternalV2ParentConfig, str],
+        _child_freeze_preflight_stage("parent_lineage", parent_lineage),
+    )
+    runtime_environment = cast(
+        RuntimeEnvironmentBinding,
+        _child_freeze_preflight_stage(
+            "runtime_environment",
+            _current_runtime_environment,
+        ),
+    )
+
+    def git_source_provenance() -> ProjectSourceTreeBinding:
+        _verify_git_remote_state(root, expected_revision=revision)
+        _verify_private_history_absent(root)
+        _verify_tracked_head_blob(
+            root,
+            revision=revision,
+            relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+            expected_file_sha256=parent.file_sha256,
+        )
+        project_tree = _build_project_source_tree(root)
+        _verify_project_source_tree_at_revisions(
+            root,
+            project_tree,
+            implementation_revision=revision,
+            execution_revision=None,
+        )
+        _verify_imported_project_module_origins(root, project_tree)
+        commit_check = _run_git(
+            root,
+            "cat-file",
+            "-e",
+            f"{revision}^{{commit}}",
+            allow_empty=True,
+        )
+        if commit_check.returncode != 0:
+            raise OODExternalV2IntegrityError(
+                "implementation revision is not a Git commit"
+            )
+        return project_tree
+
+    project_source_tree = cast(
+        ProjectSourceTreeBinding,
+        _child_freeze_preflight_stage(
+            "git_source_provenance",
+            git_source_provenance,
+        ),
+    )
+
+    def x8_inventory_evidence() -> tuple[Path, Path, Path]:
+        _verify_historical_x8_inventory_builder_evidence(root)
+        inventory_file = _require_project_file(
+            root,
+            Path(os.path.abspath(os.fspath(inventory_path))),
+            context="private external inventory",
+        )
+        projection_file = _require_project_file(
+            root,
+            Path(os.path.abspath(os.fspath(public_projection_path))),
+            context="public inventory projection",
+        )
+        requested_tool = Path(os.path.abspath(os.fspath(seven_zip_executable)))
+        if inventory_file.relative_to(root).as_posix() != SUCCESSOR_PRIVATE_INVENTORY_PATH:
+            raise OODExternalV2IntegrityError(
+                "private inventory path differs from the frozen successor namespace"
+            )
+        if projection_file.relative_to(root).as_posix() != SUCCESSOR_PUBLIC_PROJECTION_PATH:
+            raise OODExternalV2IntegrityError(
+                "public projection path differs from the frozen successor namespace"
+            )
+        _require_git_ignored_and_untracked(
+            root,
+            SUCCESSOR_PRIVATE_INVENTORY_PATH,
+            context="private external inventory",
+        )
+        projection_tracked = _run_git(
+            root,
+            "ls-files",
+            "--",
+            SUCCESSOR_PUBLIC_PROJECTION_PATH,
+            allow_empty=True,
+        )
+        if projection_tracked.stdout.strip() != "":
+            raise OODExternalV2IntegrityError(
+                "public projection must be added only in the child-freeze commit"
+            )
+        if parent.seven_zip_tool_binding is None:
+            raise OODExternalV2ConfigError(
+                "successor parent has no frozen 7-Zip tool binding"
+            )
+        verify_seven_zip_tool_binding(requested_tool, parent.seven_zip_tool_binding)
+        return inventory_file, projection_file, requested_tool
+
+    inventory_file, projection_file, requested_tool = cast(
+        tuple[Path, Path, Path],
+        _child_freeze_preflight_stage(
+            "x8_inventory_evidence",
+            x8_inventory_evidence,
+        ),
+    )
+
+    def namespace_and_timestamp() -> tuple[
+        datetime,
+        Path,
+        Path,
+        Path,
+        tuple[int, int, int, int],
+        _OwnedDirectoryIdentity,
+        _OwnedDirectoryIdentity,
+    ]:
+        frozen = _utc_datetime(frozen_at_utc, "frozen_at_utc")
+        challenge_relative = _project_relative_existing_directory(
+            root,
+            challenge_root,
+            context="Challenge extraction root",
+        )
+        zzu_relative = _project_relative_existing_directory(
+            root,
+            zzu_root,
+            context="ZZU extraction root",
+        )
+        if {
+            CHALLENGE_2011_DATASET: challenge_relative,
+            ZZU_PEDIATRIC_DATASET: zzu_relative,
+        } != dict(EXPECTED_DATASET_ROOTS):
+            raise OODExternalV2IntegrityError(
+                "child roots must equal the frozen extraction directories"
+            )
+        counts = (
+            _positive_integer(challenge_records, "Challenge records"),
+            _positive_integer(zzu_records, "ZZU records"),
+            _positive_integer(zzu_patients, "ZZU patients"),
+            _positive_integer(selected_records_total, "selected records"),
+        )
+        frozen_counts = parent.inventory_counts
+        if frozen_counts is None or counts != (
+            frozen_counts.challenge_records,
+            frozen_counts.zzu_records,
+            frozen_counts.zzu_patients,
+            frozen_counts.total_records,
+        ):
+            raise OODExternalV2IntegrityError(
+                "declared child counts differ from the frozen X8 inventory counts"
+            )
+        destination = _resolve_project_relative(
+            root,
+            _relative_path(
+                Path(os.path.abspath(os.fspath(output_path)))
+                .relative_to(root)
+                .as_posix(),
+                "child output path",
+            ),
+            require_file=False,
+        )
+        expected_destination = root.joinpath(
+            *PurePosixPath(SUCCESSOR_CHILD_CONFIG_PATH).parts
+        )
+        if destination != expected_destination:
+            raise OODExternalV2ConfigError(
+                "child contract must use its exact frozen config destination"
+            )
+        if destination.exists() or _is_indirect(destination):
+            raise OODExternalV2IntegrityError(
+                "child contract destination must remain absent before X9"
+            )
+        output_root = _resolve_project_relative(
+            root,
+            parent.output_root,
+            require_file=False,
+        )
+        claim = _resolve_project_relative(root, parent.claim_path, require_file=False)
+        if (
+            output_root.exists()
+            or _is_indirect(output_root)
+            or claim.exists()
+            or _is_indirect(claim)
+        ):
+            raise OODExternalV2IntegrityError(
+                "external claim or output root exists before child freeze"
+            )
+        attempt_path = _resolve_project_relative(
+            root,
+            SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+            require_file=False,
+        )
+        receipt_path = _resolve_project_relative(
+            root,
+            SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
+            require_file=False,
+        )
+        if attempt_path.parent != receipt_path.parent:
+            raise OODExternalV2ConfigError(
+                "X9 protocol artifacts must share one parent directory"
+            )
+        return (
+            frozen,
+            root.joinpath(*PurePosixPath(challenge_relative).parts),
+            root.joinpath(*PurePosixPath(zzu_relative).parts),
+            destination,
+            counts,
+            _owned_directory_identity(destination.parent),
+            _owned_directory_identity(attempt_path.parent),
+        )
+
+    (
+        frozen,
+        challenge_directory,
+        zzu_directory,
+        destination,
+        declared_counts,
+        output_parent_identity,
+        protocol_artifact_parent_identity,
+    ) = cast(
+        tuple[
+            datetime,
+            Path,
+            Path,
+            Path,
+            tuple[int, int, int, int],
+            _OwnedDirectoryIdentity,
+            _OwnedDirectoryIdentity,
+        ],
+        _child_freeze_preflight_stage(
+            "namespace_and_timestamp",
+            namespace_and_timestamp,
+        ),
+    )
+    preflight = ChildFreezePreflight(
+        status="CHILD_FREEZE_PREFLIGHT_VERIFIED",
+        parent=parent,
+        project_root=root,
+        implementation_revision=revision,
+        project_source_tree=project_source_tree,
+        runtime_environment=runtime_environment,
+        frozen_at_utc=frozen,
+        inventory_path=inventory_file,
+        public_projection_path=projection_file,
+        challenge_root=challenge_directory,
+        zzu_root=zzu_directory,
+        declared_counts=declared_counts,
+        output_path=destination,
+        output_parent_identity=output_parent_identity,
+        protocol_artifact_parent_identity=protocol_artifact_parent_identity,
+        seven_zip_executable=requested_tool,
+    )
+
+    def closing_control_state() -> None:
+        if _verify_clean_git_revision(root) != revision:
+            raise OODExternalV2IntegrityError(
+                "implementation revision changed during child-freeze preflight"
+            )
+        if _current_runtime_environment() != runtime_environment:
+            raise OODExternalV2IntegrityError(
+                "runtime changed during child-freeze preflight"
+            )
+        _verify_git_remote_state(root, expected_revision=revision)
+        _verify_private_history_absent(root)
+        _verify_project_source_tree_at_revisions(
+            root,
+            project_source_tree,
+            implementation_revision=revision,
+            execution_revision=None,
+        )
+        _verify_imported_project_module_origins(root, project_source_tree)
+        _verify_tracked_head_blob(
+            root,
+            revision=revision,
+            relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+            expected_file_sha256=parent.file_sha256,
+        )
+        verify_child_freeze_authorization_available(preflight, project_root=root)
+
+    _child_freeze_preflight_stage("closing_control_state", closing_control_state)
+    return preflight
+
+
+def _verify_child_freeze_raw_source_bindings(
+    root: Path,
+    expected_bindings: Mapping[str, RawSourceBinding],
+    *,
+    source_access_witness: Callable[[], None] | None,
+) -> dict[str, RawSourceBinding]:
+    """Verify in frozen order and witness exactly the first successful read."""
+
+    observed: dict[str, RawSourceBinding] = {}
+    source_access_confirmed = False
+
+    def witness_source_access_once() -> None:
+        nonlocal source_access_confirmed
+        if source_access_confirmed:
+            return
+        source_access_confirmed = True
+        if source_access_witness is not None:
+            source_access_witness()
+
+    for name, expected_path in EXPECTED_RAW_SOURCE_PATHS.items():
+        observed[name] = _raw_source_binding_for_path(
+            root,
+            expected_path,
+            context=f"raw source {name}",
+            official_md5=expected_bindings[name].official_md5,
+            content_access_witness=witness_source_access_once,
+        )
+    return observed
+
+
+def _freeze_external_v2_child_contract_after_x9_authorization(
+    *,
+    preflight: ChildFreezePreflight,
+    stage_callback: Callable[[str], None] | None,
+    source_access_witness: Callable[[], None] | None,
+    child_visibility_witness: Callable[[], None] | None,
+    child_publication_witness: Callable[[], None] | None,
+    child_bytes_witness: Callable[[bytes], None],
 ) -> OODExternalV2ChildContract:
-    """Freeze metadata-only child bytes, or refuse the infeasible v2 parent.
-
-    This function never imports a model, opens a WFDB signal, invokes quality
-    logic, or computes an endpoint.  The original frozen v2 parent is rejected
-    before source archives are hashed or an output is created.  The remaining
-    implementation is retained for the explicitly versioned successor.
-    """
-
-    root = _strict_project_root(project_root)
-    parent = _load_parent_for_operation(parent_path, project_root=root)
-    assert_external_v2_parent_executable(parent)
-    revision = _revision(implementation_revision, "implementation revision")
-    try:
-        head = _verify_clean_git_revision(root)
-    except Exception as error:
-        raise OODExternalV2IntegrityError(
-            "child freeze requires a clean implementation worktree"
-        ) from error
-    if head != revision:
-        raise OODExternalV2IntegrityError(
-            "child freeze must run at the implementation revision"
-        )
-    _verify_successor_amendment_revision(
-        root,
-        implementation_revision=revision,
+    root = preflight.project_root
+    parent = preflight.parent
+    revision = preflight.implementation_revision
+    project_source_tree = preflight.project_source_tree
+    runtime_environment = preflight.runtime_environment
+    inventory_path = preflight.inventory_path
+    public_projection_path = preflight.public_projection_path
+    challenge_root = preflight.challenge_root
+    zzu_root = preflight.zzu_root
+    challenge_records, zzu_records, zzu_patients, selected_records_total = (
+        preflight.declared_counts
     )
-    _verify_git_remote_state(root, expected_revision=revision)
-    _verify_private_history_absent(root)
-    _verify_tracked_head_blob(
-        root,
-        revision=revision,
-        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
-        expected_file_sha256=parent.file_sha256,
+    output_path = preflight.output_path
+    seven_zip_executable = preflight.seven_zip_executable
+    frozen_at_utc = preflight.frozen_at_utc.isoformat()
+    builder_attempt_file_sha256 = _verify_historical_x8_inventory_builder_evidence(
+        root
     )
-    project_source_tree = _build_project_source_tree(root)
-    _verify_project_source_tree_at_revisions(
-        root,
-        project_source_tree,
-        implementation_revision=revision,
-        execution_revision=None,
+    builder_attempt_artifact_sha256 = (
+        HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
     )
-    _verify_imported_project_module_origins(root, project_source_tree)
-    _verify_tracked_head_blob(
-        root,
-        revision=revision,
-        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
-        expected_file_sha256=parent.file_sha256,
-    )
-    commit_check = _run_git(
-        root,
-        "cat-file",
-        "-e",
-        f"{revision}^{{commit}}",
-        allow_empty=True,
-    )
-    if commit_check.returncode != 0:
-        raise OODExternalV2IntegrityError("implementation revision is not a Git commit")
-
-    builder_preflight = verify_inventory_builder_preflight(
-        parent.path,
-        root,
-        revision,
-    )
-    if (
-        builder_preflight.parent_config_file_sha256 != parent.file_sha256
-        or builder_preflight.project_source_tree_sha256
-        != project_source_tree.tree_sha256
-    ):
-        raise OODExternalV2IntegrityError(
-            "inventory builder controls differ before child freeze"
-        )
-    builder_attempt_file_sha256 = verify_inventory_builder_attempt_marker(
-        builder_preflight,
+    child_freeze_attempt_body = _child_freeze_attempt_body(preflight)
+    child_freeze_attempt_file_sha256 = _verify_child_freeze_marker(
+        _child_freeze_attempt_bytes(preflight),
         project_root=root,
     )
-    builder_attempt_artifact_sha256 = _digest(
-        _inventory_builder_attempt_body(builder_preflight).get("artifact_sha256"),
-        "inventory builder attempt artifact",
+    child_freeze_attempt_artifact_sha256 = _digest(
+        child_freeze_attempt_body.get("artifact_sha256"),
+        "child freeze attempt artifact",
     )
+    if stage_callback is not None:
+        stage_callback("raw_source_binding_verification")
 
     inventory_file = _require_project_file(
         root,
@@ -7859,10 +9147,18 @@ def freeze_external_v2_child_contract(
         f"{parent.output_root}/private",
         context="private evidence output",
     )
+    if sha256_file(inventory_file) != HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256:
+        raise OODExternalV2IntegrityError(
+            "private inventory file differs from the successful X8 output"
+        )
     try:
         inventory = load_external_inventory(inventory_file)
     except Exception as error:
         raise OODExternalV2IntegrityError("private inventory is invalid") from error
+    if inventory.inventory_sha256 != HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256:
+        raise OODExternalV2IntegrityError(
+            "private inventory artifact differs from the successful X8 output"
+        )
     archive_summaries = _assert_production_archive_closures(
         inventory.archive_closures,
         expected_seven_zip_tool=parent.seven_zip_tool_binding,
@@ -7955,7 +9251,17 @@ def freeze_external_v2_child_contract(
         zzu_records=observed_zzu,
         expected_counts=frozen_counts,
     )
-    runtime_environment = _current_runtime_environment()
+    if (
+        sha256_file(projection_file) != HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256
+        or projection_sha256 != HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
+    ):
+        raise OODExternalV2IntegrityError(
+            "public projection differs from the successful X8 output"
+        )
+    if _current_runtime_environment() != runtime_environment:
+        raise OODExternalV2IntegrityError(
+            "runtime differs from the child-freeze preflight"
+        )
     runtime_bindings = {
         relative_path: sha256_file(
             _resolve_project_relative(root, relative_path, require_file=True)
@@ -7966,15 +9272,11 @@ def freeze_external_v2_child_contract(
         raise OODExternalV2ConfigError(
             "executable successor parent has no frozen raw-source provenance table"
         )
-    raw_bindings = {
-        name: _raw_source_binding_for_path(
-            root,
-            expected_path,
-            context=f"raw source {name}",
-            official_md5=parent.raw_source_bindings[name].official_md5,
-        )
-        for name, expected_path in EXPECTED_RAW_SOURCE_PATHS.items()
-    }
+    raw_bindings = _verify_child_freeze_raw_source_bindings(
+        root,
+        parent.raw_source_bindings,
+        source_access_witness=source_access_witness,
+    )
     if raw_bindings != dict(parent.raw_source_bindings):
         raise OODExternalV2IntegrityError(
             "installed raw source bytes differ from successor-parent provenance"
@@ -8003,7 +9305,10 @@ def freeze_external_v2_child_contract(
         ),
         seven_zip_executable=seven_zip_executable,
         expected_seven_zip_tool=parent.seven_zip_tool_binding,
+        stage_callback=stage_callback,
     )
+    if stage_callback is not None:
+        stage_callback("decision_and_child_materialization")
     decisions = {
         "demo_policy": _freeze_decision_binding(
             root,
@@ -8033,6 +9338,11 @@ def freeze_external_v2_child_contract(
         "decision_bindings": {
             name: _bound_file_dict(binding) for name, binding in decisions.items()
         },
+        "child_freeze_attempt": {
+            "artifact_sha256": child_freeze_attempt_artifact_sha256,
+            "file_sha256": child_freeze_attempt_file_sha256,
+            "relative_path": SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+        },
         "frozen_at_utc": _utc_datetime(frozen_at_utc, "frozen_at_utc")
         .astimezone(UTC)
         .isoformat()
@@ -8054,7 +9364,7 @@ def freeze_external_v2_child_contract(
         "inventory_builder_attempt": {
             "artifact_sha256": builder_attempt_artifact_sha256,
             "file_sha256": builder_attempt_file_sha256,
-            "relative_path": SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+            "relative_path": HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH,
         },
         "output_root": parent.output_root,
         "parent_config_file_sha256": parent.file_sha256,
@@ -8091,6 +9401,11 @@ def freeze_external_v2_child_contract(
         raise OODExternalV2ConfigError(
             "child contract must use its exact frozen config destination"
         )
+    child_bytes = child_contract_bytes(child_body)
+    _decode_child_contract_payload(child_bytes)
+    child_bytes_witness(child_bytes)
+    if stage_callback is not None:
+        stage_callback("prepublication_control_reverification")
     _verify_project_source_tree_at_revisions(
         root,
         project_source_tree,
@@ -8110,18 +9425,331 @@ def freeze_external_v2_child_contract(
         )
     _verify_git_remote_state(root, expected_revision=revision)
     _verify_private_history_absent(root)
-    if (
-        verify_inventory_builder_attempt_marker(
-            builder_preflight,
-            project_root=root,
-        )
-        != builder_attempt_file_sha256
+    if _verify_historical_x8_inventory_builder_evidence(root) != (
+        builder_attempt_file_sha256
     ):
         raise OODExternalV2IntegrityError(
             "inventory builder attempt changed during child freeze"
         )
-    _atomic_write_new(destination, child_contract_bytes(child_body))
+    if _verify_child_freeze_marker(
+        _child_freeze_attempt_bytes(preflight),
+        project_root=root,
+    ) != child_freeze_attempt_file_sha256:
+        raise OODExternalV2IntegrityError(
+            "child freeze attempt marker changed during child freeze"
+        )
+    failure_receipt = _resolve_project_relative(
+        root,
+        SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
+        require_file=False,
+    )
+    if failure_receipt.exists() or _is_indirect(failure_receipt):
+        raise OODExternalV2IntegrityError(
+            "child freeze failure receipt exists before child publication"
+        )
+    if (
+        sha256_file(inventory_file) != HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256
+        or inventory.inventory_sha256
+        != HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256
+        or sha256_file(projection_file)
+        != HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256
+        or projection_sha256
+        != HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
+    ):
+        raise OODExternalV2IntegrityError(
+            "successful X8 inventory evidence changed before child publication"
+        )
+    if destination.exists() or _is_indirect(destination):
+        raise OODExternalV2IntegrityError(
+            "child contract destination was occupied before publication"
+        )
+    if stage_callback is not None:
+        stage_callback("child_publication")
+    _atomic_write_new(
+        destination,
+        child_bytes,
+        visibility_witness=child_visibility_witness,
+        publication_witness=child_publication_witness,
+        expected_parent_identity=preflight.output_parent_identity,
+    )
+    if stage_callback is not None:
+        stage_callback("child_reload_and_postflight")
     return load_child_contract(destination)
+
+
+def _exact_file_state(path: Path, expected_bytes: bytes) -> str:
+    """Return a bounded, path-free state for an immutable protocol artifact."""
+
+    try:
+        if _is_indirect(path):
+            return "UNVERIFIABLE"
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return "ABSENT"
+    except OSError:
+        return "UNVERIFIABLE"
+    if not path.is_file() or metadata.st_size > _CHILD_MAX_BYTES:
+        return "UNVERIFIABLE"
+    try:
+        observed = _read_bounded(path, _CHILD_MAX_BYTES, "protocol artifact")
+    except BaseException:
+        return "UNVERIFIABLE"
+    return "EXACT" if observed == expected_bytes else "UNVERIFIABLE"
+
+
+def freeze_external_v2_child_contract(
+    *,
+    parent_path: str | Path,
+    project_root: str | Path,
+    inventory_path: str | Path,
+    public_projection_path: str | Path,
+    implementation_revision: str,
+    frozen_at_utc: str,
+    challenge_root: str | Path,
+    zzu_root: str | Path,
+    challenge_records: int,
+    zzu_records: int,
+    zzu_patients: int,
+    selected_records_total: int,
+    output_path: str | Path,
+    seven_zip_executable: str | Path = "7z",
+    stage_callback: Callable[[str], None] | None = None,
+    source_access_witness: Callable[[], None] | None = None,
+    child_visibility_witness: Callable[[], None] | None = None,
+    child_publication_witness: Callable[[], None] | None = None,
+) -> OODExternalV2ChildContract:
+    """Consume X9 once and freeze the child without scientific evaluation."""
+
+    for callback, context in (
+        (stage_callback, "stage_callback"),
+        (source_access_witness, "source_access_witness"),
+        (child_visibility_witness, "child_visibility_witness"),
+        (child_publication_witness, "child_publication_witness"),
+    ):
+        if callback is not None and not callable(callback):
+            raise TypeError(f"{context} must be callable or None")
+    # Preserve the original-v2 hard refusal before the successor transaction.
+    initial_root = _strict_project_root(project_root)
+    initial_parent = _load_parent_for_operation(parent_path, project_root=initial_root)
+    assert_external_v2_parent_executable(initial_parent)
+    preflight = verify_child_freeze_preflight(
+        parent_path=parent_path,
+        project_root=project_root,
+        inventory_path=inventory_path,
+        public_projection_path=public_projection_path,
+        implementation_revision=implementation_revision,
+        frozen_at_utc=frozen_at_utc,
+        challenge_root=challenge_root,
+        zzu_root=zzu_root,
+        challenge_records=challenge_records,
+        zzu_records=zzu_records,
+        zzu_patients=zzu_patients,
+        selected_records_total=selected_records_total,
+        output_path=output_path,
+        seven_zip_executable=seven_zip_executable,
+    )
+    root = preflight.project_root
+    current_stage = "authorization_publication"
+    authorization_visible = False
+    official_source_content_accessed = False
+    child_visible = False
+    child_durable = False
+    expected_child_bytes: bytes | None = None
+
+    def transition(stage: str) -> None:
+        nonlocal current_stage
+        if stage not in CHILD_FREEZE_ATTEMPT_STAGES:
+            raise OODExternalV2IntegrityError("child freeze stage is invalid")
+        if CHILD_FREEZE_ATTEMPT_STAGES.index(stage) < (
+            CHILD_FREEZE_ATTEMPT_STAGES.index(current_stage)
+        ):
+            raise OODExternalV2IntegrityError("child freeze stage order regressed")
+        if stage != current_stage:
+            current_stage = stage
+            if stage_callback is not None:
+                stage_callback(stage)
+
+    def mark_authorization_visible() -> None:
+        nonlocal authorization_visible
+        authorization_visible = True
+
+    def mark_source_accessed() -> None:
+        nonlocal official_source_content_accessed
+        if official_source_content_accessed:
+            return
+        official_source_content_accessed = True
+        if source_access_witness is not None:
+            source_access_witness()
+
+    def mark_child_visible() -> None:
+        nonlocal child_visible
+        child_visible = True
+        if child_visibility_witness is not None:
+            child_visibility_witness()
+
+    def mark_child_durable() -> None:
+        nonlocal child_durable
+        child_durable = True
+        if child_publication_witness is not None:
+            child_publication_witness()
+
+    def remember_child_bytes(payload: bytes) -> None:
+        nonlocal expected_child_bytes
+        expected_child_bytes = payload
+
+    try:
+        if stage_callback is not None:
+            stage_callback(current_stage)
+        consume_child_freeze_authorization(
+            preflight,
+            project_root=root,
+            visibility_witness=mark_authorization_visible,
+        )
+    except BaseException:
+        marker_state = _exact_file_state(
+            _resolve_project_relative(
+                root,
+                SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+                require_file=False,
+            ),
+            _child_freeze_attempt_bytes(preflight),
+        )
+        if marker_state == "ABSENT":
+            raise ChildFreezePreflightStageError("closing_control_state") from None
+        if marker_state != "EXACT":
+            raise OODExternalV2ExecutionError(
+                "X9 child freeze authorization state is unverifiable"
+            ) from None
+        authorization_visible = True
+        failure_receipt_visible = False
+        failure_receipt_durable = False
+
+        def mark_failure_receipt_visible() -> None:
+            nonlocal failure_receipt_visible
+            failure_receipt_visible = True
+
+        def mark_failure_receipt_durable() -> None:
+            nonlocal failure_receipt_durable
+            failure_receipt_durable = True
+
+        try:
+            record_child_freeze_failure(
+                preflight,
+                project_root=root,
+                failure_stage=current_stage,
+                reason="PUBLICATION_FAILED_AFTER_VISIBILITY",
+                official_source_content_accessed=False,
+                output_state="NONE",
+                visibility_witness=mark_failure_receipt_visible,
+                publication_witness=mark_failure_receipt_durable,
+            )
+            failure_receipt_written = (
+                failure_receipt_visible and failure_receipt_durable
+            )
+        except BaseException:
+            failure_receipt_written = failure_receipt_visible
+        raise ChildFreezeAttemptError(
+            stage=current_stage,
+            reason="PUBLICATION_FAILED_AFTER_VISIBILITY",
+            output_state="NONE",
+            official_source_content_accessed=False,
+            failure_receipt_written=failure_receipt_written,
+        ) from None
+
+    try:
+        return _freeze_external_v2_child_contract_after_x9_authorization(
+            preflight=preflight,
+            stage_callback=transition,
+            source_access_witness=mark_source_accessed,
+            child_visibility_witness=mark_child_visible,
+            child_publication_witness=mark_child_durable,
+            child_bytes_witness=remember_child_bytes,
+        )
+    except BaseException as error:
+        if not authorization_visible:
+            raise OODExternalV2ExecutionError(
+                "X9 child freeze authorization state is unverifiable"
+            ) from None
+        output_state: str
+        if expected_child_bytes is None:
+            try:
+                child_state = (
+                    "ABSENT"
+                    if not preflight.output_path.exists()
+                    and not _is_indirect(preflight.output_path)
+                    else "UNVERIFIABLE"
+                )
+            except OSError:
+                child_state = "UNVERIFIABLE"
+        else:
+            child_state = _exact_file_state(
+                preflight.output_path,
+                expected_child_bytes,
+            )
+        if child_state == "ABSENT":
+            output_state = "NONE"
+        elif child_state == "EXACT" and child_durable:
+            output_state = "DURABLE_EXACT"
+        elif child_state == "EXACT" or child_visible:
+            output_state = "VISIBLE_EXACT_DURABILITY_UNCONFIRMED"
+        else:
+            output_state = "PRESENT_UNVERIFIABLE"
+        if current_stage == "child_publication":
+            if output_state != "NONE" and not child_visible:
+                reason = "DESTINATION_PREEXISTED"
+            else:
+                reason = (
+                    "PUBLICATION_FAILED_BEFORE_VISIBILITY"
+                    if output_state == "NONE"
+                    else "PUBLICATION_FAILED_AFTER_VISIBILITY"
+                )
+        elif current_stage == "child_reload_and_postflight":
+            reason = "POSTPUBLICATION_RELOAD_REFUSED"
+        elif isinstance(
+            error,
+            (
+                OODExternalV2ConfigError,
+                OODExternalV2IntegrityError,
+                OODExternalV2ExecutionError,
+            ),
+        ):
+            reason = "STAGE_REFUSED"
+        else:
+            reason = "UNEXPECTED_INTERNAL_FAILURE"
+        failure_receipt_visible = False
+        failure_receipt_durable = False
+
+        def mark_failure_receipt_visible() -> None:
+            nonlocal failure_receipt_visible
+            failure_receipt_visible = True
+
+        def mark_failure_receipt_durable() -> None:
+            nonlocal failure_receipt_durable
+            failure_receipt_durable = True
+
+        try:
+            record_child_freeze_failure(
+                preflight,
+                project_root=root,
+                failure_stage=current_stage,
+                reason=reason,
+                official_source_content_accessed=official_source_content_accessed,
+                output_state=output_state,
+                visibility_witness=mark_failure_receipt_visible,
+                publication_witness=mark_failure_receipt_durable,
+            )
+            failure_receipt_written = (
+                failure_receipt_visible and failure_receipt_durable
+            )
+        except BaseException:
+            failure_receipt_written = failure_receipt_visible
+        raise ChildFreezeAttemptError(
+            stage=current_stage,
+            reason=reason,
+            output_state=output_state,
+            official_source_content_accessed=official_source_content_accessed,
+            failure_receipt_written=failure_receipt_written,
+        ) from None
 
 
 class _OneShotClaimState:
@@ -12003,7 +13631,8 @@ def _raw_source_binding_for_path(
         raise OODExternalV2IntegrityError(f"{context} official MD5 differs")
     if not content_accessed:
         try:
-            with path.open("rb"):
+            with path.open("rb") as handle:
+                handle.read(1)
                 witness_content_access()
         except OSError as error:
             raise OODExternalV2IntegrityError(
@@ -12027,9 +13656,15 @@ def _md5_file(
     digest = hashlib.md5(usedforsecurity=False)
     try:
         with path.open("rb") as handle:
-            if content_access_witness is not None:
-                content_access_witness()
-            while chunk := handle.read(1024 * 1024):
+            first_read = True
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if first_read:
+                    if content_access_witness is not None:
+                        content_access_witness()
+                    first_read = False
+                if not chunk:
+                    break
                 digest.update(chunk)
     except OSError as error:
         raise OODExternalV2IntegrityError("official-MD5 source cannot be read") from error

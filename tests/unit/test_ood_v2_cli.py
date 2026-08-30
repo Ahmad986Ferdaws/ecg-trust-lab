@@ -68,6 +68,50 @@ def _make_runtime_root(parent: Path, *, name: str) -> Path:
     return runtime_root
 
 
+def _freeze_arguments(*, preflight_only: bool = False) -> list[str]:
+    arguments = [
+        "--implementation-revision",
+        "a" * 40,
+        "--frozen-at-utc",
+        "2026-08-30T10:00:00Z",
+        "--challenge-root",
+        "challenge",
+        "--zzu-root",
+        "zzu",
+        "--challenge-records",
+        "1000",
+        "--zzu-records",
+        "12328",
+        "--zzu-patients",
+        "10350",
+        "--selected-records-total",
+        "13328",
+        "--seven-zip-executable",
+        "7z",
+    ]
+    if preflight_only:
+        arguments.insert(0, "--preflight-only")
+    return arguments
+
+
+def _successful_freeze_report(*, cleanup_state: str = "NOT_REACHED") -> dict[str, object]:
+    return {
+        "authorization_state": "CONSUMED",
+        "child_publication_witnessed": True,
+        "child_visibility_witnessed": True,
+        "cleanup_state": cleanup_state,
+        "failure_reason": None,
+        "failure_receipt_written": False,
+        "official_source_content_accessed": True,
+        "output_state": "DURABLE_EXACT",
+        "retry_authorized": False,
+        "stage": freeze_cli.CHILD_FREEZE_ATTEMPT_STAGES[-1],
+        "stage_ordinal": len(freeze_cli.CHILD_FREEZE_ATTEMPT_STAGES) - 1,
+        "stage_scope": "ATTEMPT",
+        "status": "OOD_EXTERNAL_V2_CHILD_FROZEN",
+    }
+
+
 @pytest.mark.parametrize(
     "module",
     [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
@@ -196,6 +240,244 @@ def test_runtime_launcher_constructs_exact_isolated_child_and_cleans_cache(
     assert observed["check"] is False
     assert observed["cwd"] == root
     assert not (cache_parent / f"{module._RUNTIME_ROOT_PREFIX}{marker}").exists()
+
+
+def test_child_result_handoff_is_bounded_canonical_and_consumed(
+    tmp_path: Path,
+) -> None:
+    runtime_root = _make_runtime_root(tmp_path, name="runtime")
+    report = freeze_cli._preflight_report(
+        stage=freeze_cli.CHILD_FREEZE_PREFLIGHT_STAGES[-1],
+        verified=True,
+    )
+
+    freeze_cli._write_child_result_handoff(
+        runtime_root,
+        exit_code=0,
+        report=report,
+    )
+    result_path = runtime_root / freeze_cli._CHILD_RESULT_HANDOFF_FILENAME
+    assert result_path.stat().st_size <= freeze_cli._MAX_CHILD_RESULT_HANDOFF_BYTES
+
+    exit_code, observed = freeze_cli._consume_child_result_handoff(runtime_root)
+
+    assert exit_code == 0
+    assert observed == report
+    assert not result_path.exists()
+    freeze_cli._remove_empty_runtime_root(runtime_root)
+
+
+def test_child_result_handoff_rejects_noncanonical_bytes_without_disclosure(
+    tmp_path: Path,
+) -> None:
+    runtime_root = _make_runtime_root(tmp_path, name="runtime")
+    report = freeze_cli._preflight_report(
+        stage=freeze_cli.CHILD_FREEZE_PREFLIGHT_STAGES[-1],
+        verified=True,
+    )
+    payload = freeze_cli._terminal_handoff_bytes(exit_code=0, report=report)
+    result_path = runtime_root / freeze_cli._CHILD_RESULT_HANDOFF_FILENAME
+    result_path.write_bytes(payload + b"\n")
+
+    with pytest.raises(RuntimeError, match="noncanonical"):
+        freeze_cli._consume_child_result_handoff(runtime_root)
+
+    assert not result_path.exists()
+    freeze_cli._remove_empty_runtime_root(runtime_root)
+
+
+def test_child_freeze_launcher_suppresses_process_output_and_reports_after_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "project"
+    cache_parent = root / "artifacts" / "trust_sentinel"
+    site_packages = root / ".venv" / "Lib" / "site-packages"
+    project_src = root / "src"
+    script = root / "scripts" / "entry.py"
+    cache_parent.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    project_src.mkdir()
+    script.parent.mkdir()
+    script.write_text("# bound\n", encoding="utf-8")
+    token = "1" * 64
+    runtime_root = cache_parent / f"{freeze_cli._RUNTIME_ROOT_PREFIX}{token}"
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        freeze_cli,
+        "_project_layout",
+        lambda: (script, root, site_packages, project_src),
+    )
+    monkeypatch.setattr(freeze_cli.secrets, "token_hex", lambda _: token)
+    monkeypatch.setattr(freeze_cli, "_sanitized_runtime_environment", lambda _: {})
+
+    def fake_run(
+        arguments: list[str],
+        *,
+        check: bool,
+        cwd: Path,
+        env: dict[str, str],
+        stderr: object,
+        stdout: object,
+    ) -> SimpleNamespace:
+        observed.update(
+            arguments=arguments,
+            check=check,
+            cwd=cwd,
+            env=env,
+            stderr=stderr,
+            stdout=stdout,
+        )
+        freeze_cli._consume_parent_handoff(runtime_root, token=token)
+        freeze_cli._write_child_result_handoff(
+            runtime_root,
+            exit_code=0,
+            report=_successful_freeze_report(),
+        )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(freeze_cli.subprocess, "run", fake_run)
+
+    assert freeze_cli._relaunch_isolated(("--production",)) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out.count("\n") == 1
+    assert json.loads(captured.out) == _successful_freeze_report(cleanup_state="CLEAN")
+    assert observed["stderr"] is subprocess.DEVNULL
+    assert observed["stdout"] is subprocess.DEVNULL
+    assert not runtime_root.exists()
+
+
+def test_child_freeze_launcher_cleanup_failure_preserves_child_truth_and_never_retries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "project"
+    cache_parent = root / "artifacts" / "trust_sentinel"
+    site_packages = root / ".venv" / "Lib" / "site-packages"
+    project_src = root / "src"
+    script = root / "scripts" / "entry.py"
+    cache_parent.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    project_src.mkdir()
+    script.parent.mkdir()
+    script.write_text("# bound\n", encoding="utf-8")
+    token = "2" * 64
+    runtime_root = cache_parent / f"{freeze_cli._RUNTIME_ROOT_PREFIX}{token}"
+
+    monkeypatch.setattr(
+        freeze_cli,
+        "_project_layout",
+        lambda: (script, root, site_packages, project_src),
+    )
+    monkeypatch.setattr(freeze_cli.secrets, "token_hex", lambda _: token)
+    monkeypatch.setattr(freeze_cli, "_sanitized_runtime_environment", lambda _: {})
+
+    def fake_run(
+        _arguments: list[str],
+        *,
+        check: bool,
+        cwd: Path,
+        env: dict[str, str],
+        stderr: object,
+        stdout: object,
+    ) -> SimpleNamespace:
+        del check, cwd, env, stderr, stdout
+        freeze_cli._consume_parent_handoff(runtime_root, token=token)
+        freeze_cli._write_child_result_handoff(
+            runtime_root,
+            exit_code=0,
+            report=_successful_freeze_report(),
+        )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(freeze_cli.subprocess, "run", fake_run)
+    original_cleanup = freeze_cli._remove_empty_runtime_root
+    cleanup_calls = 0
+
+    def fail_cleanup(_: Path) -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+        raise RuntimeError(r"secret C:\private\patient-123")
+
+    monkeypatch.setattr(freeze_cli, "_remove_empty_runtime_root", fail_cleanup)
+
+    assert freeze_cli._relaunch_isolated(("--production",)) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    report = json.loads(captured.err)
+    assert report["authorization_state"] == "CONSUMED"
+    assert report["child_visibility_witnessed"] is True
+    assert report["child_publication_witnessed"] is True
+    assert report["output_state"] == "DURABLE_EXACT"
+    assert report["cleanup_state"] == "FAILED"
+    assert report["stage"] == "launcher_cleanup"
+    assert report["failure_reason"] == "UNEXPECTED_INTERNAL_FAILURE"
+    assert report["retry_authorized"] is False
+    assert cleanup_calls == 1
+    assert runtime_root.is_dir()
+    assert "secret" not in captured.err
+    assert "private" not in captured.err
+    assert "patient" not in captured.err
+    original_cleanup(runtime_root)
+
+
+def test_child_freeze_launcher_missing_handoff_is_unverifiable_and_cleanup_is_truthful(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "project"
+    cache_parent = root / "artifacts" / "trust_sentinel"
+    site_packages = root / ".venv" / "Lib" / "site-packages"
+    project_src = root / "src"
+    script = root / "scripts" / "entry.py"
+    cache_parent.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    project_src.mkdir()
+    script.parent.mkdir()
+    script.write_text("# bound\n", encoding="utf-8")
+    token = "3" * 64
+    runtime_root = cache_parent / f"{freeze_cli._RUNTIME_ROOT_PREFIX}{token}"
+
+    monkeypatch.setattr(
+        freeze_cli,
+        "_project_layout",
+        lambda: (script, root, site_packages, project_src),
+    )
+    monkeypatch.setattr(freeze_cli.secrets, "token_hex", lambda _: token)
+    monkeypatch.setattr(freeze_cli, "_sanitized_runtime_environment", lambda _: {})
+
+    def fake_run(
+        _arguments: list[str],
+        *,
+        check: bool,
+        cwd: Path,
+        env: dict[str, str],
+        stderr: object,
+        stdout: object,
+    ) -> SimpleNamespace:
+        del check, cwd, env, stderr, stdout
+        freeze_cli._consume_parent_handoff(runtime_root, token=token)
+        return SimpleNamespace(returncode=99)
+
+    monkeypatch.setattr(freeze_cli.subprocess, "run", fake_run)
+
+    assert freeze_cli._relaunch_isolated(("--production",)) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    report = json.loads(captured.err)
+    assert report["authorization_state"] == "UNVERIFIABLE"
+    assert report["official_source_content_accessed"] is None
+    assert report["failure_receipt_written"] is None
+    assert report["output_state"] == "PRESENT_UNVERIFIABLE"
+    assert report["cleanup_state"] == "CLEAN"
+    assert report["stage"] == "isolated_child_terminalization"
+    assert report["retry_authorized"] is False
+    assert not runtime_root.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows handle deletion contract")
@@ -692,7 +974,7 @@ def test_all_runtime_launchers_share_handle_bound_nonrecursive_gcm_cleanup() -> 
 
 @pytest.mark.parametrize(
     "module",
-    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+    [inventory_cli, evaluate_cli, verify_cli],
 )
 def test_runtime_launcher_refuses_nonempty_scratch_after_child(
     module: _LauncherModule,
@@ -742,7 +1024,7 @@ def test_runtime_launcher_refuses_nonempty_scratch_after_child(
 
 @pytest.mark.parametrize(
     "module",
-    [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
+    [inventory_cli, evaluate_cli, verify_cli],
 )
 def test_runtime_launcher_never_retries_failed_post_child_cleanup(
     module: _LauncherModule,
@@ -973,6 +1255,200 @@ def test_successor_cli_defaults_are_atomic_and_have_no_scientific_overrides() ->
         "external-inventory-summary.json"
     )
     assert freeze.output == Path("configs/trust_sentinel_ood_external_v2_1_execution.json")
+    assert freeze.preflight_only is False
+
+
+def test_child_freeze_preflight_only_is_repeatable_and_canonical(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    observed: dict[str, object] = {}
+
+    def verify(**kwargs: object) -> object:
+        observed.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(freeze_cli, "verify_child_freeze_preflight", verify)
+    monkeypatch.setattr(
+        freeze_cli,
+        "freeze_external_v2_child_contract",
+        lambda **_: pytest.fail("preflight-only invoked production freeze"),
+    )
+
+    assert freeze_cli.main(_freeze_arguments(preflight_only=True)) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out.count("\n") == 1
+    assert json.loads(captured.out) == {
+        "authorization_state": "NOT_CONSUMED",
+        "child_publication_witnessed": False,
+        "child_visibility_witnessed": False,
+        "cleanup_state": "NOT_REACHED",
+        "failure_reason": None,
+        "failure_receipt_written": False,
+        "official_source_content_accessed": False,
+        "output_state": "NONE",
+        "retry_authorized": True,
+        "stage": "closing_control_state",
+        "stage_ordinal": 5,
+        "stage_scope": "PREFLIGHT",
+        "status": "OOD_EXTERNAL_V2_CHILD_PREFLIGHT_VERIFIED",
+    }
+    assert observed["frozen_at_utc"] == "2026-08-30T10:00:00Z"
+    assert observed["seven_zip_executable"] == Path("7z")
+
+
+def test_child_freeze_preflight_refusal_discloses_only_allowlisted_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def refuse(**_: object) -> None:
+        raise freeze_cli.ChildFreezePreflightStageError(
+            "x8_inventory_evidence"
+        ) from RuntimeError(r"secret C:\private\patient-123")
+
+    monkeypatch.setattr(freeze_cli, "verify_child_freeze_preflight", refuse)
+
+    assert freeze_cli.main(_freeze_arguments(preflight_only=True)) == 3
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.count("\n") == 1
+    assert json.loads(captured.err) == {
+        "authorization_state": "NOT_CONSUMED",
+        "child_publication_witnessed": False,
+        "child_visibility_witnessed": False,
+        "cleanup_state": "NOT_REACHED",
+        "failure_reason": "STAGE_REFUSED",
+        "failure_receipt_written": False,
+        "official_source_content_accessed": False,
+        "output_state": "PRESENT_UNVERIFIABLE",
+        "retry_authorized": False,
+        "stage": "x8_inventory_evidence",
+        "stage_ordinal": 3,
+        "stage_scope": "PREFLIGHT",
+        "status": "OOD_EXTERNAL_V2_CHILD_PREFLIGHT_REFUSED",
+    }
+    assert "secret" not in captured.err
+    assert "private" not in captured.err
+    assert "patient" not in captured.err
+
+
+def test_child_freeze_cli_requires_exact_stage_order_and_witnesses_success(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def freeze(**kwargs: object) -> object:
+        stage_callback = kwargs["stage_callback"]
+        source_witness = kwargs["source_access_witness"]
+        visibility_witness = kwargs["child_visibility_witness"]
+        publication_witness = kwargs["child_publication_witness"]
+        assert callable(stage_callback)
+        assert callable(source_witness)
+        assert callable(visibility_witness)
+        assert callable(publication_witness)
+        for stage in freeze_cli.CHILD_FREEZE_ATTEMPT_STAGES:
+            stage_callback(stage)
+            if stage == "raw_source_binding_verification":
+                source_witness()
+            if stage == "child_publication":
+                visibility_witness()
+                publication_witness()
+        return object()
+
+    monkeypatch.setattr(freeze_cli, "freeze_external_v2_child_contract", freeze)
+
+    assert freeze_cli.main(_freeze_arguments()) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out.count("\n") == 1
+    assert json.loads(captured.out) == _successful_freeze_report()
+
+    tracker = freeze_cli._ChildFreezeStageTracker()
+    with pytest.raises(RuntimeError, match="order changed"):
+        tracker.transition(freeze_cli.CHILD_FREEZE_ATTEMPT_STAGES[1])
+    tracker.transition(freeze_cli.CHILD_FREEZE_ATTEMPT_STAGES[0])
+    with pytest.raises(RuntimeError, match="order changed"):
+        tracker.transition(freeze_cli.CHILD_FREEZE_ATTEMPT_STAGES[0])
+    with pytest.raises(RuntimeError, match="not allowlisted"):
+        tracker.transition("secret-stage")
+
+
+def test_child_freeze_attempt_failure_preserves_sanitized_publication_truth(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def freeze(**kwargs: object) -> None:
+        stage_callback = kwargs["stage_callback"]
+        source_witness = kwargs["source_access_witness"]
+        visibility_witness = kwargs["child_visibility_witness"]
+        assert callable(stage_callback)
+        assert callable(source_witness)
+        assert callable(visibility_witness)
+        for stage in freeze_cli.CHILD_FREEZE_ATTEMPT_STAGES[:12]:
+            stage_callback(stage)
+            if stage == "raw_source_binding_verification":
+                source_witness()
+            if stage == "child_publication":
+                visibility_witness()
+        raise freeze_cli.ChildFreezeAttemptError(
+            stage="child_publication",
+            reason="PUBLICATION_FAILED_AFTER_VISIBILITY",
+            output_state="VISIBLE_EXACT_DURABILITY_UNCONFIRMED",
+            official_source_content_accessed=True,
+            failure_receipt_written=True,
+        ) from RuntimeError(r"secret C:\private\patient-123")
+
+    monkeypatch.setattr(freeze_cli, "freeze_external_v2_child_contract", freeze)
+
+    assert freeze_cli.main(_freeze_arguments()) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.count("\n") == 1
+    assert json.loads(captured.err) == {
+        "authorization_state": "CONSUMED",
+        "child_publication_witnessed": False,
+        "child_visibility_witnessed": True,
+        "cleanup_state": "NOT_REACHED",
+        "failure_reason": "PUBLICATION_FAILED_AFTER_VISIBILITY",
+        "failure_receipt_written": True,
+        "official_source_content_accessed": True,
+        "output_state": "VISIBLE_EXACT_DURABILITY_UNCONFIRMED",
+        "retry_authorized": False,
+        "stage": "child_publication",
+        "stage_ordinal": 11,
+        "stage_scope": "ATTEMPT",
+        "status": "OOD_EXTERNAL_V2_CHILD_FREEZE_FAILED",
+    }
+    assert "secret" not in captured.err
+    assert "private" not in captured.err
+    assert "patient" not in captured.err
+
+
+def test_child_freeze_untyped_failure_never_infers_authorization_or_leaks(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def freeze(**kwargs: object) -> None:
+        stage_callback = kwargs["stage_callback"]
+        assert callable(stage_callback)
+        stage_callback("authorization_publication")
+        raise RuntimeError(r"secret C:\private\patient-123")
+
+    monkeypatch.setattr(freeze_cli, "freeze_external_v2_child_contract", freeze)
+
+    assert freeze_cli.main(_freeze_arguments()) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    report = json.loads(captured.err)
+    assert report["authorization_state"] == "UNVERIFIABLE"
+    assert report["failure_reason"] == "UNEXPECTED_INTERNAL_FAILURE"
+    assert report["output_state"] == "PRESENT_UNVERIFIABLE"
+    assert report["retry_authorized"] is False
+    assert report["stage"] == "authorization_publication"
+    assert report["failure_receipt_written"] is None
+    assert "secret" not in captured.err
+    assert "private" not in captured.err
+    assert "patient" not in captured.err
 
 
 @pytest.mark.parametrize(
@@ -983,31 +1459,6 @@ def test_successor_cli_defaults_are_atomic_and_have_no_scientific_overrides() ->
             "prepare_ood_external_v2",
             ["--code-revision", "a" * 40, "--seven-zip-executable", "7z"],
             "OOD_EXTERNAL_V2_EXECUTION_FAILED",
-        ),
-        (
-            freeze_cli,
-            "freeze_external_v2_child_contract",
-            [
-                "--implementation-revision",
-                "a" * 40,
-                "--frozen-at-utc",
-                "2026-08-29T00:00:00Z",
-                "--challenge-root",
-                "challenge",
-                "--zzu-root",
-                "zzu",
-                "--challenge-records",
-                "1000",
-                "--zzu-records",
-                "12328",
-                "--zzu-patients",
-                "10350",
-                "--selected-records-total",
-                "13328",
-                "--seven-zip-executable",
-                "7z",
-            ],
-            "OOD_EXTERNAL_V2_CHILD_FREEZE_FAILED",
         ),
     ],
 )

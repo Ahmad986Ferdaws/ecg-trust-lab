@@ -1182,12 +1182,14 @@ def test_x8_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "scope": "after_external_one_shot_claim_entry_first_becomes_visible",
     }
     assert "retry_resume_or_second_inference" not in one_shot
-    assert one_shot["prerequisites"][-6:] == [
+    assert one_shot["prerequisites"][-8:] == [
         "exact_retained_x6_consumed_failed_inventory_build_authorization_marker_verified",
         "exact_retained_x7_consumed_failed_inventory_build_authorization_marker_"
         "and_failure_receipt_verified",
         "durable_x8_inventory_build_authorization_marker_verified",
         "x8_inventory_build_failure_receipt_absent",
+        "durable_x9_child_freeze_authorization_marker_verified",
+        "x9_child_freeze_failure_receipt_absent",
         "output_root_absent",
         "clean_committed_revision",
     ]
@@ -1291,6 +1293,315 @@ def test_x8_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
     )
     assert all(literal in protocol for literal in required_literals)
     assert "single_directory_rmdir_only" not in protocol
+
+
+def test_x9_child_freeze_amendment_preserves_x8_and_is_single_use() -> None:
+    payload = _successor_parent_yaml()
+    assert payload["frozen_at_utc"] == "2026-08-30T09:49:39Z"
+
+    modified_paths = list(pipeline.SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS)
+    assert modified_paths == [
+        "configs/trust_sentinel_ood_external_v2_1.yaml",
+        "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+        "scripts/freeze_trust_sentinel_ood_external_v2.py",
+        "src/ecg_trust/ood_v2/models.py",
+        "src/ecg_trust/ood_v2/pipeline.py",
+        "tests/unit/test_ood_v2_cli.py",
+        "tests/unit/test_ood_v2_models.py",
+        "tests/unit/test_ood_v2_pipeline.py",
+        "tests/unit/test_ood_v2_protocol_closure.py",
+    ]
+    assert "scripts/build_trust_sentinel_ood_v2_inventory.py" not in modified_paths
+    assert "src/ecg_trust/ood_v2/inventory.py" not in modified_paths
+
+    design_history = cast(dict[str, Any], payload["design_history"])
+    design = cast(
+        dict[str, Any],
+        design_history["x8_inventory_build_success_and_pre_x9_child_freeze_failures"],
+    )
+    assert set(design) == {
+        "implementation_revision",
+        "parent_config_file_sha256",
+        "frozen_at_utc",
+        "production_inventory_build",
+        "pre_x9_child_freeze_attempts",
+        "x8_inventory_retention",
+        "x8_failure_receipt_absence",
+        "new_x9_child_freeze_authorization_id",
+        "new_x9_child_freeze_authorization_path",
+        "new_x9_child_freeze_failure_receipt_path",
+        "operational_amendment_only",
+        "scientific_protocol_change",
+        "amendment",
+        "amendment_revision_contract",
+    }
+    assert design["implementation_revision"] == (
+        pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+    )
+    assert design["parent_config_file_sha256"] == (
+        pipeline.EIGHTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+    )
+    assert design["frozen_at_utc"] == "2026-08-30T07:48:31Z"
+    assert design["production_inventory_build"] == {
+        "authorization_id": "x8_inventory_build_attempt_1",
+        "authorization_path": pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH,
+        "authorization_marker_created": True,
+        "authorization_consumed": True,
+        "authorization_state": "CONSUMED_SUCCEEDED_RETAINED",
+        "authorization_marker_file_sha256": (
+            pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+        ),
+        "authorization_marker_artifact_sha256": (
+            pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "project_source_tree_sha256": (
+            pipeline.HISTORICAL_X8_INVENTORY_BUILDER_PROJECT_SOURCE_TREE_SHA256
+        ),
+        "outcome": "INVENTORY_BUILDER_COMPLETED",
+        "failure_receipt_path": pipeline.HISTORICAL_X8_INVENTORY_BUILDER_FAILURE_PATH,
+        "failure_receipt_created": False,
+        "failure_receipt_must_remain_absent": True,
+        "private_inventory": {
+            "path": pipeline.SUCCESSOR_PRIVATE_INVENTORY_PATH,
+            "file_sha256": pipeline.HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256,
+            "artifact_sha256": (
+                pipeline.HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256
+            ),
+        },
+        "public_projection": {
+            "path": pipeline.SUCCESSOR_PUBLIC_PROJECTION_PATH,
+            "file_sha256": pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256,
+            "artifact_sha256": (
+                pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
+            ),
+        },
+        "exact_selected_counts": {
+            "challenge_records": 1_000,
+            "zzu_records": 12_328,
+            "zzu_patients": 10_350,
+            "total_records": 13_328,
+        },
+        "exact_archive_closure_summaries_revalidated_privately": True,
+        "runtime_cleanup_succeeded": True,
+        "waveform_sample_decode_occurred": False,
+        "quality_policy_execution_occurred": False,
+        "trained_checkpoint_or_model_access_occurred": False,
+        "evaluation_or_metric_execution_occurred": False,
+        "external_one_shot_claim_created": False,
+        "successor_output_root_created": False,
+    }
+    assert design["pre_x9_child_freeze_attempts"] == {
+        "count": 2,
+        "generic_failure_status": "OOD_EXTERNAL_V2_CHILD_FREEZE_FAILED",
+        "observed_child_state_after_each_attempt": "ABSENT",
+        "runtime_cleanup_state_after_each_attempt": "CLEAN",
+        "official_source_content_accessed": "UNKNOWN",
+        "exact_failure_stage": "UNKNOWN",
+        "trained_checkpoint_or_model_access_occurred": False,
+        "evaluation_or_metric_execution_occurred": False,
+        "external_one_shot_claim_created": False,
+        "successor_output_root_created": False,
+        "failure_receipt_created": False,
+        "retrospective_failure_receipt_fabrication": "forbidden",
+    }
+    assert design["x8_inventory_retention"] == (
+        "exact_private_inventory_public_projection_and_authorization_marker_"
+        "preserved_without_rebuild_mutation_or_reuse"
+    )
+    assert design["x8_failure_receipt_absence"] == "required"
+    assert design["new_x9_child_freeze_authorization_id"] == (
+        "x9_child_freeze_attempt_1"
+    )
+    assert design["new_x9_child_freeze_authorization_path"] == (
+        pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+    )
+    assert design["new_x9_child_freeze_failure_receipt_path"] == (
+        pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH
+    )
+    assert design["operational_amendment_only"] is True
+    assert design["scientific_protocol_change"] is False
+    assert design["amendment"] == (
+        "preserve_exact_successful_x8_inventory_add_single_use_x9_child_freeze_"
+        "stage_reason_publication_and_failure_observability"
+    )
+    assert design["amendment_revision_contract"] == {
+        "commit_count_after_x8_implementation_revision": 1,
+        "sole_parent": pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        "exact_modified_paths": modified_paths,
+        "status_for_every_path": "modified",
+    }
+
+    one_shot = cast(dict[str, Any], payload["one_shot_external_access"])
+    authorization = cast(dict[str, Any], one_shot["child_freeze_authorization"])
+    assert authorization["authorization_id"] == "x9_child_freeze_attempt_1"
+    assert authorization["artifact_type"] == (
+        pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_ARTIFACT_TYPE
+    )
+    assert authorization["path"] == pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+    assert authorization["scope"] == (
+        "sole_x9_child_freeze_attempt_using_exact_successful_x8_inventory"
+    )
+    assert authorization["maximum_consumptions"] == 1
+    assert authorization["create_new"] == "immutable_atomic_create_new_no_overwrite"
+    assert authorization["durability"] == (
+        "exact_file_flush_and_parent_directory_durability_or_fail_closed"
+    )
+    assert authorization["x8_implementation_revision"] == (
+        pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+    )
+    assert authorization["x8_parent_config_file_sha256"] == (
+        pipeline.EIGHTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+    )
+    assert authorization["x8_frozen_at_utc"] == (
+        pipeline.EIGHTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC
+    )
+    assert authorization["x8_project_source_tree_sha256"] == (
+        pipeline.HISTORICAL_X8_INVENTORY_BUILDER_PROJECT_SOURCE_TREE_SHA256
+    )
+    assert authorization["x8_inventory_build_authorization_path"] == (
+        pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH
+    )
+    assert authorization["x8_inventory_build_authorization_marker_file_sha256"] == (
+        pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+    )
+    assert authorization[
+        "x8_inventory_build_authorization_marker_artifact_sha256"
+    ] == pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+    assert authorization["x8_inventory_build_failure_receipt_path"] == (
+        pipeline.HISTORICAL_X8_INVENTORY_BUILDER_FAILURE_PATH
+    )
+    assert authorization["x8_inventory_build_failure_receipt_required_absent"] is True
+    assert authorization["private_inventory_path"] == (
+        pipeline.SUCCESSOR_PRIVATE_INVENTORY_PATH
+    )
+    assert authorization["private_inventory_file_sha256"] == (
+        pipeline.HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256
+    )
+    assert authorization["private_inventory_artifact_sha256"] == (
+        pipeline.HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256
+    )
+    assert authorization["public_projection_path"] == (
+        pipeline.SUCCESSOR_PUBLIC_PROJECTION_PATH
+    )
+    assert authorization["public_projection_file_sha256"] == (
+        pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256
+    )
+    assert authorization["public_projection_artifact_sha256"] == (
+        pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
+    )
+    assert authorization["preconsumption_requirements"] == [
+        "exact_x9_parent_lineage_clean_head_live_remote_history_runtime_and_source_"
+        "tree_verified",
+        "exact_historical_x8_inventory_authorization_marker_verified",
+        "x8_inventory_build_failure_receipt_absent",
+        "exact_x8_private_inventory_and_public_projection_hashes_counts_and_"
+        "semantics_verified",
+        "exact_x8_archive_closure_summaries_revalidated_without_inventory_rebuild",
+        "exact_child_timestamp_destination_decisions_and_runtime_bindings_materialized",
+        "x9_child_freeze_attempt_marker_failure_receipt_and_child_destination_absent",
+        "external_waveform_one_shot_claim_and_successor_output_root_absent",
+    ]
+    assert authorization["visibility_consumes_authorization_before_durability_completion"]
+    assert authorization["first_official_source_content_reverification_requires_durable_marker"]
+    assert authorization["child_contract_binding"] == {
+        "field": "child_freeze_attempt",
+        "inventory_builder_attempt_remains_exact_x8_marker": True,
+        "x9_failure_receipt_must_be_absent": True,
+    }
+    assert authorization["contains_external_source_bytes_or_identifiers"] is False
+    assert authorization["contains_model_outputs_embeddings_or_scores"] is False
+    assert authorization["distinct_from_external_waveform_one_shot_claim"] is True
+    assert authorization["external_one_shot_claim_consumed_at_marker_creation"] is False
+    assert authorization["git_ignored_and_untracked"] is True
+    assert authorization["retention"] == "permanent"
+    assert authorization["retry_resume_or_reuse"] == "forbidden_after_marker_visibility"
+    assert authorization[
+        "failure_after_consumption_requires_new_frozen_amendment_and_new_authorization_id"
+    ] is True
+
+    failure = cast(dict[str, Any], authorization["failure_receipt"])
+    assert failure["artifact_type"] == (
+        pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_ARTIFACT_TYPE
+    )
+    assert failure["path"] == pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH
+    assert failure["exact_ordered_failure_stages"] == list(
+        pipeline.CHILD_FREEZE_ATTEMPT_STAGES
+    )
+    assert failure["failure_reason_allowlist"] == list(
+        pipeline.CHILD_FREEZE_FAILURE_REASONS
+    )
+    assert failure["output_state_allowlist"] == list(
+        pipeline.CHILD_FREEZE_OUTPUT_STATES
+    )
+    assert failure["exact_top_level_fields"] == [
+        "artifact_type",
+        "authorization_consumed",
+        "authorization_id",
+        "authorization_marker_artifact_sha256",
+        "authorization_marker_file_sha256",
+        "contains_external_source_bytes_or_identifiers",
+        "contains_model_outputs_embeddings_or_scores",
+        "external_one_shot_claim_consumed",
+        "failure_reason",
+        "failure_requires_new_frozen_amendment_and_authorization_id",
+        "failure_stage",
+        "failure_stage_ordinal",
+        "implementation_revision",
+        "official_source_content_accessed",
+        "output_state",
+        "parent_config_file_sha256",
+        "protocol_id",
+        "quality_model_score_logit_probability_or_metric_observed",
+        "retry_resume_or_reuse_authorized",
+        "schema_version",
+        "state",
+        "waveform_sample_decode_occurred",
+        "artifact_sha256",
+    ]
+    assert failure["canonical_json"] == "utf8_sorted_keys_compact_separators_single_lf"
+    assert failure["logical_self_hash_field"] == "artifact_sha256"
+    assert failure["exception_class_message_traceback_errno_and_process_output"] == (
+        "forbidden"
+    )
+    assert failure["external_source_bytes_or_identifiers"] == "forbidden"
+    assert failure["model_outputs_embeddings_or_scores"] == "forbidden"
+    assert failure[
+        "waveform_quality_model_score_logit_probability_or_metric_observation"
+    ] == "forbidden"
+    assert failure["retry_resume_or_reuse_authorized"] is False
+    assert failure["write_failure_does_not_restore_or_repeat_authorization"] is True
+    assert failure[
+        "any_retry_requires_future_frozen_amendment_and_new_authorization_id"
+    ] is True
+
+    protected = cast(
+        dict[str, Any],
+        cast(dict[str, Any], payload["revision_boundary"])["forbidden_private_history"],
+    )["paths"]
+    assert pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH in protected
+    assert pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH in protected
+
+    protocol = (
+        _SMOKE_PROJECT_ROOT / "docs" / "TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md"
+    ).read_text(encoding="utf-8")
+    required_literals = (
+        pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        pipeline.EIGHTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        "2026-08-30T07:48:31Z",
+        "2026-08-30T09:49:39Z",
+        pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256,
+        pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256,
+        pipeline.HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256,
+        pipeline.HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256,
+        pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256,
+        pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256,
+        "x9_child_freeze_attempt_1",
+        pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+        pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
+        "child_freeze_attempt",
+        "inventory_builder_attempt",
+    )
+    assert all(literal in protocol for literal in required_literals)
 
 
 @pytest.mark.parametrize("relative_path", _ISOLATED_ENTRYPOINTS)
@@ -2122,6 +2433,8 @@ def test_private_history_query_covers_every_forbidden_path_and_fails_closed(
         pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH,
         pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
         pipeline.SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH,
+        pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+        pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
         ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
         ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**",
         ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.runtime-*/**",

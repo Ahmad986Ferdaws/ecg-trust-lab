@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -53,6 +54,7 @@ from ecg_trust.ood_v2.inventory import (
     CHALLENGE_2011_DATASET,
     CHALLENGE_2011_VERSION,
     CONFIRMATION_LOCKBOX_ROLE,
+    ZZU_PEDIATRIC_DATASET,
     ExternalInventoryRecord,
 )
 from ecg_trust.ood_v2.models import AggregateRouteCounts, ResamplingUnit
@@ -91,12 +93,27 @@ def _write_historical_x7_inventory_artifacts(root: Path) -> tuple[Path, Path]:
     return marker, receipt
 
 
+def _write_historical_x8_inventory_marker(root: Path) -> Path:
+    marker = root / pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_bytes(
+        pipeline._historical_x8_inventory_builder_attempt_bytes()  # noqa: SLF001
+    )
+    return marker
+
+
 def _write_required_historical_inventory_artifacts(
     root: Path,
 ) -> tuple[Path, Path, Path]:
     x6 = _write_historical_x6_inventory_marker(root)
     x7_marker, x7_receipt = _write_historical_x7_inventory_artifacts(root)
     return x6, x7_marker, x7_receipt
+
+
+def _write_required_x9_inventory_lineage(root: Path) -> tuple[Path, Path, Path, Path]:
+    x6, x7_marker, x7_receipt = _write_required_historical_inventory_artifacts(root)
+    x8_marker = _write_historical_x8_inventory_marker(root)
+    return x6, x7_marker, x7_receipt, x8_marker
 
 
 def _inventory_record() -> ExternalInventoryRecord:
@@ -2299,6 +2316,9 @@ def _amendment_git_runner(
     sixth_revision_line: str | None = None,
     sixth_commit_count: str = "1",
     sixth_diff_stdout: str | None = None,
+    seventh_revision_line: str | None = None,
+    seventh_commit_count: str = "1",
+    seventh_diff_stdout: str | None = None,
     revision_line: str | None = None,
     commit_count: str = "1",
     diff_stdout: str | None = None,
@@ -2327,11 +2347,17 @@ def _amendment_git_runner(
             f"M\t{path}\n"
             for path in pipeline.SUCCESSOR_INVENTORY_FAILURE_AMENDMENT_MODIFIED_PATHS
         )
+    seventh_diff = seventh_diff_stdout
+    if seventh_diff is None:
+        seventh_diff = "".join(
+            f"M\t{path}\n"
+            for path in pipeline.SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS
+        )
     current_diff = diff_stdout
     if current_diff is None:
         current_diff = "".join(
             f"M\t{path}\n"
-            for path in pipeline.SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS
+            for path in pipeline.SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS
         )
     first_diff = first_diff_stdout
     if first_diff is None:
@@ -2500,23 +2526,48 @@ def _amendment_git_runner(
             "--parents",
             "-n",
             "1",
-            implementation_revision,
-        ): revision_line
+            pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        ): seventh_revision_line
         or (
-            f"{implementation_revision} "
+            f"{pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
             f"{pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
         ),
         (
             "rev-list",
             "--count",
             f"{pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+        ): f"{seventh_commit_count}\n",
+        (
+            "diff",
+            "--name-status",
+            "--no-renames",
+            f"{pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+            "--",
+        ): seventh_diff,
+        (
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            implementation_revision,
+        ): revision_line
+        or (
+            f"{implementation_revision} "
+            f"{pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
+        ),
+        (
+            "rev-list",
+            "--count",
+            f"{pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
         ): f"{commit_count}\n",
         (
             "diff",
             "--name-status",
             "--no-renames",
-            f"{pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
             "--",
         ): current_diff,
@@ -2610,6 +2661,14 @@ def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
             ),
             "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
             "revision": pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        },
+        {
+            "context": "eighth frozen successor parent",
+            "expected_file_sha256": (
+                pipeline.EIGHTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+            ),
+            "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
+            "revision": pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         },
     ]
 
@@ -2965,14 +3024,14 @@ def test_successor_amendment_revision_rejects_x6_to_x7_lineage_or_diff_drift(
     ("runner_kwargs", "message"),
     (
         (
-            {"revision_line": f"{'d' * 40} {'e' * 40}\n"},
+            {"seventh_revision_line": f"{'d' * 40} {'e' * 40}\n"},
             "sole direct child",
         ),
-        ({"commit_count": "2"}, "sole direct child"),
-        ({"diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
+        ({"seventh_commit_count": "2"}, "sole direct child"),
+        ({"seventh_diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
         (
             {
-                "diff_stdout": "".join(
+                "seventh_diff_stdout": "".join(
                     f"M\t{path}\n"
                     for path in (
                         pipeline.SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS[:-1]
@@ -2983,9 +3042,67 @@ def test_successor_amendment_revision_rejects_x6_to_x7_lineage_or_diff_drift(
         ),
         (
             {
-                "diff_stdout": "".join(
+                "seventh_diff_stdout": "".join(
                     f"M\t{path}\n"
                     for path in pipeline.SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS
+                )
+                + "M\textra.txt\n"
+            },
+            "paths differ",
+        ),
+        (
+            {"seventh_diff_stdout": "R100\told.txt\tnew.txt\n"},
+            "non-modification",
+        ),
+    ),
+)
+def test_successor_amendment_revision_rejects_x7_to_x8_lineage_or_diff_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runner_kwargs: dict[str, str],
+    message: str,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        _amendment_git_runner(revision, **runner_kwargs),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(pipeline.OODExternalV2IntegrityError, match=message):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+@pytest.mark.parametrize(
+    ("runner_kwargs", "message"),
+    (
+        ({"revision_line": f"{'d' * 40} {'e' * 40}\n"}, "sole direct child"),
+        ({"commit_count": "2"}, "sole direct child"),
+        ({"diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
+        (
+            {
+                "diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in (
+                        pipeline.SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS[:-1]
+                    )
+                )
+            },
+            "paths differ",
+        ),
+        (
+            {
+                "diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in pipeline.SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS
                 )
                 + "M\textra.txt\n"
             },
@@ -2994,7 +3111,7 @@ def test_successor_amendment_revision_rejects_x6_to_x7_lineage_or_diff_drift(
         ({"diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
     ),
 )
-def test_successor_amendment_revision_rejects_x7_to_x8_lineage_or_diff_drift(
+def test_successor_amendment_revision_rejects_x8_to_x9_lineage_or_diff_drift(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     runner_kwargs: dict[str, str],
@@ -3207,6 +3324,35 @@ def test_successor_amendment_revision_rejects_x7_parent_blob_drift(
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
         match="X7 parent blob differs",
+    ):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+def test_successor_amendment_revision_rejects_x8_parent_blob_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(pipeline, "_run_git", _amendment_git_runner(revision))
+
+    def reject_eighth_parent(
+        _root: Path,
+        **kwargs: object,
+    ) -> None:
+        if kwargs.get("context") == "eighth frozen successor parent":
+            raise pipeline.OODExternalV2IntegrityError("X8 parent blob differs")
+
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        reject_eighth_parent,
+    )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="X8 parent blob differs",
     ):
         pipeline._verify_successor_amendment_revision(  # noqa: SLF001
             tmp_path,
@@ -4680,7 +4826,7 @@ def test_inventory_builder_authorization_rejects_retired_marker(
     assert not (root / pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH).exists()
 
 
-def test_child_attempt_verification_reconstructs_x_identity_without_x_head_preflight(
+def test_child_attempt_verification_binds_historical_x8_and_x9_without_x8_preflight(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -4709,41 +4855,71 @@ def test_child_attempt_verification_reconstructs_x_identity_without_x_head_prefl
         frozen_at_utc=datetime(2026, 8, 30, tzinfo=UTC),
         parent_config_file_sha256=parent.file_sha256,
         implementation_revision="a" * 40,
-        inventory=cast(Any, object()),
+        inventory=cast(
+            Any,
+            SimpleNamespace(
+                file_sha256=pipeline.HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256,
+                inventory_sha256=(
+                    pipeline.HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256
+                ),
+                challenge_records=1_000,
+                zzu_records=12_328,
+                zzu_patients=10_350,
+                selected_records_total=13_328,
+            ),
+        ),
         dataset_roots={},
         decision_bindings={},
         raw_source_bindings={},
         inventory_builder_attempt=pipeline.BoundFile(
-            relative_path=pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
-            file_sha256="sha256:" + "3" * 64,
-            artifact_sha256="sha256:" + "4" * 64,
+            relative_path=pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH,
+            file_sha256=(
+                pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+            ),
+            artifact_sha256=(
+                pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+            ),
+        ),
+        child_freeze_attempt=pipeline.BoundFile(
+            relative_path=pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+            file_sha256="sha256:" + "5" * 64,
+            artifact_sha256="sha256:" + "6" * 64,
         ),
         runtime_environment=cast(Any, runtime_environment),
         runtime_bindings={},
         project_source_tree=project_source_tree,
-        public_inventory_projection=None,
+        public_inventory_projection=pipeline.BoundFile(
+            relative_path=pipeline.SUCCESSOR_PUBLIC_PROJECTION_PATH,
+            file_sha256=pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256,
+            artifact_sha256=(
+                pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
+            ),
+        ),
         output_root=pipeline.SUCCESSOR_OUTPUT_PATH,
     )
-    reconstructed = pipeline._inventory_builder_preflight_from_contract(  # noqa: SLF001
-        parent,
-        child,
+    _write_required_x9_inventory_lineage(tmp_path)
+    x9_attempt_body = pipeline._child_freeze_attempt_body_from_identity(  # noqa: SLF001
+        parent_config_file_sha256=parent.file_sha256,
+        implementation_revision=child.implementation_revision,
+        project_source_tree_sha256=child.project_source_tree.tree_sha256,
+        python_environment_sha256=(
+            child.runtime_environment.python_environment_sha256
+        ),
+        git_runtime_tree_sha256=(
+            child.runtime_environment.git_tool.runtime_tree.tree_sha256
+        ),
+        frozen_at_utc=child.frozen_at_utc,
+        counts=(1_000, 12_328, 10_350, 13_328),
     )
-    attempt_body = pipeline._inventory_builder_attempt_body(  # noqa: SLF001
-        reconstructed
-    )
-    marker_bytes = pipeline._inventory_builder_attempt_bytes(  # noqa: SLF001
-        reconstructed
-    )
-    marker = tmp_path / pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH
-    marker.parent.mkdir(parents=True)
-    _write_required_historical_inventory_artifacts(tmp_path)
-    marker.write_bytes(marker_bytes)
+    x9_marker_bytes = pipeline.canonical_json_bytes(x9_attempt_body)
+    x9_marker = tmp_path / pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+    x9_marker.write_bytes(x9_marker_bytes)
     child = replace(
         child,
-        inventory_builder_attempt=pipeline.BoundFile(
-            relative_path=pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
-            file_sha256=sha256_bytes(marker_bytes),
-            artifact_sha256=cast(str, attempt_body["artifact_sha256"]),
+        child_freeze_attempt=pipeline.BoundFile(
+            relative_path=pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+            file_sha256=sha256_bytes(x9_marker_bytes),
+            artifact_sha256=cast(str, x9_attempt_body["artifact_sha256"]),
         ),
     )
 
@@ -4816,7 +4992,7 @@ def test_child_attempt_verification_reconstructs_x_identity_without_x_head_prefl
     for changed_parent_value, changed_child_value in identity_mutations:
         with pytest.raises(
             pipeline.OODExternalV2IntegrityError,
-            match="marker differs from its authorization",
+            match="X9 child freeze attempt marker differs",
         ):
             pipeline._verify_child_inventory_builder_attempt(  # noqa: SLF001
                 changed_parent_value,
@@ -4916,9 +5092,542 @@ def test_inventory_builder_marker_visibility_blocks_retry_after_directory_fsync_
         )
 
 
+def _x9_child_freeze_preflight(root: Path) -> pipeline.ChildFreezePreflight:
+    (root / "artifacts" / "trust_sentinel").mkdir(parents=True, exist_ok=True)
+    (root / "configs").mkdir(parents=True, exist_ok=True)
+    parent = pipeline.load_parent_config(PARENT_PATH)
+    project_tree = pipeline.ProjectSourceTreeBinding(  # noqa: SLF001
+        files=(),
+        file_count=0,
+        total_bytes=0,
+        tree_sha256="sha256:" + "c" * 64,
+    )
+    runtime = SimpleNamespace(
+        python_environment_sha256="sha256:" + "d" * 64,
+        git_tool=SimpleNamespace(
+            runtime_tree=SimpleNamespace(tree_sha256="sha256:" + "e" * 64)
+        ),
+    )
+    output = root / pipeline.SUCCESSOR_CHILD_CONFIG_PATH
+    return pipeline.ChildFreezePreflight(
+        status="CHILD_FREEZE_PREFLIGHT_VERIFIED",
+        parent=parent,
+        project_root=root,
+        implementation_revision="a" * 40,
+        project_source_tree=project_tree,
+        runtime_environment=cast(Any, runtime),
+        frozen_at_utc=datetime(2026, 8, 30, 10, tzinfo=UTC),
+        inventory_path=root / pipeline.SUCCESSOR_PRIVATE_INVENTORY_PATH,
+        public_projection_path=root / pipeline.SUCCESSOR_PUBLIC_PROJECTION_PATH,
+        challenge_root=root / pipeline.EXPECTED_DATASET_ROOTS[CHALLENGE_2011_DATASET],
+        zzu_root=root / pipeline.EXPECTED_DATASET_ROOTS[ZZU_PEDIATRIC_DATASET],
+        declared_counts=(1_000, 12_328, 10_350, 13_328),
+        output_path=output,
+        output_parent_identity=pipeline._owned_directory_identity(output.parent),  # noqa: SLF001
+        protocol_artifact_parent_identity=pipeline._owned_directory_identity(  # noqa: SLF001
+            root / "artifacts" / "trust_sentinel"
+        ),
+        seven_zip_executable=root / "7z.exe",
+    )
+
+
+def test_historical_x8_inventory_marker_reconstruction_is_exact() -> None:
+    payload = pipeline._historical_x8_inventory_builder_attempt_bytes()  # noqa: SLF001
+    decoded = json.loads(payload)
+
+    assert sha256_bytes(payload) == (
+        pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+    )
+    assert decoded["artifact_sha256"] == (
+        pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+    )
+    assert len(decoded["artifact_sha256"].removeprefix("sha256:")) == 64
+    assert decoded["implementation_revision"] == (
+        pipeline.EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+    )
+    assert decoded["parent_config_file_sha256"] == (
+        pipeline.EIGHTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+    )
+
+
+def test_historical_x8_inventory_evidence_requires_exact_marker_and_absent_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    _write_required_x9_inventory_lineage(root)
+    monkeypatch.setattr(
+        pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+
+    assert pipeline._verify_historical_x8_inventory_builder_evidence(  # noqa: SLF001
+        root
+    ) == pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+
+    marker = root / pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH
+    exact = marker.read_bytes()
+    marker.write_bytes(exact[:-2] + b"x\n")
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="historical X8 inventory builder attempt marker differs",
+    ):
+        pipeline._verify_historical_x8_inventory_builder_evidence(root)  # noqa: SLF001
+    marker.write_bytes(exact)
+    receipt = root / pipeline.HISTORICAL_X8_INVENTORY_BUILDER_FAILURE_PATH
+    receipt.write_bytes(b"{}\n")
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="X8 inventory builder failure receipt must remain absent",
+    ):
+        pipeline._verify_historical_x8_inventory_builder_evidence(root)  # noqa: SLF001
+
+
+def test_x9_child_freeze_marker_and_failure_receipt_are_canonical_and_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    preflight = _x9_child_freeze_preflight(root)
+    _write_required_x9_inventory_lineage(root)
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
+    monkeypatch.setattr(
+        pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+
+    marker_sha = pipeline.consume_child_freeze_authorization(
+        preflight,
+        project_root=root,
+    )
+    marker = root / pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+    marker_payload = json.loads(marker.read_bytes())
+    assert marker_sha == sha256_file(marker)
+    assert marker_payload["authorization_id"] == "x9_child_freeze_attempt_1"
+    assert marker_payload["historical_x8_inventory_builder_attempt_file_sha256"] == (
+        pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+    )
+
+    receipt_sha = pipeline.record_child_freeze_failure(
+        preflight,
+        project_root=root,
+        failure_stage="zzu_archive_listing",
+        reason="STAGE_REFUSED",
+        official_source_content_accessed=True,
+        output_state="NONE",
+    )
+    receipt = root / pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH
+    payload = json.loads(receipt.read_bytes())
+    assert receipt_sha == sha256_file(receipt)
+    assert payload["failure_stage_ordinal"] == 4
+    assert payload["state"] == "PRECLAIM_CHILD_FREEZE_FAILED"
+    assert payload["official_source_content_accessed"] is True
+    assert payload["retry_resume_or_reuse_authorized"] is False
+    assert payload["artifact_sha256"] == pipeline.canonical_sha256(
+        {key: value for key, value in payload.items() if key != "artifact_sha256"}
+    )
+    assert not {
+        "exception",
+        "message",
+        "path",
+        "record_id",
+        "patient_id",
+        "timestamp",
+    }.intersection(payload)
+
+
+def test_x9_failure_receipt_binds_preflight_parent_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    preflight = _x9_child_freeze_preflight(root)
+    _write_required_x9_inventory_lineage(root)
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
+    monkeypatch.setattr(
+        pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+    pipeline.consume_child_freeze_authorization(preflight, project_root=root)
+    alternate_parent = root / "alternate-artifacts"
+    alternate_parent.mkdir()
+    mismatched = replace(
+        preflight,
+        protocol_artifact_parent_identity=pipeline._owned_directory_identity(  # noqa: SLF001
+            alternate_parent
+        ),
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2ExecutionError,
+        match="immutable artifact parent is not owned by this execution",
+    ):
+        pipeline.record_child_freeze_failure(
+            mismatched,
+            project_root=root,
+            failure_stage="raw_source_binding_verification",
+            reason="STAGE_REFUSED",
+            official_source_content_accessed=False,
+            output_state="NONE",
+        )
+
+    assert not (root / pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH).exists()
+
+
+def test_x9_failure_receipt_witnesses_visibility_before_durability_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    preflight = _x9_child_freeze_preflight(root)
+    _write_required_x9_inventory_lineage(root)
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
+    monkeypatch.setattr(
+        pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+    pipeline.consume_child_freeze_authorization(preflight, project_root=root)
+    events: list[str] = []
+    monkeypatch.setattr(
+        pipeline,
+        "_fsync_directory",
+        lambda _path: (_ for _ in ()).throw(OSError("injected durability failure")),
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2ExecutionError,
+        match="atomic artifact commit failed",
+    ):
+        pipeline.record_child_freeze_failure(
+            preflight,
+            project_root=root,
+            failure_stage="raw_source_binding_verification",
+            reason="STAGE_REFUSED",
+            official_source_content_accessed=False,
+            output_state="NONE",
+            visibility_witness=lambda: events.append("visible"),
+            publication_witness=lambda: events.append("durable"),
+        )
+
+    assert (root / pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH).is_file()
+    assert events == ["visible"]
+
+
+def test_x9_source_access_remains_false_before_raw_source_verification(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    preflight = _x9_child_freeze_preflight(root)
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_x8_inventory_builder_evidence",
+        lambda _root: pipeline.HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_child_freeze_marker",
+        lambda *_args, **_kwargs: "sha256:" + "1" * 64,
+    )
+    accessed: list[str] = []
+
+    with pytest.raises(pipeline.OODExternalV2IntegrityError):
+        pipeline._freeze_external_v2_child_contract_after_x9_authorization(  # noqa: SLF001
+            preflight=preflight,
+            stage_callback=None,
+            source_access_witness=lambda: accessed.append("accessed"),
+            child_visibility_witness=None,
+            child_publication_witness=None,
+            child_bytes_witness=lambda _payload: None,
+        )
+
+    assert accessed == []
+
+
+def test_x9_raw_source_access_witness_is_deduplicated_across_ordered_bindings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    paths = {"first": "raw/first.bin", "second": "raw/second.bin"}
+    bindings = {
+        name: pipeline.RawSourceBinding(
+            relative_path=relative_path,
+            file_sha256="sha256:" + str(index) * 64,
+            size_bytes=index,
+            official_md5=None,
+        )
+        for index, (name, relative_path) in enumerate(paths.items(), start=1)
+    }
+    monkeypatch.setattr(pipeline, "EXPECTED_RAW_SOURCE_PATHS", paths)
+    observed_order: list[str] = []
+
+    def bind(
+        _root: Path,
+        relative_path: str,
+        *,
+        context: str,
+        official_md5: str | None,
+        content_access_witness: Callable[[], None] | None,
+    ) -> pipeline.RawSourceBinding:
+        del context, official_md5
+        observed_order.append(relative_path)
+        assert content_access_witness is not None
+        content_access_witness()
+        return bindings["first" if relative_path.endswith("first.bin") else "second"]
+
+    monkeypatch.setattr(pipeline, "_raw_source_binding_for_path", bind)
+    accessed: list[str] = []
+
+    observed = pipeline._verify_child_freeze_raw_source_bindings(  # noqa: SLF001
+        tmp_path,
+        bindings,
+        source_access_witness=lambda: accessed.append("accessed"),
+    )
+
+    assert observed == bindings
+    assert observed_order == list(paths.values())
+    assert accessed == ["accessed"]
+
+
+@pytest.mark.parametrize(
+    ("reads", "expected_accessed"),
+    (
+        ([OSError("first read failed")], []),
+        ([b"partial", OSError("later read failed")], ["accessed"]),
+    ),
+)
+def test_md5_source_access_witness_requires_one_successful_read(
+    reads: list[bytes | OSError],
+    expected_accessed: list[str],
+) -> None:
+    class Reader:
+        def __enter__(self) -> Reader:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _size: int) -> bytes:
+            value = reads.pop(0)
+            if isinstance(value, OSError):
+                raise value
+            return value
+
+    path = cast(Path, SimpleNamespace(open=lambda _mode: Reader()))
+    accessed: list[str] = []
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="official-MD5 source cannot be read",
+    ):
+        pipeline._md5_file(  # noqa: SLF001
+            path,
+            content_access_witness=lambda: accessed.append("accessed"),
+        )
+
+    assert accessed == expected_accessed
+
+
+def test_x9_raced_exact_destination_is_preexisting_and_visible_receipt_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    preflight = _x9_child_freeze_preflight(root)
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
+    monkeypatch.setattr(
+        pipeline,
+        "_load_parent_for_operation",
+        lambda *_args, **_kwargs: preflight.parent,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "assert_external_v2_parent_executable",
+        lambda _parent: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "verify_child_freeze_preflight",
+        lambda **_kwargs: preflight,
+    )
+
+    def consume(
+        _preflight: pipeline.ChildFreezePreflight,
+        *,
+        project_root: Path,
+        visibility_witness: Callable[[], None],
+    ) -> str:
+        del project_root
+        visibility_witness()
+        return "sha256:" + "1" * 64
+
+    expected_child = b"synthetic-child\n"
+
+    def race_destination(**kwargs: Any) -> Any:
+        kwargs["stage_callback"]("child_publication")
+        kwargs["child_bytes_witness"](expected_child)
+        preflight.output_path.write_bytes(expected_child)
+        raise pipeline.OODExternalV2ExecutionError("synthetic publication race")
+
+    observed_receipt: dict[str, object] = {}
+
+    def fail_receipt_after_visibility(
+        _preflight: pipeline.ChildFreezePreflight,
+        **kwargs: object,
+    ) -> str:
+        visibility_witness = cast(Callable[[], None], kwargs.pop("visibility_witness"))
+        kwargs.pop("publication_witness")
+        visibility_witness()
+        observed_receipt.update(kwargs)
+        raise OSError("synthetic receipt durability failure")
+
+    monkeypatch.setattr(pipeline, "consume_child_freeze_authorization", consume)
+    monkeypatch.setattr(
+        pipeline,
+        "_freeze_external_v2_child_contract_after_x9_authorization",
+        race_destination,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "record_child_freeze_failure",
+        fail_receipt_after_visibility,
+    )
+
+    with pytest.raises(pipeline.ChildFreezeAttemptError) as captured:
+        pipeline.freeze_external_v2_child_contract(
+            parent_path=PARENT_PATH,
+            project_root=root,
+            inventory_path=preflight.inventory_path,
+            public_projection_path=preflight.public_projection_path,
+            implementation_revision=preflight.implementation_revision,
+            frozen_at_utc="2026-08-30T10:00:00Z",
+            challenge_root=preflight.challenge_root,
+            zzu_root=preflight.zzu_root,
+            challenge_records=1_000,
+            zzu_records=12_328,
+            zzu_patients=10_350,
+            selected_records_total=13_328,
+            output_path=preflight.output_path,
+        )
+
+    error = captured.value
+    assert error.reason == "DESTINATION_PREEXISTED"
+    assert error.output_state == "VISIBLE_EXACT_DURABILITY_UNCONFIRMED"
+    assert error.failure_receipt_written is True
+    assert observed_receipt["reason"] == "DESTINATION_PREEXISTED"
+
+
+def test_x9_freeze_wraps_post_marker_baseexception_with_exact_stage_and_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    preflight = _x9_child_freeze_preflight(root)
+    observed_receipt: dict[str, object] = {}
+    observed_stages: list[str] = []
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
+    monkeypatch.setattr(
+        pipeline,
+        "_load_parent_for_operation",
+        lambda *_args, **_kwargs: preflight.parent,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "assert_external_v2_parent_executable",
+        lambda _parent: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "verify_child_freeze_preflight",
+        lambda **_kwargs: preflight,
+    )
+
+    def consume(
+        _preflight: pipeline.ChildFreezePreflight,
+        *,
+        project_root: Path,
+        visibility_witness: Any,
+    ) -> str:
+        del project_root
+        visibility_witness()
+        return "sha256:" + "1" * 64
+
+    def fail_after_source_access(**kwargs: Any) -> Any:
+        kwargs["stage_callback"]("raw_source_binding_verification")
+        kwargs["source_access_witness"]()
+        raise KeyboardInterrupt
+
+    def record(
+        _preflight: pipeline.ChildFreezePreflight,
+        **kwargs: object,
+    ) -> str:
+        visibility_witness = cast(Callable[[], None], kwargs.pop("visibility_witness"))
+        publication_witness = cast(
+            Callable[[], None], kwargs.pop("publication_witness")
+        )
+        visibility_witness()
+        publication_witness()
+        observed_receipt.update(kwargs)
+        return "sha256:" + "2" * 64
+
+    monkeypatch.setattr(pipeline, "consume_child_freeze_authorization", consume)
+    monkeypatch.setattr(
+        pipeline,
+        "_freeze_external_v2_child_contract_after_x9_authorization",
+        fail_after_source_access,
+    )
+    monkeypatch.setattr(pipeline, "record_child_freeze_failure", record)
+
+    with pytest.raises(pipeline.ChildFreezeAttemptError) as captured:
+        pipeline.freeze_external_v2_child_contract(
+            parent_path=PARENT_PATH,
+            project_root=root,
+            inventory_path=preflight.inventory_path,
+            public_projection_path=preflight.public_projection_path,
+            implementation_revision=preflight.implementation_revision,
+            frozen_at_utc="2026-08-30T10:00:00Z",
+            challenge_root=preflight.challenge_root,
+            zzu_root=preflight.zzu_root,
+            challenge_records=1_000,
+            zzu_records=12_328,
+            zzu_patients=10_350,
+            selected_records_total=13_328,
+            output_path=preflight.output_path,
+            stage_callback=observed_stages.append,
+        )
+
+    error = captured.value
+    assert error.authorization_consumed is True
+    assert error.stage == "raw_source_binding_verification"
+    assert error.reason == "UNEXPECTED_INTERNAL_FAILURE"
+    assert error.output_state == "NONE"
+    assert error.official_source_content_accessed is True
+    assert error.failure_receipt_written is True
+    assert observed_stages == [
+        "authorization_publication",
+        "raw_source_binding_verification",
+    ]
+    assert observed_receipt == {
+        "project_root": root,
+        "failure_stage": "raw_source_binding_verification",
+        "reason": "UNEXPECTED_INTERNAL_FAILURE",
+        "official_source_content_accessed": True,
+        "output_state": "NONE",
+    }
+
+
 def _skeletal_child_contract_body() -> dict[str, object]:
     return {
         "artifact_type": pipeline.CHILD_CONTRACT_ARTIFACT_TYPE,
+        "child_freeze_attempt": {
+            "artifact_sha256": "sha256:" + "4" * 64,
+            "file_sha256": "sha256:" + "5" * 64,
+            "relative_path": pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+        },
         "dataset_roots": {},
         "decision_bindings": {},
         "frozen_at_utc": "2026-08-30T00:00:00Z",
