@@ -931,6 +931,51 @@ def test_zzu_split_zip_closure_binds_tool_crc_sha_and_round_trips(tmp_path: Path
         verify_seven_zip_tool_binding(executable, closure.tool_binding, runner=runner)
 
 
+def test_zzu_split_zip_closure_resolves_relative_archive_parts_before_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    z01, zip_path, root, executable, required, raw_runner = _zzu_closure_fixture(tmp_path)
+    baseline = build_zzu_split_zip_extraction_closure(
+        z01,
+        zip_path,
+        root,
+        executable,
+        expected_required_relative_paths=required,
+        runner=raw_runner,
+    )
+    monkeypatch.chdir(tmp_path)
+    observed_archive_arguments: list[Path] = []
+
+    def runner(executable_path: Path, arguments: tuple[str, ...]) -> str:
+        if arguments[0] in {"l", "t", "x"}:
+            archive_argument = Path(arguments[-1])
+            observed_archive_arguments.append(archive_argument)
+            assert archive_argument.is_absolute()
+            assert archive_argument == zip_path.resolve(strict=True)
+        return raw_runner(executable_path, arguments)
+
+    rebuilt = build_zzu_split_zip_extraction_closure(
+        z01.relative_to(tmp_path),
+        zip_path.relative_to(tmp_path),
+        root.relative_to(tmp_path),
+        executable.relative_to(tmp_path),
+        expected_required_relative_paths=required,
+        runner=runner,
+    )
+
+    assert rebuilt == baseline
+    assert verify_zzu_split_zip_extraction_closure(
+        z01.relative_to(tmp_path),
+        zip_path.relative_to(tmp_path),
+        root.relative_to(tmp_path),
+        executable.relative_to(tmp_path),
+        rebuilt,
+        runner=runner,
+    ) == rebuilt.closure_sha256
+    assert observed_archive_arguments == [zip_path.resolve(strict=True)] * 6
+
+
 def test_zzu_split_zip_closure_stage_callback_is_exact_and_result_neutral(
     tmp_path: Path,
 ) -> None:

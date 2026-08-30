@@ -2,7 +2,7 @@ schema_version: 1
 protocol_id: trust-sentinel-ood-external-v2-1-parent
 status: frozen_parent_preregistration_pre_waveform
 drafted_on: "2026-08-29"
-frozen_at_utc: "2026-08-30T06:34:49Z"
+frozen_at_utc: "2026-08-30T07:48:31Z"
 research_only: true
 
 purpose: >-
@@ -303,6 +303,85 @@ design_history:
         - tests/unit/test_ood_v2_pipeline.py
         - tests/unit/test_ood_v2_protocol_closure.py
       status_for_every_path: modified
+  x7_inventory_build_failure:
+    implementation_revision: 207fd1568697adb56991baeccee29ded38d3caf1
+    parent_config_file_sha256: sha256:1da505b37d64dec804f147fa8cfd43a5029fe2ee7d92d1666177d490ea7016e1
+    frozen_at_utc: "2026-08-30T06:34:49Z"
+    production_attempt:
+      authorization_id: x7_inventory_build_attempt_1
+      authorization_path: artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-attempt.json
+      authorization_marker_created: true
+      authorization_consumed: true
+      authorization_state: CONSUMED_FAILED_RETAINED
+      authorization_marker_file_sha256: sha256:8255b58e5c63a4e18ae2a0b7715109106e4f1a949cb68204b66cde9f1fd4af01
+      authorization_marker_artifact_sha256: sha256:ec01f1554da7733a4d298161a3d67818dc1edd2fefb663760277070359354830
+      outcome: failed_after_authorization_consumption_before_inventory_output
+      failure_receipt_path: artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-failure.json
+      failure_receipt_created: true
+      failure_receipt_state: PRECLAIM_INVENTORY_BUILD_FAILED
+      failure_receipt_file_sha256: sha256:af6995828daad64a6606dfd1875a2ced6daa9ac390e328152488270f5dcffac6
+      failure_receipt_artifact_sha256: sha256:02c2d212a1ff4108c9dd10bd67095a94727d5aabb68e0c1e94a2ed9d4304d7d3
+      exact_failure_stage: zzu_archive_listing
+      failure_stage_ordinal: 8
+      official_source_content_accessed: true
+      output_state: NONE
+      runtime_cleanup_succeeded: true
+      successor_inventory_created: false
+      successor_public_projection_created: false
+      successor_child_execution_contract_created: false
+      successor_external_access_armed_marker_created: false
+      successor_external_one_shot_claim_created: false
+      waveform_sample_decode_occurred: false
+      quality_policy_execution_occurred: false
+      embedding_extraction_occurred: false
+      distribution_scoring_occurred: false
+      model_logits_or_probabilities_observed: false
+      endpoint_or_subgroup_metrics_observed: false
+    post_failure_static_code_path_diagnosis:
+      purpose: operational_failure_localization_only
+      new_official_source_access_occurred: false
+      failure_boundary: zzu_archive_listing
+      root_cause: project_relative_ZZU_terminal_zip_operand_was_interpreted_from_the_fresh_isolated_7zip_working_directory
+      correction: normalize_the_already_bound_terminal_zip_operand_to_its_exact_absolute_direct_path_before_every_isolated_7zip_listing_test_or_extraction_call
+      absolute_user_path_publication: forbidden
+      archive_member_selection_or_role_change: false
+      source_free_synthetic_two_volume_probe:
+        exact_7zip_version: "26.02"
+        standards_compliant_split_archive: true
+        synthetic_record_count: 14190
+        synthetic_regular_file_count: 28380
+        listed_total_entry_count: 42586
+        listing_elapsed_seconds: 0.34
+        parser_elapsed_seconds: 1.04
+        listing_output_size_bytes: 12957423
+        listing_stdout_limit_bytes: 67108864
+        listing_stdout_limit_fraction: 0.1931
+        standard_error: exact_empty
+        small_split_exact_multivolume_marker_observed: true
+        small_split_exact_two_volume_count_observed: true
+        official_source_or_identifier_accessed: false
+        scientific_result_or_claim: false
+    x7_authorization_and_receipt_retention: exact_artifacts_permanently_retained_ignored_untracked_and_never_reused
+    new_x8_inventory_build_authorization_id: x8_inventory_build_attempt_1
+    new_x8_inventory_build_authorization_path: artifacts/trust_sentinel/.ood_external_v2_1.x8-inventory-build-attempt.json
+    new_x8_failure_receipt_path: artifacts/trust_sentinel/.ood_external_v2_1.x8-inventory-build-failure.json
+    operational_amendment_only: true
+    scientific_protocol_change: false
+    amendment: normalize_the_already_bound_ZZU_terminal_zip_operand_to_its_exact_absolute_direct_path_before_isolated_7zip_execution_require_exact_x7_marker_and_receipt_and_issue_one_new_x8_authorization
+    amendment_revision_contract:
+      commit_count_after_x7_implementation_revision: 1
+      sole_parent: 207fd1568697adb56991baeccee29ded38d3caf1
+      exact_modified_paths:
+        - configs/trust_sentinel_ood_external_v2_1.yaml
+        - docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md
+        - src/ecg_trust/ood_v2/inventory.py
+        - src/ecg_trust/ood_v2/models.py
+        - src/ecg_trust/ood_v2/pipeline.py
+        - tests/unit/test_ood_v2_inventory.py
+        - tests/unit/test_ood_v2_models.py
+        - tests/unit/test_ood_v2_pipeline.py
+        - tests/unit/test_ood_v2_protocol_closure.py
+      status_for_every_path: modified
   v1_c_influence:
     allowed:
       - historical_aggregate_context_only
@@ -502,6 +581,8 @@ revision_boundary:
       - artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json
       - artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-attempt.json
       - artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-failure.json
+      - artifacts/trust_sentinel/.ood_external_v2_1.x8-inventory-build-attempt.json
+      - artifacts/trust_sentinel/.ood_external_v2_1.x8-inventory-build-failure.json
       - :(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**
       - :(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**
       - :(glob)artifacts/trust_sentinel/.ood_external_v2_1.runtime-*/**
@@ -1058,8 +1139,9 @@ runtime:
       private_public_inventory_destinations_must_be_absent_before_authorization: true
       historical_x4_and_x5_authorization_paths_must_remain_absent: true
       consumed_failed_x6_authorization_marker_must_be_present_and_exact: true
-      current_x7_authorization_and_failure_receipt_paths_must_be_absent_before_authorization: true
-      post_x7_consumption_failure_disclosure: exact_allowlisted_stage_ordinal_and_output_state_without_exception_timestamp_path_or_external_source_identifier
+      consumed_failed_x7_authorization_marker_and_failure_receipt_must_be_present_and_exact: true
+      current_x8_authorization_and_failure_receipt_paths_must_be_absent_before_authorization: true
+      post_x8_consumption_failure_disclosure: exact_allowlisted_stage_ordinal_and_output_state_without_exception_timestamp_path_or_external_source_identifier
       postflight_before_success_report: exact_same_preflight_plus_strict_private_public_output_hashes
   complete_runtime_tree_binding:
     cpython_base:
@@ -1155,6 +1237,14 @@ runtime:
       application_directory: fresh_verified_direct_two_file_replica_of_bound_exe_and_dll
       codecs_formats_or_other_adjacent_plugins: absent
       working_directory: separate_fresh_verified_empty_directory
+      archive_operand_normalization:
+        timing: after_exact_direct_archive_binding_before_isolated_process_creation
+        input: already_bound_project_relative_ZZU_terminal_zip_path
+        output: exact_absolute_direct_archive_path
+        applies_to_commands: [listing, archive_test, isolated_extraction]
+        direct_ancestry_regular_file_and_stable_identity_reverified: true
+        archive_bytes_members_roles_selection_or_order_changed: false
+        absolute_path_serialization_or_publication: forbidden
       environment: minimal_fixed_SystemRoot_System32_TEMP_TMP_and_PATH
       PATH: replica_tool_directory_then_System32_only
       caller_cwd_and_environment: forbidden
@@ -1282,16 +1372,31 @@ one_shot_external_access:
     - model_logits_or_probabilities
     - endpoint_or_subgroup_metrics
   inventory_build_authorization:
-    authorization_id: x7_inventory_build_attempt_1
+    authorization_id: x8_inventory_build_attempt_1
     artifact_type: ecg_trust.ood_external_v2_1_inventory_builder_attempt
-    path: artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-attempt.json
-    scope: sole_x7_preclaim_inventory_build_attempt
-    predecessor_consumed_failed_authorization_id: x6_inventory_build_attempt_1
-    predecessor_authorization_path: artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json
+    path: artifacts/trust_sentinel/.ood_external_v2_1.x8-inventory-build-attempt.json
+    scope: sole_x8_preclaim_inventory_build_attempt
+    predecessor_consumed_failed_authorization_id: x7_inventory_build_attempt_1
+    predecessor_authorization_path: artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-attempt.json
     predecessor_authorization_state: CONSUMED_FAILED_RETAINED
-    predecessor_authorization_marker_file_sha256: sha256:4e3e968a2dc9f0c7f552bc05f8d70ef6afc99d97b5b81a60c2920e064efbe9e8
-    predecessor_authorization_marker_artifact_sha256: sha256:88fb0a119f5c550f352cc2dca6f181567e0dd660449eb0ddd3c6247a7884cf93
+    predecessor_authorization_marker_file_sha256: sha256:8255b58e5c63a4e18ae2a0b7715109106e4f1a949cb68204b66cde9f1fd4af01
+    predecessor_authorization_marker_artifact_sha256: sha256:ec01f1554da7733a4d298161a3d67818dc1edd2fefb663760277070359354830
+    predecessor_failure_receipt_path: artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-failure.json
+    predecessor_failure_receipt_file_sha256: sha256:af6995828daad64a6606dfd1875a2ced6daa9ac390e328152488270f5dcffac6
+    predecessor_failure_receipt_artifact_sha256: sha256:02c2d212a1ff4108c9dd10bd67095a94727d5aabb68e0c1e94a2ed9d4304d7d3
+    predecessor_failure_stage: zzu_archive_listing
+    predecessor_failure_stage_ordinal: 8
+    predecessor_failure_output_state: NONE
+    predecessor_official_source_content_accessed: true
     predecessor_authorization_must_remain_present_and_exact: true
+    predecessor_failure_receipt_must_remain_present_and_exact: true
+    historical_x6_authorization:
+      authorization_id: x6_inventory_build_attempt_1
+      path: artifacts/trust_sentinel/.ood_external_v2_1.x6-inventory-build-attempt.json
+      state: CONSUMED_FAILED_RETAINED
+      marker_file_sha256: sha256:4e3e968a2dc9f0c7f552bc05f8d70ef6afc99d97b5b81a60c2920e064efbe9e8
+      marker_artifact_sha256: sha256:88fb0a119f5c550f352cc2dca6f181567e0dd660449eb0ddd3c6247a7884cf93
+      must_remain_present_and_exact: true
     retired_x4_and_x5_authorization_paths_must_remain_absent: true
     creation: atomic_create_new_no_overwrite
     durability: exact_file_flush_and_parent_directory_durability_or_fail_closed
@@ -1299,7 +1404,8 @@ one_shot_external_access:
     preconsumption_requirements:
       - repeatable_controls_only_preflight_passed_with_no_durable_state
       - exact_retained_x6_consumed_failed_authorization_marker_verified
-      - x7_authorization_marker_and_failure_receipt_absent
+      - exact_retained_x7_consumed_failed_authorization_marker_and_failure_receipt_verified
+      - x8_authorization_marker_and_failure_receipt_absent
       - exact_frozen_parent_schema_and_count_invariants_verified
       - exact_canonical_dataset_root_and_raw_source_path_keysets_verified
       - exact_bound_7zip_tool_identity_verified
@@ -1318,11 +1424,11 @@ one_shot_external_access:
     failure_receipt:
       schema_version: 1
       artifact_type: ecg_trust.ood_external_v2_1_inventory_builder_failure
-      path: artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-failure.json
+      path: artifacts/trust_sentinel/.ood_external_v2_1.x8-inventory-build-failure.json
       state: PRECLAIM_INVENTORY_BUILD_FAILED
       creation: immutable_atomic_create_new_no_overwrite
       durability: exact_file_flush_and_parent_directory_durability_or_fail_closed
-      timing: exactly_once_after_x7_authorization_consumption_on_any_failure_before_success
+      timing: exactly_once_after_x8_authorization_consumption_on_any_failure_before_success
       git_ignored_and_untracked: true
       retention: permanent
       canonical_json: utf8_sorted_keys_compact_separators_single_lf
@@ -1392,8 +1498,9 @@ one_shot_external_access:
     - exact_python_scientific_package_tree_and_7zip_identities_verified
     - quality_implementation_hash_verified
     - exact_retained_x6_consumed_failed_inventory_build_authorization_marker_verified
-    - durable_x7_inventory_build_authorization_marker_verified
-    - x7_inventory_build_failure_receipt_absent
+    - exact_retained_x7_consumed_failed_inventory_build_authorization_marker_and_failure_receipt_verified
+    - durable_x8_inventory_build_authorization_marker_verified
+    - x8_inventory_build_failure_receipt_absent
     - output_root_absent
     - clean_committed_revision
   output_root: artifacts/trust_sentinel/ood_external_v2_1

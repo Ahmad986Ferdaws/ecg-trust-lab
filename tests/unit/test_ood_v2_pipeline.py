@@ -78,6 +78,27 @@ def _write_historical_x6_inventory_marker(root: Path) -> Path:
     return marker
 
 
+def _write_historical_x7_inventory_artifacts(root: Path) -> tuple[Path, Path]:
+    marker = root / pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH
+    receipt = root / pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_bytes(
+        pipeline._historical_x7_inventory_builder_attempt_bytes()  # noqa: SLF001
+    )
+    receipt.write_bytes(
+        pipeline._historical_x7_inventory_builder_failure_bytes()  # noqa: SLF001
+    )
+    return marker, receipt
+
+
+def _write_required_historical_inventory_artifacts(
+    root: Path,
+) -> tuple[Path, Path, Path]:
+    x6 = _write_historical_x6_inventory_marker(root)
+    x7_marker, x7_receipt = _write_historical_x7_inventory_artifacts(root)
+    return x6, x7_marker, x7_receipt
+
+
 def _inventory_record() -> ExternalInventoryRecord:
     return ExternalInventoryRecord(
         dataset=CHALLENGE_2011_DATASET,
@@ -394,6 +415,27 @@ def test_successor_preflight_rejects_hash_identical_parent_copy(
             ),
             "recursive_delete",
             "successor GCM sentinel cleanup declaration differs",
+        ),
+        (
+            (
+                "runtime",
+                "split_archive_tool",
+                "execution_isolation",
+                "archive_operand_normalization",
+                "input",
+            ),
+            "already_bound_project_relative_ZZU_split_archive_path",
+            "successor 7-Zip archive-operand isolation declaration differs",
+        ),
+        (
+            (
+                "design_history",
+                "x7_inventory_build_failure",
+                "post_failure_static_code_path_diagnosis",
+                "root_cause",
+            ),
+            "alternate_failure_cause",
+            "successor X7 archive-operand amendment declaration differs",
         ),
         (
             (
@@ -2254,6 +2296,9 @@ def _amendment_git_runner(
     fifth_revision_line: str | None = None,
     fifth_commit_count: str = "1",
     fifth_diff_stdout: str | None = None,
+    sixth_revision_line: str | None = None,
+    sixth_commit_count: str = "1",
+    sixth_diff_stdout: str | None = None,
     revision_line: str | None = None,
     commit_count: str = "1",
     diff_stdout: str | None = None,
@@ -2276,11 +2321,17 @@ def _amendment_git_runner(
             f"M\t{path}\n"
             for path in pipeline.SUCCESSOR_GCM_SCRATCH_AMENDMENT_MODIFIED_PATHS
         )
+    sixth_diff = sixth_diff_stdout
+    if sixth_diff is None:
+        sixth_diff = "".join(
+            f"M\t{path}\n"
+            for path in pipeline.SUCCESSOR_INVENTORY_FAILURE_AMENDMENT_MODIFIED_PATHS
+        )
     current_diff = diff_stdout
     if current_diff is None:
         current_diff = "".join(
             f"M\t{path}\n"
-            for path in pipeline.SUCCESSOR_INVENTORY_FAILURE_AMENDMENT_MODIFIED_PATHS
+            for path in pipeline.SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS
         )
     first_diff = first_diff_stdout
     if first_diff is None:
@@ -2424,23 +2475,48 @@ def _amendment_git_runner(
             "--parents",
             "-n",
             "1",
-            implementation_revision,
-        ): revision_line
+            pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        ): sixth_revision_line
         or (
-            f"{implementation_revision} "
+            f"{pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
             f"{pipeline.SIXTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
         ),
         (
             "rev-list",
             "--count",
             f"{pipeline.SIXTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+        ): f"{sixth_commit_count}\n",
+        (
+            "diff",
+            "--name-status",
+            "--no-renames",
+            f"{pipeline.SIXTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+            "--",
+        ): sixth_diff,
+        (
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            implementation_revision,
+        ): revision_line
+        or (
+            f"{implementation_revision} "
+            f"{pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
+        ),
+        (
+            "rev-list",
+            "--count",
+            f"{pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
         ): f"{commit_count}\n",
         (
             "diff",
             "--name-status",
             "--no-renames",
-            f"{pipeline.SIXTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
             "--",
         ): current_diff,
@@ -2526,6 +2602,14 @@ def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
             ),
             "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
             "revision": pipeline.SIXTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        },
+        {
+            "context": "seventh frozen successor parent",
+            "expected_file_sha256": (
+                pipeline.SEVENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+            ),
+            "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
+            "revision": pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         },
     ]
 
@@ -2819,14 +2903,14 @@ def test_successor_amendment_revision_rejects_x5_to_x6_lineage_or_diff_drift(
     ("runner_kwargs", "message"),
     (
         (
-            {"revision_line": f"{'d' * 40} {'e' * 40}\n"},
+            {"sixth_revision_line": f"{'d' * 40} {'e' * 40}\n"},
             "sole direct child",
         ),
-        ({"commit_count": "2"}, "sole direct child"),
-        ({"diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
+        ({"sixth_commit_count": "2"}, "sole direct child"),
+        ({"sixth_diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
         (
             {
-                "diff_stdout": "".join(
+                "sixth_diff_stdout": "".join(
                     f"M\t{path}\n"
                     for path in (
                         pipeline.SUCCESSOR_INVENTORY_FAILURE_AMENDMENT_MODIFIED_PATHS[
@@ -2839,7 +2923,7 @@ def test_successor_amendment_revision_rejects_x5_to_x6_lineage_or_diff_drift(
         ),
         (
             {
-                "diff_stdout": "".join(
+                "sixth_diff_stdout": "".join(
                     f"M\t{path}\n"
                     for path in (
                         pipeline.SUCCESSOR_INVENTORY_FAILURE_AMENDMENT_MODIFIED_PATHS
@@ -2849,10 +2933,68 @@ def test_successor_amendment_revision_rejects_x5_to_x6_lineage_or_diff_drift(
             },
             "paths differ",
         ),
-        ({"diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
+        ({"sixth_diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
     ),
 )
 def test_successor_amendment_revision_rejects_x6_to_x7_lineage_or_diff_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runner_kwargs: dict[str, str],
+    message: str,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        _amendment_git_runner(revision, **runner_kwargs),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(pipeline.OODExternalV2IntegrityError, match=message):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+@pytest.mark.parametrize(
+    ("runner_kwargs", "message"),
+    (
+        (
+            {"revision_line": f"{'d' * 40} {'e' * 40}\n"},
+            "sole direct child",
+        ),
+        ({"commit_count": "2"}, "sole direct child"),
+        ({"diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
+        (
+            {
+                "diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in (
+                        pipeline.SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS[:-1]
+                    )
+                )
+            },
+            "paths differ",
+        ),
+        (
+            {
+                "diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in pipeline.SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS
+                )
+                + "M\textra.txt\n"
+            },
+            "paths differ",
+        ),
+        ({"diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
+    ),
+)
+def test_successor_amendment_revision_rejects_x7_to_x8_lineage_or_diff_drift(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     runner_kwargs: dict[str, str],
@@ -3036,6 +3178,35 @@ def test_successor_amendment_revision_rejects_x6_parent_blob_drift(
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
         match="X6 parent blob differs",
+    ):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+def test_successor_amendment_revision_rejects_x7_parent_blob_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(pipeline, "_run_git", _amendment_git_runner(revision))
+
+    def reject_seventh_parent(
+        _root: Path,
+        **kwargs: object,
+    ) -> None:
+        if kwargs.get("context") == "seventh frozen successor parent":
+            raise pipeline.OODExternalV2IntegrityError("X7 parent blob differs")
+
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        reject_seventh_parent,
+    )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="X7 parent blob differs",
     ):
         pipeline._verify_successor_amendment_revision(  # noqa: SLF001
             tmp_path,
@@ -4126,6 +4297,42 @@ def test_inventory_builder_preflight_binds_frozen_runtime_and_source(
     assert refusal.value.stage == "namespace_state"
 
 
+def test_historical_x7_inventory_artifacts_reconstruct_exact_preserved_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    marker, receipt = _write_historical_x7_inventory_artifacts(root)
+    monkeypatch.setattr(
+        pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+
+    assert sha256_file(marker) == (
+        pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+    )
+    assert sha256_file(receipt) == (
+        pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_FILE_SHA256
+    )
+    marker_payload = json.loads(marker.read_bytes())
+    receipt_payload = json.loads(receipt.read_bytes())
+    assert marker_payload["artifact_sha256"] == (
+        pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+    )
+    assert marker_payload["authorization_id"] == "x7_inventory_build_attempt_1"
+    assert receipt_payload["artifact_sha256"] == (
+        pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_ARTIFACT_SHA256
+    )
+    assert receipt_payload["failure_stage"] == "zzu_archive_listing"
+    assert receipt_payload["failure_stage_ordinal"] == 8
+    assert receipt_payload["official_source_content_accessed"] is True
+    assert receipt_payload["output_state"] == "NONE"
+    assert pipeline._verify_historical_x7_inventory_builder_artifacts(  # noqa: SLF001
+        root
+    ) == (sha256_file(marker), sha256_file(receipt))
+
+
 def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -4155,8 +4362,12 @@ def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim
         "_require_git_ignored_and_untracked",
         lambda *_args, **_kwargs: None,
     )
-    historical_x6 = _write_historical_x6_inventory_marker(root)
+    historical_x6, historical_x7, historical_x7_receipt = (
+        _write_required_historical_inventory_artifacts(root)
+    )
     historical_x6_bytes = historical_x6.read_bytes()
+    historical_x7_bytes = historical_x7.read_bytes()
+    historical_x7_receipt_bytes = historical_x7_receipt.read_bytes()
 
     marker_sha256 = pipeline.consume_inventory_builder_authorization(
         preflight,
@@ -4167,22 +4378,41 @@ def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim
     assert marker != root / pipeline.SUCCESSOR_CLAIM_PATH
     marker_payload = json.loads(marker.read_bytes())
     assert marker_payload["authorization_consumption_ordinal"] == 1
-    assert marker_payload["protocol_inventory_build_attempt_ordinal"] == 2
+    assert marker_payload["protocol_inventory_build_attempt_ordinal"] == 3
     assert marker_payload["maximum_consumptions"] == 1
-    assert marker_payload["authorization_id"] == "x7_inventory_build_attempt_1"
-    assert marker_payload["schema_version"] == 3
+    assert marker_payload["authorization_id"] == "x8_inventory_build_attempt_1"
+    assert marker_payload["schema_version"] == 4
     assert marker_payload["predecessor_authorization_id"] == (
-        "x6_inventory_build_attempt_1"
+        "x7_inventory_build_attempt_1"
     )
     assert marker_payload["predecessor_authorization_consumed"] is True
     assert marker_payload["predecessor_authorization_path"] == (
-        pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_PATH
+        pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH
     )
     assert marker_payload["predecessor_authorization_state"] == (
         "CONSUMED_FAILED_RETAINED"
     )
     assert marker_payload["retry_resume_or_reuse_of_predecessor"] is False
+    assert marker_payload["predecessor_failure_receipt_path"] == (
+        pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH
+    )
+    assert marker_payload["predecessor_failure_stage"] == "zzu_archive_listing"
+    assert marker_payload["predecessor_failure_stage_ordinal"] == 8
+    assert marker_payload["predecessor_failure_output_state"] == "NONE"
+    assert marker_payload["predecessor_official_source_content_accessed"] is True
+    assert marker_payload["archive_operand_normalization"] == {
+        "applies_to_commands": [
+            "listing",
+            "archive_test",
+            "isolated_extraction",
+        ],
+        "input": "already_bound_project_relative_ZZU_terminal_zip_path",
+        "output": "exact_absolute_direct_archive_path",
+        "scientific_protocol_change": False,
+    }
     assert historical_x6.read_bytes() == historical_x6_bytes
+    assert historical_x7.read_bytes() == historical_x7_bytes
+    assert historical_x7_receipt.read_bytes() == historical_x7_receipt_bytes
     assert not (
         root / pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
     ).exists()
@@ -4199,7 +4429,7 @@ def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim
 
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
-        match="X7 inventory builder authorization is unavailable",
+        match="X8 inventory builder authorization is unavailable",
     ):
         pipeline.consume_inventory_builder_authorization(
             preflight,
@@ -4217,10 +4447,19 @@ def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim
         )
 
 
+@pytest.mark.parametrize(
+    "historical_path",
+    (
+        pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_PATH,
+        pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH,
+        pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH,
+    ),
+)
 @pytest.mark.parametrize("historical_state", ("missing", "tampered"))
-def test_x7_authorization_requires_exact_retained_x6_marker(
+def test_x8_authorization_requires_exact_retained_x6_and_x7_artifacts(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    historical_path: str,
     historical_state: str,
 ) -> None:
     root = tmp_path / "project"
@@ -4237,8 +4476,11 @@ def test_x7_authorization_requires_exact_retained_x6_marker(
         seven_zip_tool_binding=cast(Any, object()),
         inventory_counts=cast(Any, object()),
     )
-    if historical_state == "tampered":
-        historical = root / pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_PATH
+    _write_required_historical_inventory_artifacts(root)
+    historical = root / historical_path
+    if historical_state == "missing":
+        historical.unlink()
+    else:
         historical.write_bytes(b"{}\n")
     monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
     monkeypatch.setattr(
@@ -4267,7 +4509,7 @@ def test_x7_authorization_requires_exact_retained_x6_marker(
         ("challenge_archive_closure", True),
     ),
 )
-def test_x7_failure_receipt_is_canonical_sanitized_and_single_use(
+def test_x8_failure_receipt_is_canonical_sanitized_and_single_use(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     failure_stage: str,
@@ -4298,7 +4540,7 @@ def test_x7_failure_receipt_is_canonical_sanitized_and_single_use(
         "_require_git_ignored_and_untracked",
         lambda *_args, **_kwargs: None,
     )
-    _write_historical_x6_inventory_marker(root)
+    _write_required_historical_inventory_artifacts(root)
     pipeline.consume_inventory_builder_authorization(preflight, project_root=root)
 
     receipt_sha256 = pipeline.record_inventory_builder_failure(
@@ -4312,7 +4554,7 @@ def test_x7_failure_receipt_is_canonical_sanitized_and_single_use(
     raw = receipt.read_bytes()
     payload = json.loads(raw)
     assert receipt_sha256 == sha256_bytes(raw)
-    assert payload["authorization_id"] == "x7_inventory_build_attempt_1"
+    assert payload["authorization_id"] == "x8_inventory_build_attempt_1"
     assert payload["authorization_consumed"] is True
     assert payload["failure_stage"] == failure_stage
     assert payload["failure_stage_ordinal"] == (
@@ -4494,7 +4736,7 @@ def test_child_attempt_verification_reconstructs_x_identity_without_x_head_prefl
     )
     marker = tmp_path / pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH
     marker.parent.mkdir(parents=True)
-    _write_historical_x6_inventory_marker(tmp_path)
+    _write_required_historical_inventory_artifacts(tmp_path)
     marker.write_bytes(marker_bytes)
     child = replace(
         child,
@@ -4643,7 +4885,7 @@ def test_inventory_builder_marker_visibility_blocks_retry_after_directory_fsync_
         "_require_git_ignored_and_untracked",
         lambda *_args, **_kwargs: None,
     )
-    _write_historical_x6_inventory_marker(root)
+    _write_required_historical_inventory_artifacts(root)
     monkeypatch.setattr(
         pipeline,
         "_fsync_directory",
@@ -4666,7 +4908,7 @@ def test_inventory_builder_marker_visibility_blocks_retry_after_directory_fsync_
     assert visibility_events == ["visible"]
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
-        match="X7 inventory builder authorization is unavailable",
+        match="X8 inventory builder authorization is unavailable",
     ):
         pipeline.consume_inventory_builder_authorization(
             preflight,

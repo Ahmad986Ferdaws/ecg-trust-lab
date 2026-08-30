@@ -497,10 +497,12 @@ def test_x5_amendment_retires_unconsumed_x4_and_closes_runtime_provenance() -> N
             "or_output_write"
         ),
         "consumed_failed_x6_authorization_marker_must_be_present_and_exact": True,
-        "current_x7_authorization_and_failure_receipt_paths_must_be_absent_"
+        "consumed_failed_x7_authorization_marker_and_failure_receipt_must_be_"
+        "present_and_exact": True,
+        "current_x8_authorization_and_failure_receipt_paths_must_be_absent_"
         "before_authorization": True,
         "historical_x4_and_x5_authorization_paths_must_remain_absent": True,
-        "post_x7_consumption_failure_disclosure": (
+        "post_x8_consumption_failure_disclosure": (
             "exact_allowlisted_stage_ordinal_and_output_state_without_exception_"
             "timestamp_path_or_external_source_identifier"
         ),
@@ -531,6 +533,10 @@ def test_x5_amendment_retires_unconsumed_x4_and_closes_runtime_provenance() -> N
     assert pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH in protected
     assert pipeline.HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH in protected
     assert pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH in protected
+    assert pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH in protected
 
 
 def test_x6_amendment_retires_unconsumed_x5_and_closes_gcm_scratch() -> None:
@@ -740,8 +746,8 @@ def test_x7_amendment_discloses_consumed_failed_x6_and_freezes_receipt_contract(
         ],
     )["paths"]
     assert pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_PATH in protected
-    assert pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH in protected
-    assert pipeline.SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH in protected
+    assert pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH in protected
 
     assert design["x6_inventory_build_failure"] == {
         "amendment": (
@@ -768,11 +774,11 @@ def test_x7_amendment_discloses_consumed_failed_x6_and_freezes_receipt_contract(
             pipeline.SIXTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
         ),
         "new_x7_failure_receipt_path": (
-            pipeline.SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH
+            pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH
         ),
         "new_x7_inventory_build_authorization_id": "x7_inventory_build_attempt_1",
         "new_x7_inventory_build_authorization_path": (
-            pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH
+            pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH
         ),
         "operational_amendment_only": True,
         "parent_config_file_sha256": (
@@ -836,7 +842,146 @@ def test_x7_amendment_discloses_consumed_failed_x6_and_freezes_receipt_contract(
     }
 
 
-def test_x7_inventory_authorization_counts_and_seven_zip_contract_are_exact() -> None:
+def test_x8_amendment_discloses_consumed_failed_x7_and_normalizes_terminal_zip() -> None:
+    modified_paths = [
+        "configs/trust_sentinel_ood_external_v2_1.yaml",
+        "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+        "src/ecg_trust/ood_v2/inventory.py",
+        "src/ecg_trust/ood_v2/models.py",
+        "src/ecg_trust/ood_v2/pipeline.py",
+        "tests/unit/test_ood_v2_inventory.py",
+        "tests/unit/test_ood_v2_models.py",
+        "tests/unit/test_ood_v2_pipeline.py",
+        "tests/unit/test_ood_v2_protocol_closure.py",
+    ]
+    assert modified_paths == list(
+        pipeline.SUCCESSOR_ARCHIVE_OPERAND_AMENDMENT_MODIFIED_PATHS
+    )
+    payload = _successor_parent_yaml()
+    design = cast(dict[str, Any], payload["design_history"])
+    protected = cast(
+        dict[str, Any],
+        cast(dict[str, Any], payload["revision_boundary"])[
+            "forbidden_private_history"
+        ],
+    )["paths"]
+    assert pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH in protected
+    assert pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH in protected
+
+    assert design["x7_inventory_build_failure"] == {
+        "amendment": (
+            "normalize_the_already_bound_ZZU_terminal_zip_operand_to_its_exact_"
+            "absolute_direct_path_before_isolated_7zip_execution_require_exact_x7_"
+            "marker_and_receipt_and_issue_one_new_x8_authorization"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_x7_implementation_revision": 1,
+            "exact_modified_paths": modified_paths,
+            "sole_parent": pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+            "status_for_every_path": "modified",
+        },
+        "frozen_at_utc": "2026-08-30T06:34:49Z",
+        "implementation_revision": (
+            pipeline.SEVENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+        ),
+        "new_x8_failure_receipt_path": (
+            pipeline.SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH
+        ),
+        "new_x8_inventory_build_authorization_id": "x8_inventory_build_attempt_1",
+        "new_x8_inventory_build_authorization_path": (
+            pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH
+        ),
+        "operational_amendment_only": True,
+        "parent_config_file_sha256": (
+            pipeline.SEVENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+        ),
+        "post_failure_static_code_path_diagnosis": {
+            "absolute_user_path_publication": "forbidden",
+            "archive_member_selection_or_role_change": False,
+            "correction": (
+                "normalize_the_already_bound_terminal_zip_operand_to_its_exact_"
+                "absolute_direct_path_before_every_isolated_7zip_listing_test_or_"
+                "extraction_call"
+            ),
+            "failure_boundary": "zzu_archive_listing",
+            "new_official_source_access_occurred": False,
+            "purpose": "operational_failure_localization_only",
+            "root_cause": (
+                "project_relative_ZZU_terminal_zip_operand_was_interpreted_from_"
+                "the_fresh_isolated_7zip_working_directory"
+            ),
+            "source_free_synthetic_two_volume_probe": {
+                "exact_7zip_version": "26.02",
+                "listed_total_entry_count": 42_586,
+                "listing_elapsed_seconds": 0.34,
+                "listing_output_size_bytes": 12_957_423,
+                "listing_stdout_limit_bytes": 67_108_864,
+                "listing_stdout_limit_fraction": 0.1931,
+                "official_source_or_identifier_accessed": False,
+                "parser_elapsed_seconds": 1.04,
+                "scientific_result_or_claim": False,
+                "small_split_exact_multivolume_marker_observed": True,
+                "small_split_exact_two_volume_count_observed": True,
+                "standard_error": "exact_empty",
+                "standards_compliant_split_archive": True,
+                "synthetic_record_count": 14_190,
+                "synthetic_regular_file_count": 28_380,
+            },
+        },
+        "production_attempt": {
+            "authorization_consumed": True,
+            "authorization_id": "x7_inventory_build_attempt_1",
+            "authorization_marker_artifact_sha256": (
+                pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+            ),
+            "authorization_marker_created": True,
+            "authorization_marker_file_sha256": (
+                pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+            ),
+            "authorization_path": (
+                pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH
+            ),
+            "authorization_state": "CONSUMED_FAILED_RETAINED",
+            "distribution_scoring_occurred": False,
+            "embedding_extraction_occurred": False,
+            "endpoint_or_subgroup_metrics_observed": False,
+            "exact_failure_stage": "zzu_archive_listing",
+            "failure_receipt_artifact_sha256": (
+                pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_ARTIFACT_SHA256
+            ),
+            "failure_receipt_created": True,
+            "failure_receipt_file_sha256": (
+                pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_FILE_SHA256
+            ),
+            "failure_receipt_path": (
+                pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH
+            ),
+            "failure_receipt_state": "PRECLAIM_INVENTORY_BUILD_FAILED",
+            "failure_stage_ordinal": 8,
+            "model_logits_or_probabilities_observed": False,
+            "official_source_content_accessed": True,
+            "outcome": "failed_after_authorization_consumption_before_inventory_output",
+            "output_state": "NONE",
+            "quality_policy_execution_occurred": False,
+            "runtime_cleanup_succeeded": True,
+            "successor_child_execution_contract_created": False,
+            "successor_external_access_armed_marker_created": False,
+            "successor_external_one_shot_claim_created": False,
+            "successor_inventory_created": False,
+            "successor_public_projection_created": False,
+            "waveform_sample_decode_occurred": False,
+        },
+        "scientific_protocol_change": False,
+        "x7_authorization_and_receipt_retention": (
+            "exact_artifacts_permanently_retained_ignored_untracked_and_never_reused"
+        ),
+    }
+
+
+def test_x8_inventory_authorization_counts_and_seven_zip_contract_are_exact() -> None:
     payload = _successor_parent_yaml()
     inventory = cast(dict[str, Any], payload["successor_inventory_contract"])
     assert inventory["exact_zzu_exclusion_counts"] == {
@@ -857,6 +1002,15 @@ def test_x7_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
 
     runtime = cast(dict[str, Any], payload["runtime"])
     seven_zip = cast(dict[str, Any], runtime["split_archive_tool"])
+    assert seven_zip["execution_isolation"]["archive_operand_normalization"] == {
+        "absolute_path_serialization_or_publication": "forbidden",
+        "applies_to_commands": ["listing", "archive_test", "isolated_extraction"],
+        "archive_bytes_members_roles_selection_or_order_changed": False,
+        "direct_ancestry_regular_file_and_stable_identity_reverified": True,
+        "input": "already_bound_project_relative_ZZU_terminal_zip_path",
+        "output": "exact_absolute_direct_archive_path",
+        "timing": "after_exact_direct_archive_binding_before_isolated_process_creation",
+    }
     assert seven_zip["windows_slt_member_path_normalization"] == {
         "accepted_separator_conventions": [
             "forward_slash_only",
@@ -878,7 +1032,7 @@ def test_x7_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
     one_shot = cast(dict[str, Any], payload["one_shot_external_access"])
     assert one_shot["inventory_build_authorization"] == {
         "artifact_type": pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE,
-        "authorization_id": "x7_inventory_build_attempt_1",
+        "authorization_id": "x8_inventory_build_attempt_1",
         "contains_external_source_bytes_or_identifiers": False,
         "contains_model_outputs_embeddings_or_scores": False,
         "creation": "atomic_create_new_no_overwrite",
@@ -892,26 +1046,54 @@ def test_x7_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "maximum_consumptions": 1,
         "path": pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
         "predecessor_authorization_marker_artifact_sha256": (
-            pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+            pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
         ),
         "predecessor_authorization_marker_file_sha256": (
-            pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+            pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
         ),
         "predecessor_authorization_must_remain_present_and_exact": True,
         "predecessor_authorization_path": (
-            pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_PATH
+            pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH
         ),
         "predecessor_authorization_state": "CONSUMED_FAILED_RETAINED",
         "predecessor_consumed_failed_authorization_id": (
-            "x6_inventory_build_attempt_1"
+            "x7_inventory_build_attempt_1"
         ),
+        "predecessor_failure_output_state": "NONE",
+        "predecessor_failure_receipt_artifact_sha256": (
+            pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_ARTIFACT_SHA256
+        ),
+        "predecessor_failure_receipt_file_sha256": (
+            pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_FILE_SHA256
+        ),
+        "predecessor_failure_receipt_must_remain_present_and_exact": True,
+        "predecessor_failure_receipt_path": (
+            pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH
+        ),
+        "predecessor_failure_stage": "zzu_archive_listing",
+        "predecessor_failure_stage_ordinal": 8,
+        "predecessor_official_source_content_accessed": True,
+        "historical_x6_authorization": {
+            "authorization_id": "x6_inventory_build_attempt_1",
+            "marker_artifact_sha256": (
+                pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+            ),
+            "marker_file_sha256": (
+                pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+            ),
+            "must_remain_present_and_exact": True,
+            "path": pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_PATH,
+            "state": "CONSUMED_FAILED_RETAINED",
+        },
         "postconsumption_first_raw_action": (
             "hash_every_official_source_against_exact_parent_size_sha256_and_md5"
         ),
         "preconsumption_requirements": [
             "repeatable_controls_only_preflight_passed_with_no_durable_state",
             "exact_retained_x6_consumed_failed_authorization_marker_verified",
-            "x7_authorization_marker_and_failure_receipt_absent",
+            "exact_retained_x7_consumed_failed_authorization_marker_and_failure_"
+            "receipt_verified",
+            "x8_authorization_marker_and_failure_receipt_absent",
             "exact_frozen_parent_schema_and_count_invariants_verified",
             "exact_canonical_dataset_root_and_raw_source_path_keysets_verified",
             "exact_bound_7zip_tool_identity_verified",
@@ -974,7 +1156,7 @@ def test_x7_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
             "schema_version": 1,
             "state": "PRECLAIM_INVENTORY_BUILD_FAILED",
             "timing": (
-                "exactly_once_after_x7_authorization_consumption_on_any_failure_"
+                "exactly_once_after_x8_authorization_consumption_on_any_failure_"
                 "before_success"
             ),
             "waveform_quality_model_score_logit_probability_or_metric_observation": (
@@ -985,7 +1167,7 @@ def test_x7_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "retention": "permanent",
         "retired_x4_and_x5_authorization_paths_must_remain_absent": True,
         "retry_resume_or_reuse": "forbidden",
-        "scope": "sole_x7_preclaim_inventory_build_attempt",
+        "scope": "sole_x8_preclaim_inventory_build_attempt",
         "timing": (
             "after_exact_preflight_path_schema_and_tool_binding_before_first_"
             "official_source_byte"
@@ -1000,10 +1182,12 @@ def test_x7_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "scope": "after_external_one_shot_claim_entry_first_becomes_visible",
     }
     assert "retry_resume_or_second_inference" not in one_shot
-    assert one_shot["prerequisites"][-5:] == [
+    assert one_shot["prerequisites"][-6:] == [
         "exact_retained_x6_consumed_failed_inventory_build_authorization_marker_verified",
-        "durable_x7_inventory_build_authorization_marker_verified",
-        "x7_inventory_build_failure_receipt_absent",
+        "exact_retained_x7_consumed_failed_inventory_build_authorization_marker_"
+        "and_failure_receipt_verified",
+        "durable_x8_inventory_build_authorization_marker_verified",
+        "x8_inventory_build_failure_receipt_absent",
         "output_root_absent",
         "clean_committed_revision",
     ]
@@ -1064,6 +1248,18 @@ def test_x7_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "x7_inventory_build_attempt_1",
         "artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-attempt.json",
         "artifacts/trust_sentinel/.ood_external_v2_1.x7-inventory-build-failure.json",
+        "207fd1568697adb56991baeccee29ded38d3caf1",
+        "sha256:1da505b37d64dec804f147fa8cfd43a5029fe2ee7d92d1666177d490ea7016e1",
+        "2026-08-30T06:34:49Z",
+        "sha256:8255b58e5c63a4e18ae2a0b7715109106e4f1a949cb68204b66cde9f1fd4af01",
+        "sha256:ec01f1554da7733a4d298161a3d67818dc1edd2fefb663760277070359354830",
+        "sha256:af6995828daad64a6606dfd1875a2ced6daa9ac390e328152488270f5dcffac6",
+        "sha256:02c2d212a1ff4108c9dd10bd67095a94727d5aabb68e0c1e94a2ed9d4304d7d3",
+        "zzu_archive_listing",
+        "x8_inventory_build_attempt_1",
+        "artifacts/trust_sentinel/.ood_external_v2_1.x8-inventory-build-attempt.json",
+        "artifacts/trust_sentinel/.ood_external_v2_1.x8-inventory-build-failure.json",
+        "already-bound ZZU terminal `.zip` operand",
         "PRECLAIM_INVENTORY_BUILD_FAILED",
         "authorization_publication",
         "raw_source_binding_verification",
@@ -1922,6 +2118,8 @@ def test_private_history_query_covers_every_forbidden_path_and_fails_closed(
         pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH,
         pipeline.HISTORICAL_X5_INVENTORY_BUILDER_ATTEMPT_PATH,
         pipeline.HISTORICAL_X6_INVENTORY_BUILDER_ATTEMPT_PATH,
+        pipeline.HISTORICAL_X7_INVENTORY_BUILDER_ATTEMPT_PATH,
+        pipeline.HISTORICAL_X7_INVENTORY_BUILDER_FAILURE_PATH,
         pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
         pipeline.SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH,
         ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",

@@ -2153,6 +2153,15 @@ def build_zzu_split_zip_extraction_closure(
     _assert_direct_ancestry(archive_z01_path, field="ZZU .z01 archive part")
     _assert_direct_ancestry(archive_zip_path, field="ZZU .zip archive part")
     _assert_direct_ancestry(extraction_root, field="ZZU extraction root")
+    # The bound 7-Zip process uses a fresh isolated cwd, so archive operands
+    # must be caller-independent before they cross that process boundary.
+    try:
+        archive_z01_path = archive_z01_path.resolve(strict=True)
+        archive_zip_path = archive_zip_path.resolve(strict=True)
+    except OSError as error:
+        raise ExternalInventoryError("ZZU split archive part is unavailable") from error
+    _assert_direct_ancestry(archive_z01_path, field="resolved ZZU .z01 archive part")
+    _assert_direct_ancestry(archive_zip_path, field="resolved ZZU .zip archive part")
     prefix = _canonical_archive_leaf(archive_root_prefix, "archive_root_prefix")
     try:
         z01_parent = archive_z01_path.parent.resolve(strict=True)
