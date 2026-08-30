@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import _thread
+import importlib.util
 import json
 import os
 import shutil
@@ -12,7 +13,7 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import numpy as np
@@ -342,6 +343,15 @@ def test_successor_preflight_rejects_hash_identical_parent_copy(
             ),
             "0" * 40,
             "successor inventory-builder amendment declaration differs",
+        ),
+        (
+            (
+                "design_history",
+                "x4_runtime_provenance_preflight",
+                "predecessor_inventory_builder_implementation_revision",
+            ),
+            "0" * 40,
+            "successor runtime-preflight amendment declaration differs",
         ),
         (
             ("revision_boundary", "git_execution", "install_root_windows"),
@@ -2082,15 +2092,24 @@ def _amendment_git_runner(
     second_revision_line: str | None = None,
     second_commit_count: str = "1",
     second_diff_stdout: str | None = None,
+    third_revision_line: str | None = None,
+    third_commit_count: str = "1",
+    third_diff_stdout: str | None = None,
     revision_line: str | None = None,
     commit_count: str = "1",
     diff_stdout: str | None = None,
 ) -> Any:
-    resolved_diff = diff_stdout
-    if resolved_diff is None:
-        resolved_diff = "".join(
+    third_diff = third_diff_stdout
+    if third_diff is None:
+        third_diff = "".join(
             f"M\t{path}\n"
             for path in pipeline.SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS
+        )
+    current_diff = diff_stdout
+    if current_diff is None:
+        current_diff = "".join(
+            f"M\t{path}\n"
+            for path in pipeline.SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS
         )
     first_diff = first_diff_stdout
     if first_diff is None:
@@ -2159,26 +2178,51 @@ def _amendment_git_runner(
             "--parents",
             "-n",
             "1",
-            implementation_revision,
-        ): revision_line
+            pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        ): third_revision_line
         or (
-            f"{implementation_revision} "
+            f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
             f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
         ),
         (
             "rev-list",
             "--count",
             f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+        ): f"{third_commit_count}\n",
+        (
+            "diff",
+            "--name-status",
+            "--no-renames",
+            f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}",
+            "--",
+        ): third_diff,
+        (
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            implementation_revision,
+        ): revision_line
+        or (
+            f"{implementation_revision} "
+            f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}\n"
+        ),
+        (
+            "rev-list",
+            "--count",
+            f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
         ): f"{commit_count}\n",
         (
             "diff",
             "--name-status",
             "--no-renames",
-            f"{pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
+            f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION}.."
             f"{implementation_revision}",
             "--",
-        ): resolved_diff,
+        ): current_diff,
     }
 
     def runner(_root: Path, *arguments: str, **_kwargs: object) -> Any:
@@ -2237,6 +2281,14 @@ def test_successor_amendment_revision_binds_parent_blob_and_exact_diff(
             ),
             "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
             "revision": pipeline.THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        },
+        {
+            "context": "fourth frozen successor parent",
+            "expected_file_sha256": (
+                pipeline.FOURTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+            ),
+            "relative_path": pipeline.SUCCESSOR_PARENT_CONFIG_PATH,
+            "revision": pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         },
     ]
 
@@ -2325,14 +2377,19 @@ def test_successor_amendment_revision_rejects_x2_to_x3_drift(
     ("runner_kwargs", "message"),
     (
         (
-            {"revision_line": f"{'d' * 40} {'e' * 40}\n"},
+            {
+                "third_revision_line": (
+                    f"{pipeline.FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION} "
+                    f"{'e' * 40}\n"
+                )
+            },
             "sole direct child",
         ),
-        ({"commit_count": "2"}, "sole direct child"),
-        ({"diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
+        ({"third_commit_count": "2"}, "sole direct child"),
+        ({"third_diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
         (
             {
-                "diff_stdout": "".join(
+                "third_diff_stdout": "".join(
                     f"M\t{path}\n"
                     for path in (
                         pipeline.SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS[
@@ -2345,7 +2402,7 @@ def test_successor_amendment_revision_rejects_x2_to_x3_drift(
         ),
         (
             {
-                "diff_stdout": "".join(
+                "third_diff_stdout": "".join(
                     f"M\t{path}\n"
                     for path in (
                         pipeline.SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS
@@ -2355,10 +2412,75 @@ def test_successor_amendment_revision_rejects_x2_to_x3_drift(
             },
             "paths differ",
         ),
-        ({"diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
+        (
+            {"third_diff_stdout": "R100\told.txt\tnew.txt\n"},
+            "non-modification",
+        ),
     ),
 )
 def test_successor_amendment_revision_rejects_x3_to_x4_lineage_or_diff_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runner_kwargs: dict[str, str],
+    message: str,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(
+        pipeline,
+        "_run_git",
+        _amendment_git_runner(revision, **runner_kwargs),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(pipeline.OODExternalV2IntegrityError, match=message):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+@pytest.mark.parametrize(
+    ("runner_kwargs", "message"),
+    (
+        (
+            {"revision_line": f"{'d' * 40} {'e' * 40}\n"},
+            "sole direct child",
+        ),
+        ({"commit_count": "2"}, "sole direct child"),
+        ({"diff_stdout": "A\tunexpected.txt\n"}, "non-modification"),
+        (
+            {
+                "diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in (
+                        pipeline.SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS[
+                            :-1
+                        ]
+                    )
+                )
+            },
+            "paths differ",
+        ),
+        (
+            {
+                "diff_stdout": "".join(
+                    f"M\t{path}\n"
+                    for path in (
+                        pipeline.SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS
+                    )
+                )
+                + "M\textra.txt\n"
+            },
+            "paths differ",
+        ),
+        ({"diff_stdout": "R100\told.txt\tnew.txt\n"}, "non-modification"),
+    ),
+)
+def test_successor_amendment_revision_rejects_x4_to_x5_lineage_or_diff_drift(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     runner_kwargs: dict[str, str],
@@ -2455,6 +2577,35 @@ def test_successor_amendment_revision_rejects_x3_parent_blob_drift(
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
         match="X3 parent blob differs",
+    ):
+        pipeline._verify_successor_amendment_revision(  # noqa: SLF001
+            tmp_path,
+            implementation_revision=revision,
+        )
+
+
+def test_successor_amendment_revision_rejects_x4_parent_blob_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    revision = "d" * 40
+    monkeypatch.setattr(pipeline, "_run_git", _amendment_git_runner(revision))
+
+    def reject_fourth_parent(
+        _root: Path,
+        **kwargs: object,
+    ) -> None:
+        if kwargs.get("context") == "fourth frozen successor parent":
+            raise pipeline.OODExternalV2IntegrityError("X4 parent blob differs")
+
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_historical_revision_blob",
+        reject_fourth_parent,
+    )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="X4 parent blob differs",
     ):
         pipeline._verify_successor_amendment_revision(  # noqa: SLF001
             tmp_path,
@@ -2813,18 +2964,216 @@ def test_runtime_environment_hash_material_canonicalizes_fresh_owned_roots(
     assert all(str(root) not in repr(observed) for root in roots)
 
 
+def _module_audit_main(
+    project: Path,
+) -> tuple[ModuleType, pipeline.ProjectSourceTreeBinding]:
+    entrypoint = project / "scripts" / "build_trust_sentinel_ood_v2_inventory.py"
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_text("# bound test entrypoint\n", encoding="ascii")
+    main_module = ModuleType("__main__")
+    main_module.__file__ = os.fspath(entrypoint)
+    main_module.__spec__ = importlib.util.spec_from_file_location(
+        "__main__",
+        entrypoint,
+    )
+    source = pipeline.ProjectSourceFileBinding(
+        relative_path=entrypoint.relative_to(project).as_posix(),
+        size_bytes=entrypoint.stat().st_size,
+        file_sha256=sha256_file(entrypoint),
+    )
+    return main_module, pipeline.ProjectSourceTreeBinding(
+        files=(source,),
+        file_count=1,
+        total_bytes=source.size_bytes,
+        tree_sha256="sha256:" + "a" * 64,
+    )
+
+
+def test_module_origin_audit_accepts_only_exact_frozen_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    main_module, binding = _module_audit_main(project)
+    python = tmp_path / "python"
+    site = tmp_path / "site-packages"
+    python.mkdir()
+    site.mkdir()
+    observed: dict[str, ModuleType] = {"__main__": main_module}
+    for registry_name in (
+        "os.path",
+        "importlib._bootstrap",
+        "importlib._bootstrap_external",
+        "importlib.util",
+        "importlib.machinery",
+    ):
+        module = cast(ModuleType, sys.modules[registry_name])
+        canonical_name = cast(str, module.__spec__.name)
+        observed[canonical_name] = module
+        observed[registry_name] = module
+    monkeypatch.setattr(sys, "modules", observed)
+
+    pipeline._verify_all_file_backed_module_origins(  # noqa: SLF001
+        project_root=project,
+        project_sources=binding,
+        python_base_alias=python,
+        python_base_target=python,
+        site_packages=site,
+    )
+
+    observed["forged.alias"] = observed["ntpath"]
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="falsely claims a frozen origin",
+    ):
+        pipeline._verify_all_file_backed_module_origins(  # noqa: SLF001
+            project_root=project,
+            project_sources=binding,
+            python_base_alias=python,
+            python_base_target=python,
+            site_packages=site,
+        )
+
+
+def test_module_origin_audit_accepts_bound_dynamic_empty_namespace_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    main_module, binding = _module_audit_main(project)
+    python = tmp_path / "python"
+    site = tmp_path / "site-packages"
+    python.mkdir()
+    site.mkdir()
+    six_path = site / "six.py"
+    six_path.write_text("# bound six owner\n", encoding="ascii")
+    six_module = ModuleType("six")
+    six_module.__file__ = os.fspath(six_path)
+    six_module.__spec__ = importlib.util.spec_from_file_location("six", six_path)
+    moves_module = ModuleType("six.moves")
+    moves_module.__spec__ = SimpleNamespace(
+        loader=object(),
+        origin=None,
+        submodule_search_locations=(),
+    )
+    observed = {
+        "__main__": main_module,
+        "six": six_module,
+        "six.moves": moves_module,
+    }
+    monkeypatch.setattr(sys, "modules", observed)
+
+    pipeline._verify_all_file_backed_module_origins(  # noqa: SLF001
+        project_root=project,
+        project_sources=binding,
+        python_base_alias=python,
+        python_base_target=python,
+        site_packages=site,
+    )
+
+    del observed["six"]
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="no auditable search location",
+    ):
+        pipeline._verify_all_file_backed_module_origins(  # noqa: SLF001
+            project_root=project,
+            project_sources=binding,
+            python_base_alias=python,
+            python_base_target=python,
+            site_packages=site,
+        )
+
+
+def test_module_origin_audit_binds_relative_placeholders_to_file_backed_owner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    main_module, binding = _module_audit_main(project)
+    python = tmp_path / "python"
+    site = tmp_path / "site-packages"
+    python.mkdir()
+    site.mkdir()
+    torch_path = site / "torch" / "__init__.py"
+    torch_path.parent.mkdir()
+    torch_path.write_text("# bound torch owner\n", encoding="ascii")
+    torch_module = ModuleType("torch")
+    torch_module.__file__ = os.fspath(torch_path)
+    torch_module.__spec__ = importlib.util.spec_from_file_location(
+        "torch",
+        torch_path,
+        submodule_search_locations=[os.fspath(torch_path.parent)],
+    )
+    observed = {
+        "__main__": main_module,
+        "torch": torch_module,
+    }
+    for name, relative_file in (
+        ("torch.ops", "_ops.py"),
+        ("torch.classes", "_classes.py"),
+    ):
+        module = ModuleType(name)
+        module.__file__ = relative_file
+        module.__spec__ = SimpleNamespace(
+            loader=None,
+            origin=None,
+            submodule_search_locations=None,
+        )
+        observed[name] = module
+    monkeypatch.setattr(sys, "modules", observed)
+
+    pipeline._verify_all_file_backed_module_origins(  # noqa: SLF001
+        project_root=project,
+        project_sources=binding,
+        python_base_alias=python,
+        python_base_target=python,
+        site_packages=site,
+    )
+
+    orphan_module = ModuleType("orphan.ops")
+    orphan_module.__file__ = "_orphan_ops.py"
+    orphan_module.__spec__ = SimpleNamespace(
+        loader=None,
+        origin=None,
+        submodule_search_locations=None,
+    )
+    observed["orphan.ops"] = orphan_module
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="originless module has no bound file-backed owner",
+    ):
+        pipeline._verify_all_file_backed_module_origins(  # noqa: SLF001
+            project_root=project,
+            project_sources=binding,
+            python_base_alias=python,
+            python_base_target=python,
+            site_packages=site,
+        )
+
+
 def test_native_module_audit_requires_base_python_not_uv_redirector(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     redirector = tmp_path / "venv" / "Scripts" / "python.exe"
+    base_alias = tmp_path / "python-alias"
     base = tmp_path / "python-base"
     base_python = base / "python.exe"
     site = tmp_path / "venv" / "Lib" / "site-packages"
     system_root = tmp_path / "Windows"
     system32 = system_root / "System32"
     winsxs = system_root / "WinSxS"
-    for directory in (redirector.parent, base, site, system32, winsxs):
+    security_root = tmp_path / "host-security"
+    for directory in (
+        redirector.parent,
+        base_alias,
+        base,
+        site,
+        system32,
+        winsxs,
+        security_root,
+    ):
         directory.mkdir(parents=True, exist_ok=True)
     for path in (
         redirector,
@@ -2834,6 +3183,17 @@ def test_native_module_audit_requires_base_python_not_uv_redirector(
         system32 / "nvcuda.dll",
     ):
         path.write_bytes(b"bound")
+    security_modules = (security_root / "aswAMSI.dll", security_root / "MpOav.dll")
+    for path in security_modules:
+        path.write_bytes(b"security")
+    monkeypatch.setattr(
+        pipeline,
+        "EXPECTED_HOST_SECURITY_NATIVE_MODULES",
+        {
+            os.fspath(path): (path.stat().st_size, sha256_file(path))
+            for path in security_modules
+        },
+    )
     monkeypatch.setenv("SYSTEMROOT", str(system_root))
     monkeypatch.setattr(
         pipeline,
@@ -2847,18 +3207,48 @@ def test_native_module_audit_requires_base_python_not_uv_redirector(
     monkeypatch.setattr(
         pipeline,
         "_loaded_windows_native_module_paths",
-        lambda: (base_python,),
+        lambda: (base_alias / "python.exe", *security_modules),
     )
     pipeline._verify_loaded_native_module_origins(  # noqa: SLF001
         python_executable=redirector,
+        python_base_alias=base_alias,
         python_base_target=base,
         site_packages=site,
     )
 
+    security_modules[0].write_bytes(b"tampered")
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="bound host-security native module differs",
+    ):
+        pipeline._verify_loaded_native_module_origins(  # noqa: SLF001
+            python_executable=redirector,
+            python_base_alias=base_alias,
+            python_base_target=base,
+            site_packages=site,
+        )
+    security_modules[0].write_bytes(b"security")
+
     monkeypatch.setattr(
         pipeline,
         "_loaded_windows_native_module_paths",
-        lambda: (redirector,),
+        lambda: (base_alias / "python.exe", security_modules[0]),
+    )
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="host-security native module set differs",
+    ):
+        pipeline._verify_loaded_native_module_origins(  # noqa: SLF001
+            python_executable=redirector,
+            python_base_alias=base_alias,
+            python_base_target=base,
+            site_packages=site,
+        )
+
+    monkeypatch.setattr(
+        pipeline,
+        "_loaded_windows_native_module_paths",
+        lambda: (redirector, *security_modules),
     )
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
@@ -2866,6 +3256,7 @@ def test_native_module_audit_requires_base_python_not_uv_redirector(
     ):
         pipeline._verify_loaded_native_module_origins(  # noqa: SLF001
             python_executable=redirector,
+            python_base_alias=base_alias,
             python_base_target=base,
             site_packages=site,
         )
@@ -3055,10 +3446,10 @@ def test_inventory_builder_preflight_binds_frozen_runtime_and_source(
 
     (root / parent.output_root).mkdir()
     with pytest.raises(
-        pipeline.OODExternalV2IntegrityError,
-        match="output root must be absent",
-    ):
+        pipeline.InventoryBuilderPreflightStageError,
+    ) as refusal:
         pipeline.verify_inventory_builder_preflight(parent_path, root, revision)
+    assert refusal.value.stage == "namespace_state"
 
 
 def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim(
@@ -3101,6 +3492,19 @@ def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim
     marker_payload = json.loads(marker.read_bytes())
     assert marker_payload["consumption_ordinal"] == 1
     assert marker_payload["maximum_consumptions"] == 1
+    assert marker_payload["authorization_id"] == "x5_inventory_build_attempt_1"
+    assert marker_payload["schema_version"] == 2
+    assert marker_payload["superseded_authorization_id"] == (
+        "x4_inventory_build_attempt_1"
+    )
+    assert marker_payload["superseded_authorization_consumed"] is False
+    assert marker_payload["superseded_authorization_path"] == (
+        pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
+    )
+    assert marker_payload["superseded_authorization_state"] == "RETIRED_UNCONSUMED"
+    assert not (
+        root / pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
+    ).exists()
     assert (
         marker_payload["external_one_shot_claim_consumed_at_marker_creation"]
         is False
@@ -3111,7 +3515,7 @@ def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim
 
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
-        match="authorization is already consumed",
+        match="authorization is unavailable",
     ):
         pipeline.consume_inventory_builder_authorization(
             preflight,
@@ -3127,6 +3531,52 @@ def test_inventory_builder_authorization_is_durable_single_use_and_not_the_claim
             preflight,
             project_root=root,
         )
+
+
+def test_inventory_builder_authorization_rejects_retired_x4_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    marker_parent = root / "artifacts" / "trust_sentinel"
+    marker_parent.mkdir(parents=True)
+    revision = "a" * 40
+    preflight = pipeline.InventoryBuilderPreflight(
+        status="INVENTORY_BUILDER_PREFLIGHT_VERIFIED",
+        parent_config_file_sha256="sha256:" + "b" * 64,
+        implementation_revision=revision,
+        project_source_tree_sha256="sha256:" + "c" * 64,
+        python_environment_sha256="sha256:" + "d" * 64,
+        git_runtime_tree_sha256="sha256:" + "e" * 64,
+        raw_source_bindings={},
+        seven_zip_tool_binding=cast(Any, object()),
+        inventory_counts=cast(Any, object()),
+    )
+    historical_marker = (
+        root / pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
+    )
+    historical_marker.write_bytes(b"{}\n")
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda _root: root)
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_clean_git_revision",
+        lambda _root: revision,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(
+        pipeline.OODExternalV2IntegrityError,
+        match="retired X4 inventory builder authorization is unavailable",
+    ):
+        pipeline.consume_inventory_builder_authorization(
+            preflight,
+            project_root=root,
+        )
+    assert not (root / pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH).exists()
 
 
 def test_child_attempt_verification_reconstructs_x_identity_without_x_head_preflight(
@@ -3330,6 +3780,11 @@ def test_inventory_builder_marker_visibility_blocks_retry_after_directory_fsync_
     )
     monkeypatch.setattr(
         pipeline,
+        "_require_git_ignored_and_untracked",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
         "_fsync_directory",
         lambda _path: (_ for _ in ()).throw(OSError("injected directory fsync failure")),
     )
@@ -3347,7 +3802,7 @@ def test_inventory_builder_marker_visibility_blocks_retry_after_directory_fsync_
     assert marker.is_file()
     with pytest.raises(
         pipeline.OODExternalV2IntegrityError,
-        match="authorization is already consumed",
+        match="authorization is unavailable",
     ):
         pipeline.consume_inventory_builder_authorization(
             preflight,

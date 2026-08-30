@@ -306,7 +306,10 @@ from ecg_trust.ood_v2.inventory import (  # noqa: E402
     verify_wfdb_candidate_file_set,
 )
 from ecg_trust.ood_v2.pipeline import (  # noqa: E402
+    InventoryBuilderPreflight,
+    InventoryBuilderPreflightStageError,
     consume_inventory_builder_authorization,
+    verify_inventory_builder_authorization_available,
     verify_inventory_builder_input_contract,
     verify_inventory_builder_postflight,
     verify_inventory_builder_preflight,
@@ -348,6 +351,25 @@ SUCCESSOR_PUBLIC_PROJECTION_PATH = Path(
 
 class InventoryCLIError(ValueError):
     """Raised when official inputs or immutable outputs violate the CLI contract."""
+
+
+INVENTORY_CONTROLS_STAGES = (
+    "output_destinations",
+    "metadata_schema",
+    "input_contract",
+    "authorization_state",
+    "control_stability",
+)
+
+
+class InventoryControlsStageError(InventoryCLIError):
+    """Sanitized, allowlisted refusal from the shared pre-consumption path."""
+
+    def __init__(self, stage: str) -> None:
+        if stage not in INVENTORY_CONTROLS_STAGES:
+            raise ValueError("inventory controls stage is not allowlisted")
+        self.stage = stage
+        super().__init__(f"inventory controls refused at stage {stage}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -446,6 +468,13 @@ class InventoryInputPaths:
     zzu_archive_z01: Path | None = None
     zzu_archive_zip: Path | None = None
     seven_zip_executable: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedInventoryControls:
+    preflight: InventoryBuilderPreflight
+    inputs: InventoryInputPaths
+    schema: ZZUMetadataSchema
 
 
 @dataclass(frozen=True, slots=True)
@@ -1303,10 +1332,19 @@ def _verify_production_output_destinations(
         raise InventoryCLIError("inventory outputs must use the exact successor namespace")
     for destination in (requested_private, requested_public):
         _assert_direct_existing_ancestry(destination)
+        if destination.exists() or _is_indirect(destination):
+            raise InventoryCLIError(
+                "inventory output destinations must be absent before authorization"
+            )
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="verify every pre-consumption control and exit without durable state",
+    )
     parser.add_argument(
         "--parent",
         type=Path,
@@ -1338,39 +1376,51 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_inventory_build(arguments: argparse.Namespace) -> InventoryCLIResult:
+def _verify_inventory_preconsumption_controls(
+    arguments: argparse.Namespace,
+) -> PreparedInventoryControls:
+    """Run the exact shared prefix that has no raw-content or write capability."""
+
     _, project_root, _, _ = _project_layout()
     preflight = verify_inventory_builder_preflight(
         arguments.parent,
         project_root,
         arguments.implementation_revision,
     )
-    _verify_production_output_destinations(
-        arguments.private_output,
-        arguments.public_output,
-    )
-    inputs = InventoryInputPaths(
-        challenge_root=arguments.challenge_root,
-        challenge_archive=arguments.challenge_archive,
-        challenge_records=arguments.challenge_records,
-        challenge_acceptable=arguments.challenge_acceptable,
-        challenge_unacceptable=arguments.challenge_unacceptable,
-        zzu_root=arguments.zzu_root,
-        zzu_archive_z01=arguments.zzu_archive_z01,
-        zzu_archive_zip=arguments.zzu_archive_zip,
-        seven_zip_executable=arguments.seven_zip_executable,
-        zzu_metadata=arguments.zzu_metadata,
-    )
-    schema = ZZUMetadataSchema(
-        record_column=arguments.zzu_record_column,
-        ecg_id_column=arguments.zzu_ecg_id_column,
-        patient_column=arguments.zzu_patient_column,
-        lead_count_column=arguments.zzu_lead_count_column,
-        sampling_point_column=arguments.zzu_sampling_point_column,
-        delimiter=_delimiter(arguments.zzu_delimiter),
-    )
-    if schema != ZZUMetadataSchema():
-        raise InventoryCLIError("production ZZU metadata schema differs from the frozen contract")
+    try:
+        _verify_production_output_destinations(
+            arguments.private_output,
+            arguments.public_output,
+        )
+    except Exception as error:
+        raise InventoryControlsStageError("output_destinations") from error
+    try:
+        inputs = InventoryInputPaths(
+            challenge_root=arguments.challenge_root,
+            challenge_archive=arguments.challenge_archive,
+            challenge_records=arguments.challenge_records,
+            challenge_acceptable=arguments.challenge_acceptable,
+            challenge_unacceptable=arguments.challenge_unacceptable,
+            zzu_root=arguments.zzu_root,
+            zzu_archive_z01=arguments.zzu_archive_z01,
+            zzu_archive_zip=arguments.zzu_archive_zip,
+            seven_zip_executable=arguments.seven_zip_executable,
+            zzu_metadata=arguments.zzu_metadata,
+        )
+        schema = ZZUMetadataSchema(
+            record_column=arguments.zzu_record_column,
+            ecg_id_column=arguments.zzu_ecg_id_column,
+            patient_column=arguments.zzu_patient_column,
+            lead_count_column=arguments.zzu_lead_count_column,
+            sampling_point_column=arguments.zzu_sampling_point_column,
+            delimiter=_delimiter(arguments.zzu_delimiter),
+        )
+        if schema != ZZUMetadataSchema():
+            raise InventoryCLIError(
+                "production ZZU metadata schema differs from the frozen contract"
+            )
+    except Exception as error:
+        raise InventoryControlsStageError("metadata_schema") from error
     dataset_roots = {
         CHALLENGE_2011_DATASET: inputs.challenge_root,
         ZZU_PEDIATRIC_DATASET: inputs.zzu_root,
@@ -1384,13 +1434,55 @@ def run_inventory_build(arguments: argparse.Namespace) -> InventoryCLIResult:
         "zzu_archive_zip": arguments.zzu_archive_zip,
         "zzu_attributes_dictionary": arguments.zzu_metadata,
     }
-    verify_inventory_builder_input_contract(
-        preflight,
-        project_root=project_root,
-        dataset_roots=dataset_roots,
-        raw_source_paths=raw_source_paths,
-        seven_zip_executable=arguments.seven_zip_executable,
+    try:
+        verify_inventory_builder_input_contract(
+            preflight,
+            project_root=project_root,
+            dataset_roots=dataset_roots,
+            raw_source_paths=raw_source_paths,
+            seven_zip_executable=arguments.seven_zip_executable,
+        )
+    except Exception as error:
+        raise InventoryControlsStageError("input_contract") from error
+    try:
+        verify_inventory_builder_authorization_available(
+            preflight,
+            project_root=project_root,
+        )
+    except Exception as error:
+        raise InventoryControlsStageError("authorization_state") from error
+    try:
+        _verify_production_output_destinations(
+            arguments.private_output,
+            arguments.public_output,
+        )
+        verify_inventory_builder_authorization_available(
+            preflight,
+            project_root=project_root,
+        )
+    except Exception as error:
+        raise InventoryControlsStageError("control_stability") from error
+    return PreparedInventoryControls(
+        preflight=preflight,
+        inputs=inputs,
+        schema=schema,
     )
+
+
+def run_inventory_preflight_only(
+    arguments: argparse.Namespace,
+) -> InventoryBuilderPreflight:
+    """Repeatably verify the exact no-write, pre-consumption boundary."""
+
+    return _verify_inventory_preconsumption_controls(arguments).preflight
+
+
+def run_inventory_build(arguments: argparse.Namespace) -> InventoryCLIResult:
+    controls = _verify_inventory_preconsumption_controls(arguments)
+    _, project_root, _, _ = _project_layout()
+    preflight = controls.preflight
+    inputs = controls.inputs
+    schema = controls.schema
     consume_inventory_builder_authorization(preflight, project_root=project_root)
     verify_inventory_builder_raw_source_bindings(preflight, project_root=project_root)
     counts = preflight.inventory_counts
@@ -1447,8 +1539,63 @@ def run_inventory_build(arguments: argparse.Namespace) -> InventoryCLIResult:
     return result
 
 
+def _controls_report(*, status: str, stage: str) -> str:
+    code_stage = stage.replace("_", "-").upper()
+    return json.dumps(
+        {
+            "authorization_consumed": False,
+            "code": f"OODV2-PF-{code_stage}",
+            "official_source_content_accessed": False,
+            "protocol_artifact_written": False,
+            "stage": stage,
+            "status": status,
+        },
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
+    if arguments.preflight_only:
+        try:
+            run_inventory_preflight_only(arguments)
+        except InventoryBuilderPreflightStageError as error:
+            print(
+                _controls_report(
+                    status="OOD_V2_INVENTORY_PREFLIGHT_REFUSED",
+                    stage=error.stage,
+                ),
+                file=sys.stderr,
+            )
+            return 3
+        except InventoryControlsStageError as error:
+            print(
+                _controls_report(
+                    status="OOD_V2_INVENTORY_PREFLIGHT_REFUSED",
+                    stage=error.stage,
+                ),
+                file=sys.stderr,
+            )
+            return 3
+        except Exception:
+            print(
+                _controls_report(
+                    status="OOD_V2_INVENTORY_PREFLIGHT_REFUSED",
+                    stage="unclassified",
+                ),
+                file=sys.stderr,
+            )
+            return 3
+        print(
+            _controls_report(
+                status="OOD_V2_INVENTORY_PREFLIGHT_VERIFIED",
+                stage="complete",
+            )
+        )
+        return 0
     try:
         result = run_inventory_build(arguments)
     except Exception:

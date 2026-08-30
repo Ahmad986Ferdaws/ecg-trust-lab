@@ -187,7 +187,7 @@ EXPECTED_PARENT_CONFIG_SHA256: Final = (
     "sha256:3aacb31be939d1a2bea96bb29f193d60a4b54c38a40a1a7e2a490cfe60c3b0d9"
 )
 EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256: Final[str | None] = (
-    "sha256:ac3653cd3a83d8d963531e54566487749c0faf03b5bc816ae66bdbde7f21927c"
+    "sha256:d4c3145985219fd65c9a5a4800773427cecd1f099b9e7ab75958596b7a995c61"
 )
 SUCCESSOR_PROTOCOL_ID: Final = PROTOCOL_ID
 PREDECESSOR_TERMINATION_PATH: Final = (
@@ -224,8 +224,11 @@ SUCCESSOR_OUTPUT_PATH: Final = "artifacts/trust_sentinel/ood_external_v2_1"
 SUCCESSOR_CLAIM_PATH: Final = (
     "artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json"
 )
-SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
+HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
     "artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json"
+)
+SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH: Final = (
+    "artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json"
 )
 SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE: Final = (
     "ecg_trust.ood_external_v2_1_inventory_builder_attempt"
@@ -238,6 +241,7 @@ FORBIDDEN_GIT_HISTORY_PATHS: Final[tuple[str, ...]] = (
     SUCCESSOR_OUTPUT_PATH,
     PREDECESSOR_CLAIM_PATH,
     SUCCESSOR_CLAIM_PATH,
+    HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH,
     SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
     ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
     ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**",
@@ -397,6 +401,27 @@ EXPECTED_NVIDIA_DRIVER_FILES: Final[
             4_466_920,
             "sha256:ec9942ff94bcf2a6714531932720d0d36bd1f362df768af9ae21f2388c08ef7c",
         ),
+    }
+)
+EXPECTED_HOST_SECURITY_NATIVE_MODULES: Final[
+    Mapping[str, tuple[int, str]]
+] = MappingProxyType(
+    {
+        r"C:\Program Files\Norton\Suite\aswAMSI.dll": (
+            1_007_544,
+            "sha256:5cb95df5fe2800f297c223fff08c710a0409c4c88b89f07b60ef33d2e2e2704c",
+        ),
+        r"C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.26070.9-0\MpOav.dll": (
+            673_816,
+            "sha256:2d5e72b81c236db1fd30978e2ad6a20d241945090b90f2cc2a36993469dc144f",
+        ),
+    }
+)
+ALLOWED_FROZEN_MODULE_ALIASES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "importlib._bootstrap": "_frozen_importlib",
+        "importlib._bootstrap_external": "_frozen_importlib_external",
+        "os.path": "ntpath",
     }
 )
 EXPECTED_RUNTIME_SYS_PATH_LAYOUT: Final[tuple[str, ...]] = (
@@ -677,6 +702,12 @@ THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
 THIRD_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
     "sha256:9b0358be1d4a12ca1771c57d8387c1b332bbef5698e01d3da2707f59157a586c"
 )
+FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
+    "6b04c5c6308cfddd9a3b2b06f1ebbe24acc961e9"
+)
+FOURTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
+    "sha256:ac3653cd3a83d8d963531e54566487749c0faf03b5bc816ae66bdbde7f21927c"
+)
 SUCCESSOR_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "configs/trust_sentinel_ood_external_v2_1.yaml",
     "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
@@ -708,6 +739,17 @@ SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "tests/unit/test_ood_v2_pipeline.py",
     "tests/unit/test_ood_v2_protocol_closure.py",
 )
+SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
+    "configs/trust_sentinel_ood_external_v2_1.yaml",
+    "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+    "scripts/build_trust_sentinel_ood_v2_inventory.py",
+    "src/ecg_trust/ood_v2/models.py",
+    "src/ecg_trust/ood_v2/pipeline.py",
+    "tests/unit/test_ood_v2_inventory_cli.py",
+    "tests/unit/test_ood_v2_models.py",
+    "tests/unit/test_ood_v2_pipeline.py",
+    "tests/unit/test_ood_v2_protocol_closure.py",
+)
 _ARCHIVE_MEMBER_ROLES: Final[tuple[str, ...]] = (
     "ignored_release_file",
     "quality_reference",
@@ -733,6 +775,25 @@ class OODExternalV2IntegrityError(RuntimeError):
 
 class OODExternalV2ExecutionError(RuntimeError):
     """Raised when a one-shot v2 execution cannot complete safely."""
+
+
+INVENTORY_BUILDER_PREFLIGHT_STAGES: Final[tuple[str, ...]] = (
+    "parent_lineage",
+    "runtime_environment",
+    "git_source_provenance",
+    "namespace_state",
+    "closing_control_state",
+)
+
+
+class InventoryBuilderPreflightStageError(OODExternalV2IntegrityError):
+    """Sanitized, controls-only inventory-preflight stage refusal."""
+
+    def __init__(self, stage: str) -> None:
+        if stage not in INVENTORY_BUILDER_PREFLIGHT_STAGES:
+            raise ValueError("inventory builder preflight stage is not allowlisted")
+        self.stage = stage
+        super().__init__(f"inventory builder preflight refused at stage {stage}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1674,6 +1735,64 @@ def verify_successor_parent_preflight(
         raise OODExternalV2ConfigError(
             "successor inventory-builder amendment declaration differs"
         )
+    runtime_preflight_amendment = _mapping(
+        design.get("x4_runtime_provenance_preflight"),
+        "successor runtime-preflight amendment",
+    )
+    expected_runtime_preflight_amendment = {
+        "amendment": (
+            "validate_canonical_frozen_modules_dynamic_namespaces_python_alias_"
+            "native_images_and_exact_host_security_modules_add_controls_only_"
+            "preflight_and_issue_unconsumed_x5_authorization"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_predecessor_inventory_builder_revision": 1,
+            "exact_modified_paths": list(
+                SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS
+            ),
+            "sole_parent": FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+            "status_for_every_path": "modified",
+        },
+        "controls_only_engineering_triage_observed_follow_on_runtime_refusals": True,
+        "new_successor_external_source_archive_header_record_metadata_or_"
+        "waveform_byte_read": False,
+        "new_successor_trained_checkpoint_or_inference_access_occurred": False,
+        "new_x5_inventory_build_authorization_id": "x5_inventory_build_attempt_1",
+        "observed_failure": "module_falsely_claims_a_frozen_origin",
+        "operational_amendment_only": True,
+        "outcome": "refused_before_x4_inventory_build_authorization_consumption",
+        "predecessor_inventory_builder_frozen_at_utc": "2026-08-30T02:00:56Z",
+        "predecessor_inventory_builder_implementation_revision": (
+            FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+        ),
+        "predecessor_inventory_builder_parent_config_file_sha256": (
+            FOURTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+        ),
+        "root_causes": [
+            "legitimate_frozen_module_aliases_were_compared_to_sys_modules_keys",
+            "empty_dynamic_six_moves_namespace_was_rejected_before_its_bound_owner",
+            "relative_torch_dynamic_namespace_placeholders_were_treated_as_file_origins",
+            "verified_cpython_alias_native_paths_were_not_mapped_to_the_bound_target",
+            "host_injected_security_modules_were_not_exactly_bound",
+        ],
+        "scientific_protocol_change": False,
+        "successor_external_access_armed_marker_created": False,
+        "successor_external_one_shot_claim_created": False,
+        "successor_inventory_created": False,
+        "successor_output_root_created": False,
+        "successor_parent_protocol_byte_read": True,
+        "x4_inventory_build_authorization_consumed": False,
+        "x4_inventory_build_authorization_id": "x4_inventory_build_attempt_1",
+        "x4_inventory_build_authorization_marker_created": False,
+        "x4_inventory_build_authorization_path": (
+            HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
+        ),
+        "x4_inventory_build_authorization_state": "RETIRED_UNCONSUMED",
+    }
+    if runtime_preflight_amendment != expected_runtime_preflight_amendment:
+        raise OODExternalV2ConfigError(
+            "successor runtime-preflight amendment declaration differs"
+        )
     revision_boundary = _mapping(
         payload.get("revision_boundary"),
         "successor revision boundary",
@@ -2017,7 +2136,7 @@ def verify_successor_parent_preflight(
         raise OODExternalV2ConfigError("successor namespace paths differ")
     if inventory_authorization != {
         "artifact_type": SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE,
-        "authorization_id": "x4_inventory_build_attempt_1",
+        "authorization_id": "x5_inventory_build_attempt_1",
         "contains_external_source_bytes_or_identifiers": False,
         "contains_model_outputs_embeddings_or_scores": False,
         "creation": "atomic_create_new_no_overwrite",
@@ -2036,6 +2155,7 @@ def verify_successor_parent_preflight(
             "hash_every_official_source_against_exact_parent_size_sha256_and_md5"
         ),
         "preconsumption_requirements": [
+            "repeatable_controls_only_preflight_passed_with_no_durable_state",
             "exact_frozen_parent_schema_and_count_invariants_verified",
             "exact_canonical_dataset_root_and_raw_source_path_keysets_verified",
             "exact_bound_7zip_tool_identity_verified",
@@ -2043,7 +2163,14 @@ def verify_successor_parent_preflight(
         ],
         "retention": "permanent",
         "retry_resume_or_reuse": "forbidden",
-        "scope": "sole_x4_preclaim_inventory_build_attempt",
+        "scope": "sole_x5_preclaim_inventory_build_attempt",
+        "superseded_authorization_consumed": False,
+        "superseded_authorization_must_remain_absent": True,
+        "superseded_authorization_path": (
+            HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
+        ),
+        "superseded_authorization_state": "RETIRED_UNCONSUMED",
+        "supersedes_unconsumed_authorization_id": "x4_inventory_build_attempt_1",
         "timing": (
             "after_exact_preflight_path_schema_and_tool_binding_before_first_"
             "official_source_byte"
@@ -2071,7 +2198,7 @@ def verify_successor_parent_preflight(
             "exact_raw_source_hashes_and_semantic_roles_rederived",
             "exact_python_scientific_package_tree_and_7zip_identities_verified",
             "quality_implementation_hash_verified",
-            "durable_x4_inventory_build_authorization_marker_verified",
+            "durable_x5_inventory_build_authorization_marker_verified",
             "output_root_absent",
             "clean_committed_revision",
         ]
@@ -2110,6 +2237,69 @@ def verify_successor_parent_preflight(
         raise OODExternalV2ConfigError("successor raw source paths differ")
 
     runtime = _mapping(payload.get("runtime"), "successor runtime")
+    module_audit = _mapping(
+        runtime.get("loaded_module_origin_audit"),
+        "successor loaded-module audit",
+    )
+    if module_audit != {
+        "all_sys_modules_entries_checked": True,
+        "built_in_and_frozen_loader_ownership_verified": True,
+        "cpython_alias_native_paths_mapped_to_exact_resolved_target": True,
+        "dynamic_originless_namespace_requires_bound_file_backed_owner": True,
+        "every_loaded_native_image_enumerated": True,
+        "exact_main_must_be_one_of_four_bound_operational_entrypoints": True,
+        "frozen_module_canonical_spec_and_exact_alias_map_verified": True,
+        "host_security_native_module_set": "exact_required_paths_sizes_and_sha256",
+        "host_security_native_modules": [
+            {
+                "path": path,
+                "sha256": digest.removeprefix("sha256:"),
+                "size_bytes": size,
+            }
+            for path, (size, digest) in EXPECTED_HOST_SECURITY_NATIVE_MODULES.items()
+        ],
+        "namespace_search_locations_must_enter_bound_trees": True,
+        "non_OS_native_images_must_enter_complete_cpython_or_site_packages_tree": True,
+        "process_main_image": "exact_resolved_cpython_base_tree_python_exe",
+        "pyc_pyo_and_unbound_file_origins": "forbidden",
+        "uv_redirector": (
+            "separately_hash_bound_but_not_required_to_remain_loaded"
+        ),
+    }:
+        raise OODExternalV2ConfigError(
+            "successor loaded-module audit declaration differs"
+        )
+    isolated_launcher = _mapping(
+        runtime.get("isolated_launcher"),
+        "successor isolated launcher",
+    )
+    inventory_builder_boundary = _mapping(
+        isolated_launcher.get("inventory_builder_boundary"),
+        "successor inventory builder boundary",
+    )
+    if inventory_builder_boundary != {
+        "controls_only_failure_disclosure": (
+            "stable_stage_code_without_exception_path_or_external_identifier"
+        ),
+        "controls_only_mode": (
+            "exact_shared_preconsumption_path_repeatable_no_marker_raw_content_"
+            "or_output_write"
+        ),
+        "historical_x4_and_current_x5_authorization_paths_checked_before_"
+        "authorization": True,
+        "postflight_before_success_report": (
+            "exact_same_preflight_plus_strict_private_public_output_hashes"
+        ),
+        "preflight_before_any_raw_or_inventory_read": (
+            "frozen_parent_clean_X_live_remote_history_runtime_git_source_main_"
+            "and_absent_claim_output"
+        ),
+        "private_public_inventory_destinations_must_be_absent_before_"
+        "authorization": True,
+    }:
+        raise OODExternalV2ConfigError(
+            "successor inventory builder boundary declaration differs"
+        )
     tool_payload = _mapping(runtime.get("split_archive_tool"), "split archive tool")
     tool = SevenZipToolBinding(
         implementation=_exact_string(
@@ -3626,7 +3816,7 @@ def _verify_successor_amendment_revision(
     )
     _verify_exact_modification_child(
         project_root,
-        child_revision=revision,
+        child_revision=FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         parent_revision=THIRD_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         modified_paths=SUCCESSOR_INVENTORY_BUILDER_AMENDMENT_MODIFIED_PATHS,
         context="inventory-builder successor amendment",
@@ -3637,6 +3827,20 @@ def _verify_successor_amendment_revision(
         relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
         expected_file_sha256=THIRD_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
         context="third frozen successor parent",
+    )
+    _verify_exact_modification_child(
+        project_root,
+        child_revision=revision,
+        parent_revision=FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        modified_paths=SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS,
+        context="runtime-preflight successor amendment",
+    )
+    _verify_historical_revision_blob(
+        project_root,
+        revision=FOURTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=FOURTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        context="fourth frozen successor parent",
     )
 
 
@@ -3939,7 +4143,9 @@ def _verify_all_file_backed_module_origins(
         spec = getattr(module, "__spec__", None)
         raw_origin = getattr(spec, "origin", None)
         if raw_origin is None:
-            raw_origin = getattr(module, "__file__", None)
+            raw_file = getattr(module, "__file__", None)
+            if isinstance(raw_file, str) and Path(raw_file).is_absolute():
+                raw_origin = raw_file
         if raw_origin == "built-in":
             if (
                 name not in sys.builtin_module_names
@@ -3951,9 +4157,29 @@ def _verify_all_file_backed_module_origins(
                 )
             continue
         if raw_origin == "frozen":
+            canonical_name = getattr(spec, "name", None)
+            try:
+                canonical_spec = (
+                    None
+                    if not isinstance(canonical_name, str) or not canonical_name
+                    else importlib.machinery.FrozenImporter.find_spec(canonical_name)
+                )
+            except (AttributeError, ImportError, ValueError):
+                canonical_spec = None
+            alias_is_exact = name == canonical_name or (
+                ALLOWED_FROZEN_MODULE_ALIASES.get(name) == canonical_name
+            )
             if (
-                name not in sys.stdlib_module_names
+                not isinstance(canonical_name, str)
+                or not canonical_name
+                or canonical_name.partition(".")[0] not in sys.stdlib_module_names
+                or not alias_is_exact
+                or sys.modules.get(canonical_name) is not module
                 or getattr(spec, "loader", None)
+                is not importlib.machinery.FrozenImporter
+                or canonical_spec is None
+                or canonical_spec.origin != "frozen"
+                or getattr(canonical_spec, "loader", None)
                 is not importlib.machinery.FrozenImporter
             ):
                 raise OODExternalV2IntegrityError(
@@ -3965,6 +4191,8 @@ def _verify_all_file_backed_module_origins(
             if locations is not None:
                 raw_locations = tuple(locations)
                 if not raw_locations:
+                    if has_bound_dynamic_owner(name):
+                        continue
                     raise OODExternalV2IntegrityError(
                         "namespace module has no auditable search location"
                     )
@@ -5769,90 +5997,113 @@ def verify_inventory_builder_preflight(
 ) -> InventoryBuilderPreflight:
     """Prove the frozen metadata-only builder boundary before raw-byte access."""
 
-    root = _strict_project_root(project_root)
-    revision = _revision(implementation_revision, "inventory implementation revision")
-    _verify_successor_amendment_revision(
-        root,
-        implementation_revision=revision,
-    )
-    expected_parent = root.joinpath(
-        *PurePosixPath(SUCCESSOR_PARENT_CONFIG_PATH).parts
-    )
-    parent = _load_parent_for_operation(parent_path, project_root=root)
-    assert_external_v2_parent_executable(parent)
-    if (
-        parent.path != expected_parent
-        or parent.status != "frozen_parent_preregistration_pre_waveform"
-        or parent.file_sha256 != EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256
-    ):
-        raise OODExternalV2IntegrityError(
-            "inventory builder requires the exact frozen successor parent"
+    try:
+        root = _strict_project_root(project_root)
+        revision = _revision(
+            implementation_revision,
+            "inventory implementation revision",
         )
-
-    # Runtime verification includes the full CPython/site/Git/NVIDIA trees,
-    # exact isolated launcher state, __main__, and all loaded module images.
-    runtime = _current_runtime_environment()
-    source_tree = _build_project_source_tree(root)
-    if _verify_clean_git_revision(root) != revision:
-        raise OODExternalV2IntegrityError(
-            "inventory builder HEAD differs from the implementation revision"
+        _verify_successor_amendment_revision(
+            root,
+            implementation_revision=revision,
         )
-    _verify_git_remote_state(root, expected_revision=revision)
-    _verify_private_history_absent(root)
-    _verify_tracked_head_blob(
-        root,
-        revision=revision,
-        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
-        expected_file_sha256=parent.file_sha256,
-    )
-    _verify_project_source_tree_at_revisions(
-        root,
-        source_tree,
-        implementation_revision=revision,
-        execution_revision=None,
-    )
-    _verify_imported_project_module_origins(root, source_tree)
-
-    output_root = _resolve_project_relative(
-        root,
-        parent.output_root,
-        require_file=False,
-    )
-    claim_path = _resolve_project_relative(
-        root,
-        parent.claim_path,
-        require_file=False,
-    )
-    for candidate, context in (
-        (output_root, "successor output root"),
-        (claim_path, "successor one-shot claim"),
-    ):
-        if candidate.exists() or _is_indirect(candidate):
+        expected_parent = root.joinpath(
+            *PurePosixPath(SUCCESSOR_PARENT_CONFIG_PATH).parts
+        )
+        parent = _load_parent_for_operation(parent_path, project_root=root)
+        assert_external_v2_parent_executable(parent)
+        if (
+            parent.path != expected_parent
+            or parent.status != "frozen_parent_preregistration_pre_waveform"
+            or parent.file_sha256 != EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256
+        ):
             raise OODExternalV2IntegrityError(
-                f"{context} must be absent before inventory construction"
+                "inventory builder requires the exact frozen successor parent"
             )
-        _assert_direct_ancestry(
-            candidate.parent,
-            context=f"{context} parent",
-        )
-    _assert_no_marked_staging_retry(output_root)
+    except Exception as error:
+        raise InventoryBuilderPreflightStageError("parent_lineage") from error
 
-    # Close the long runtime/Git probe against a late source or index change.
-    if (
-        _verify_clean_git_revision(root) != revision
-        or _build_project_source_tree(root) != source_tree
-    ):
-        raise OODExternalV2IntegrityError(
-            "inventory builder controls changed during preflight"
+    try:
+        # This includes the complete CPython/site/Git/NVIDIA trees, isolated
+        # launcher state, __main__, Python modules, and loaded native images.
+        runtime = _current_runtime_environment()
+        source_tree = _build_project_source_tree(root)
+    except Exception as error:
+        raise InventoryBuilderPreflightStageError("runtime_environment") from error
+
+    try:
+        if _verify_clean_git_revision(root) != revision:
+            raise OODExternalV2IntegrityError(
+                "inventory builder HEAD differs from the implementation revision"
+            )
+        _verify_git_remote_state(root, expected_revision=revision)
+        _verify_private_history_absent(root)
+        _verify_tracked_head_blob(
+            root,
+            revision=revision,
+            relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+            expected_file_sha256=parent.file_sha256,
         )
-    if (
-        parent.raw_source_bindings is None
-        or parent.seven_zip_tool_binding is None
-        or parent.inventory_counts is None
-    ):
-        raise OODExternalV2ConfigError(
-            "inventory builder parent lacks executable source/count bindings"
+        _verify_project_source_tree_at_revisions(
+            root,
+            source_tree,
+            implementation_revision=revision,
+            execution_revision=None,
         )
+        _verify_imported_project_module_origins(root, source_tree)
+    except Exception as error:
+        raise InventoryBuilderPreflightStageError(
+            "git_source_provenance"
+        ) from error
+
+    try:
+        output_root = _resolve_project_relative(
+            root,
+            parent.output_root,
+            require_file=False,
+        )
+        claim_path = _resolve_project_relative(
+            root,
+            parent.claim_path,
+            require_file=False,
+        )
+        for candidate, context in (
+            (output_root, "successor output root"),
+            (claim_path, "successor one-shot claim"),
+        ):
+            if candidate.exists() or _is_indirect(candidate):
+                raise OODExternalV2IntegrityError(
+                    f"{context} must be absent before inventory construction"
+                )
+            _assert_direct_ancestry(
+                candidate.parent,
+                context=f"{context} parent",
+            )
+        _assert_no_marked_staging_retry(output_root)
+    except Exception as error:
+        raise InventoryBuilderPreflightStageError("namespace_state") from error
+
+    try:
+        # Close the long runtime/Git probe against a late source or index change.
+        if (
+            _verify_clean_git_revision(root) != revision
+            or _build_project_source_tree(root) != source_tree
+        ):
+            raise OODExternalV2IntegrityError(
+                "inventory builder controls changed during preflight"
+            )
+        if (
+            parent.raw_source_bindings is None
+            or parent.seven_zip_tool_binding is None
+            or parent.inventory_counts is None
+        ):
+            raise OODExternalV2ConfigError(
+                "inventory builder parent lacks executable source/count bindings"
+            )
+    except Exception as error:
+        raise InventoryBuilderPreflightStageError(
+            "closing_control_state"
+        ) from error
     return InventoryBuilderPreflight(
         status="INVENTORY_BUILDER_PREFLIGHT_VERIFIED",
         parent_config_file_sha256=parent.file_sha256,
@@ -5941,7 +6192,7 @@ def _inventory_builder_attempt_body(
         raise TypeError("preflight must be InventoryBuilderPreflight")
     body: dict[str, object] = {
         "artifact_type": SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_TYPE,
-        "authorization_id": "x4_inventory_build_attempt_1",
+        "authorization_id": "x5_inventory_build_attempt_1",
         "contains_external_source_bytes_or_identifiers": False,
         "contains_model_outputs_embeddings_or_scores": False,
         "consumption_ordinal": 1,
@@ -5953,8 +6204,14 @@ def _inventory_builder_attempt_body(
         "project_source_tree_sha256": preflight.project_source_tree_sha256,
         "protocol_id": PROTOCOL_ID,
         "python_environment_sha256": preflight.python_environment_sha256,
-        "schema_version": 1,
+        "schema_version": 2,
         "state": "PRECLAIM_INVENTORY_BUILD_AUTHORIZATION_CONSUMED",
+        "superseded_authorization_consumed": False,
+        "superseded_authorization_id": "x4_inventory_build_attempt_1",
+        "superseded_authorization_path": (
+            HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH
+        ),
+        "superseded_authorization_state": "RETIRED_UNCONSUMED",
     }
     body["artifact_sha256"] = canonical_sha256(body)
     return body
@@ -6034,6 +6291,15 @@ def verify_inventory_builder_attempt_marker(
     if not isinstance(preflight, InventoryBuilderPreflight):
         raise TypeError("preflight must be InventoryBuilderPreflight")
     root = _strict_project_root(project_root)
+    historical = _resolve_project_relative(
+        root,
+        HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH,
+        require_file=False,
+    )
+    if historical.exists() or _is_indirect(historical):
+        raise OODExternalV2IntegrityError(
+            "retired X4 inventory builder authorization path must remain absent"
+        )
     marker = _resolve_project_relative(
         root,
         SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
@@ -6057,20 +6323,58 @@ def verify_inventory_builder_attempt_marker(
     return sha256_bytes(observed)
 
 
-def consume_inventory_builder_authorization(
+def verify_inventory_builder_authorization_available(
     preflight: InventoryBuilderPreflight,
     *,
     project_root: str | Path,
-) -> str:
-    """Durably consume the sole X4 build authorization before source-byte access."""
+) -> None:
+    """Prove retired X4 and current X5 authorizations are both unconsumed."""
 
     if not isinstance(preflight, InventoryBuilderPreflight):
         raise TypeError("preflight must be InventoryBuilderPreflight")
     root = _strict_project_root(project_root)
     if _verify_clean_git_revision(root) != preflight.implementation_revision:
         raise OODExternalV2IntegrityError(
-            "inventory builder revision changed before authorization consumption"
+            "inventory builder revision changed before authorization availability"
         )
+    for relative_path, context in (
+        (
+            HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH,
+            "retired X4 inventory builder authorization",
+        ),
+        (
+            SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
+            "X5 inventory builder authorization",
+        ),
+    ):
+        marker = _resolve_project_relative(
+            root,
+            relative_path,
+            require_file=False,
+        )
+        if marker.exists() or _is_indirect(marker):
+            raise OODExternalV2IntegrityError(f"{context} is unavailable")
+        _require_git_ignored_and_untracked(
+            root,
+            relative_path,
+            context=context,
+        )
+
+
+def consume_inventory_builder_authorization(
+    preflight: InventoryBuilderPreflight,
+    *,
+    project_root: str | Path,
+) -> str:
+    """Durably consume the sole X5 build authorization before source-byte access."""
+
+    if not isinstance(preflight, InventoryBuilderPreflight):
+        raise TypeError("preflight must be InventoryBuilderPreflight")
+    root = _strict_project_root(project_root)
+    verify_inventory_builder_authorization_available(
+        preflight,
+        project_root=root,
+    )
     marker = _resolve_project_relative(
         root,
         SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
@@ -6078,7 +6382,7 @@ def consume_inventory_builder_authorization(
     )
     if marker.exists() or _is_indirect(marker):
         raise OODExternalV2IntegrityError(
-            "X4 inventory builder authorization is already consumed"
+            "X5 inventory builder authorization is already consumed"
         )
     _atomic_write_new(marker, _inventory_builder_attempt_bytes(preflight))
     return verify_inventory_builder_attempt_marker(preflight, project_root=root)
@@ -8347,6 +8651,7 @@ def _loaded_windows_native_module_paths() -> tuple[Path, ...]:
 def _verify_loaded_native_module_origins(
     *,
     python_executable: Path,
+    python_base_alias: Path,
     python_base_target: Path,
     site_packages: Path,
 ) -> None:
@@ -8367,6 +8672,25 @@ def _verify_loaded_native_module_origins(
     exact_nvidia = {
         path.name.casefold(): path for path in _nvidia_driver_tool_paths()[1:]
     }
+    exact_host_security: dict[Path, tuple[int, str]] = {}
+    for raw_host_path, expected in EXPECTED_HOST_SECURITY_NATIVE_MODULES.items():
+        path = _assert_direct_ancestry(
+            Path(raw_host_path),
+            context="bound host-security native module",
+        )
+        entry = _stable_runtime_file_entry(
+            path,
+            context="bound host-security native module",
+        )
+        if (
+            not path.is_file()
+            or entry["size_bytes"] != expected[0]
+            or entry["sha256"] != expected[1]
+        ):
+            raise OODExternalV2IntegrityError(
+                "bound host-security native module differs"
+            )
+        exact_host_security[path] = expected
     base_python = _assert_direct_ancestry(
         python_base_target / "python.exe",
         context="bound CPython base executable",
@@ -8376,8 +8700,21 @@ def _verify_loaded_native_module_origins(
             "bound CPython base executable is unavailable"
         )
     observed_base_python = False
+    observed_host_security: set[Path] = set()
     for raw_path in _loaded_windows_native_module_paths():
-        source = _assert_direct_ancestry(raw_path, context="loaded native module")
+        lexical = Path(os.path.abspath(os.fspath(raw_path)))
+        try:
+            alias_relative = lexical.relative_to(python_base_alias)
+        except ValueError:
+            source = _assert_direct_ancestry(
+                lexical,
+                context="loaded native module",
+            )
+        else:
+            source = _assert_direct_ancestry(
+                python_base_target / alias_relative,
+                context="loaded CPython native module",
+            )
         if not source.is_file() or source.suffix.casefold() not in {
             ".dll",
             ".exe",
@@ -8398,6 +8735,9 @@ def _verify_loaded_native_module_origins(
             source, site_packages
         ):
             continue
+        if source in exact_host_security:
+            observed_host_security.add(source)
+            continue
         nvidia_path = exact_nvidia.get(source.name.casefold())
         if nvidia_path is not None:
             if source != nvidia_path:
@@ -8417,6 +8757,10 @@ def _verify_loaded_native_module_origins(
     if not observed_base_python:
         raise OODExternalV2IntegrityError(
             "native-module audit did not observe the exact CPython base executable"
+        )
+    if observed_host_security != set(exact_host_security):
+        raise OODExternalV2IntegrityError(
+            "loaded host-security native module set differs from the frozen binding"
         )
 
 
@@ -8513,6 +8857,7 @@ def _current_runtime_environment() -> RuntimeEnvironmentBinding:
     )
     _verify_loaded_native_module_origins(
         python_executable=executable,
+        python_base_alias=python_base_alias,
         python_base_target=python_base,
         site_packages=site_packages,
     )
@@ -8529,6 +8874,16 @@ def _current_runtime_environment() -> RuntimeEnvironmentBinding:
             "python_base_target_name": python_base.name,
             "site_packages_tree": _runtime_filesystem_tree_dict(site_packages_tree),
             "git_tool": _git_tool_dict(git_tool),
+            "host_security_native_modules": [
+                {
+                    "path": path,
+                    "sha256": digest,
+                    "size_bytes": size,
+                }
+                for path, (size, digest) in (
+                    EXPECTED_HOST_SECURITY_NATIVE_MODULES.items()
+                )
+            ],
             "nvidia_driver_tool": _nvidia_driver_tool_dict(nvidia_driver_tool),
             "pyvenv_config_file_sha256": sha256_file(pyvenv_config),
             "pyvenv_config_size_bytes": pyvenv_size,

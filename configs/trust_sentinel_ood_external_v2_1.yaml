@@ -2,7 +2,7 @@ schema_version: 1
 protocol_id: trust-sentinel-ood-external-v2-1-parent
 status: frozen_parent_preregistration_pre_waveform
 drafted_on: "2026-08-29"
-frozen_at_utc: "2026-08-30T02:00:56Z"
+frozen_at_utc: "2026-08-30T03:08:59Z"
 research_only: true
 
 purpose: >-
@@ -128,6 +128,49 @@ design_history:
         - src/ecg_trust/ood_v2/models.py
         - src/ecg_trust/ood_v2/pipeline.py
         - tests/unit/test_ood_v2_inventory.py
+        - tests/unit/test_ood_v2_inventory_cli.py
+        - tests/unit/test_ood_v2_models.py
+        - tests/unit/test_ood_v2_pipeline.py
+        - tests/unit/test_ood_v2_protocol_closure.py
+      status_for_every_path: modified
+  x4_runtime_provenance_preflight:
+    predecessor_inventory_builder_implementation_revision: 6b04c5c6308cfddd9a3b2b06f1ebbe24acc961e9
+    predecessor_inventory_builder_parent_config_file_sha256: sha256:ac3653cd3a83d8d963531e54566487749c0faf03b5bc816ae66bdbde7f21927c
+    predecessor_inventory_builder_frozen_at_utc: "2026-08-30T02:00:56Z"
+    outcome: refused_before_x4_inventory_build_authorization_consumption
+    observed_failure: module_falsely_claims_a_frozen_origin
+    root_causes:
+      - legitimate_frozen_module_aliases_were_compared_to_sys_modules_keys
+      - empty_dynamic_six_moves_namespace_was_rejected_before_its_bound_owner
+      - relative_torch_dynamic_namespace_placeholders_were_treated_as_file_origins
+      - verified_cpython_alias_native_paths_were_not_mapped_to_the_bound_target
+      - host_injected_security_modules_were_not_exactly_bound
+    successor_parent_protocol_byte_read: true
+    new_successor_external_source_archive_header_record_metadata_or_waveform_byte_read: false
+    new_successor_trained_checkpoint_or_inference_access_occurred: false
+    successor_inventory_created: false
+    successor_external_access_armed_marker_created: false
+    successor_external_one_shot_claim_created: false
+    successor_output_root_created: false
+    x4_inventory_build_authorization_id: x4_inventory_build_attempt_1
+    x4_inventory_build_authorization_path: artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json
+    x4_inventory_build_authorization_marker_created: false
+    x4_inventory_build_authorization_consumed: false
+    x4_inventory_build_authorization_state: RETIRED_UNCONSUMED
+    controls_only_engineering_triage_observed_follow_on_runtime_refusals: true
+    new_x5_inventory_build_authorization_id: x5_inventory_build_attempt_1
+    operational_amendment_only: true
+    scientific_protocol_change: false
+    amendment: validate_canonical_frozen_modules_dynamic_namespaces_python_alias_native_images_and_exact_host_security_modules_add_controls_only_preflight_and_issue_unconsumed_x5_authorization
+    amendment_revision_contract:
+      commit_count_after_predecessor_inventory_builder_revision: 1
+      sole_parent: 6b04c5c6308cfddd9a3b2b06f1ebbe24acc961e9
+      exact_modified_paths:
+        - configs/trust_sentinel_ood_external_v2_1.yaml
+        - docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md
+        - scripts/build_trust_sentinel_ood_v2_inventory.py
+        - src/ecg_trust/ood_v2/models.py
+        - src/ecg_trust/ood_v2/pipeline.py
         - tests/unit/test_ood_v2_inventory_cli.py
         - tests/unit/test_ood_v2_models.py
         - tests/unit/test_ood_v2_pipeline.py
@@ -328,6 +371,7 @@ revision_boundary:
       - artifacts/trust_sentinel/.ood_external_v2.one-shot-claim.json
       - artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json
       - artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json
+      - artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json
       - :(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**
       - :(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**
       - :(glob)artifacts/trust_sentinel/.ood_external_v2_1.runtime-*/**
@@ -833,6 +877,10 @@ runtime:
     caller_environment_not_on_allowlist: forbidden
     inventory_builder_boundary:
       preflight_before_any_raw_or_inventory_read: frozen_parent_clean_X_live_remote_history_runtime_git_source_main_and_absent_claim_output
+      controls_only_mode: exact_shared_preconsumption_path_repeatable_no_marker_raw_content_or_output_write
+      controls_only_failure_disclosure: stable_stage_code_without_exception_path_or_external_identifier
+      private_public_inventory_destinations_must_be_absent_before_authorization: true
+      historical_x4_and_current_x5_authorization_paths_checked_before_authorization: true
       postflight_before_success_report: exact_same_preflight_plus_strict_private_public_output_hashes
   complete_runtime_tree_binding:
     cpython_base:
@@ -870,10 +918,21 @@ runtime:
     all_sys_modules_entries_checked: true
     exact_main_must_be_one_of_four_bound_operational_entrypoints: true
     built_in_and_frozen_loader_ownership_verified: true
+    frozen_module_canonical_spec_and_exact_alias_map_verified: true
+    dynamic_originless_namespace_requires_bound_file_backed_owner: true
     namespace_search_locations_must_enter_bound_trees: true
     pyc_pyo_and_unbound_file_origins: forbidden
     every_loaded_native_image_enumerated: true
     non_OS_native_images_must_enter_complete_cpython_or_site_packages_tree: true
+    cpython_alias_native_paths_mapped_to_exact_resolved_target: true
+    host_security_native_modules:
+      - path: 'C:\Program Files\Norton\Suite\aswAMSI.dll'
+        size_bytes: 1007544
+        sha256: 5cb95df5fe2800f297c223fff08c710a0409c4c88b89f07b60ef33d2e2e2704c
+      - path: 'C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.26070.9-0\MpOav.dll'
+        size_bytes: 673816
+        sha256: 2d5e72b81c236db1fd30978e2ad6a20d241945090b90f2cc2a36993469dc144f
+    host_security_native_module_set: exact_required_paths_sizes_and_sha256
     uv_redirector: separately_hash_bound_but_not_required_to_remain_loaded
     process_main_image: exact_resolved_cpython_base_tree_python_exe
   cuda_cache:
@@ -1044,14 +1103,20 @@ one_shot_external_access:
     - model_logits_or_probabilities
     - endpoint_or_subgroup_metrics
   inventory_build_authorization:
-    authorization_id: x4_inventory_build_attempt_1
+    authorization_id: x5_inventory_build_attempt_1
     artifact_type: ecg_trust.ood_external_v2_1_inventory_builder_attempt
-    path: artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json
-    scope: sole_x4_preclaim_inventory_build_attempt
+    path: artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json
+    scope: sole_x5_preclaim_inventory_build_attempt
+    supersedes_unconsumed_authorization_id: x4_inventory_build_attempt_1
+    superseded_authorization_path: artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json
+    superseded_authorization_consumed: false
+    superseded_authorization_state: RETIRED_UNCONSUMED
+    superseded_authorization_must_remain_absent: true
     creation: atomic_create_new_no_overwrite
     durability: exact_file_flush_and_parent_directory_durability_or_fail_closed
     timing: after_exact_preflight_path_schema_and_tool_binding_before_first_official_source_byte
     preconsumption_requirements:
+      - repeatable_controls_only_preflight_passed_with_no_durable_state
       - exact_frozen_parent_schema_and_count_invariants_verified
       - exact_canonical_dataset_root_and_raw_source_path_keysets_verified
       - exact_bound_7zip_tool_identity_verified
@@ -1074,7 +1139,7 @@ one_shot_external_access:
     - exact_raw_source_hashes_and_semantic_roles_rederived
     - exact_python_scientific_package_tree_and_7zip_identities_verified
     - quality_implementation_hash_verified
-    - durable_x4_inventory_build_authorization_marker_verified
+    - durable_x5_inventory_build_authorization_marker_verified
     - output_root_absent
     - clean_committed_revision
   output_root: artifacts/trust_sentinel/ood_external_v2_1

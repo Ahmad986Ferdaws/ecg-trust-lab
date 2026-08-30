@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import hashlib
+import inspect
 import json
 import os
 import subprocess
+import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,6 +22,31 @@ from ecg_trust.ood_v2.inventory import (
     ZZU_PEDIATRIC_DATASET,
     ExternalInventoryError,
     load_external_inventory,
+)
+
+_PREFLIGHT_FORBIDDEN_CAPABILITIES = (
+    "_build_archive_closures",
+    "_commit_new_outputs",
+    "_read_bounded_utf8",
+    "_verify_inventory_roots",
+    "build_challenge_tar_extraction_closure",
+    "build_external_inventory",
+    "build_inventory_artifacts",
+    "build_zzu_split_zip_extraction_closure",
+    "consume_inventory_builder_authorization",
+    "inventory_challenge_2011_record",
+    "load_external_inventory",
+    "parse_challenge_2011_quality_lists",
+    "parse_zzu_pediatric_attributes_csv",
+    "read_zzu_candidates",
+    "run_inventory_build",
+    "select_zzu_pediatric_inventory_records",
+    "validate_challenge_2011_set_a_inventory",
+    "verify_external_inventory",
+    "verify_inventory_builder_postflight",
+    "verify_inventory_builder_raw_source_bindings",
+    "verify_wfdb_candidate_file_set",
+    "write_inventory_artifacts",
 )
 
 
@@ -523,6 +551,23 @@ def test_production_inventory_outputs_require_isolation_and_exact_namespace(
     )
     cli._verify_production_output_destinations(private_output, public_output)
 
+    private_output.parent.mkdir(parents=True)
+    private_output.write_bytes(b"preexisting")
+    with pytest.raises(
+        cli.InventoryCLIError,
+        match="must be absent before authorization",
+    ):
+        cli._verify_production_output_destinations(private_output, public_output)
+
+    private_output.unlink()
+    public_output.parent.mkdir(parents=True)
+    public_output.write_bytes(b"preexisting")
+    with pytest.raises(
+        cli.InventoryCLIError,
+        match="must be absent before authorization",
+    ):
+        cli._verify_production_output_destinations(private_output, public_output)
+
     with pytest.raises(cli.InventoryCLIError, match="exact successor namespace"):
         cli._verify_production_output_destinations(
             root / "artifacts" / "private" / "inventory.json",
@@ -630,6 +675,302 @@ def test_inventory_builder_preflight_runs_before_any_raw_build(
     }
 
 
+def test_preflight_only_reuses_controls_and_never_reaches_capabilities(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    preflight = _builder_preflight()
+    arguments = _builder_arguments(tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "_project_layout",
+        lambda: (
+            tmp_path / "scripts" / "inventory.py",
+            tmp_path,
+            tmp_path / ".venv" / "Lib" / "site-packages",
+            tmp_path / "src",
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "verify_inventory_builder_preflight",
+        lambda *_args: calls.append("preflight") or preflight,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_verify_production_output_destinations",
+        lambda *_args: calls.append("destinations"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "verify_inventory_builder_input_contract",
+        lambda *_args, **_kwargs: calls.append("input_contract"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "verify_inventory_builder_authorization_available",
+        lambda *_args, **_kwargs: calls.append("availability"),
+    )
+    for name in _PREFLIGHT_FORBIDDEN_CAPABILITIES:
+        monkeypatch.setattr(
+            cli,
+            name,
+            lambda *_args, _name=name, **_kwargs: pytest.fail(
+                f"preflight-only reached {_name}"
+            ),
+        )
+    for name in ("rdheader", "rdrecord"):
+        monkeypatch.setattr(
+            inventory_module.wfdb,
+            name,
+            lambda *_args, _name=name, **_kwargs: pytest.fail(
+                f"preflight-only reached wfdb.{_name}"
+            ),
+        )
+    protected_paths = (
+        arguments.private_output,
+        arguments.public_output,
+        tmp_path
+        / "artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json",
+        tmp_path / "artifacts/trust_sentinel/.ood_external_v2_1.one-shot-claim.json",
+        tmp_path / "artifacts/trust_sentinel/ood_external_v2_1",
+    )
+    assert all(not path.exists() for path in protected_paths)
+
+    assert cli.run_inventory_preflight_only(arguments) is preflight
+    assert cli.run_inventory_preflight_only(arguments) is preflight
+    assert calls == [
+        "preflight",
+        "destinations",
+        "input_contract",
+        "availability",
+        "destinations",
+        "availability",
+    ] * 2
+    assert all(not path.exists() for path in protected_paths)
+
+
+def test_preflight_only_call_graph_excludes_production_capabilities() -> None:
+    forbidden_writes = {
+        "mkdir",
+        "open",
+        "rename",
+        "replace",
+        "touch",
+        "unlink",
+        "write_bytes",
+        "write_text",
+    }
+    referenced: set[str] = set()
+    for function in (
+        cli._verify_inventory_preconsumption_controls,
+        cli.run_inventory_preflight_only,
+    ):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                referenced.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                referenced.add(node.attr)
+
+    assert set(_PREFLIGHT_FORBIDDEN_CAPABILITIES).isdisjoint(referenced)
+    assert forbidden_writes.isdisjoint(referenced)
+
+
+@pytest.mark.parametrize(
+    ("failure_point", "expected_stage", "expected_calls"),
+    (
+        (
+            "first_destinations",
+            "output_destinations",
+            ["preflight", "destinations:1"],
+        ),
+        (
+            "input_contract",
+            "input_contract",
+            ["preflight", "destinations:1", "input_contract"],
+        ),
+        (
+            "first_availability",
+            "authorization_state",
+            [
+                "preflight",
+                "destinations:1",
+                "input_contract",
+                "availability:1",
+            ],
+        ),
+        (
+            "second_destinations",
+            "control_stability",
+            [
+                "preflight",
+                "destinations:1",
+                "input_contract",
+                "availability:1",
+                "destinations:2",
+            ],
+        ),
+        (
+            "second_availability",
+            "control_stability",
+            [
+                "preflight",
+                "destinations:1",
+                "input_contract",
+                "availability:1",
+                "destinations:2",
+                "availability:2",
+            ],
+        ),
+    ),
+)
+def test_preflight_only_control_failures_are_staged_and_stop_before_capabilities(
+    failure_point: str,
+    expected_stage: str,
+    expected_calls: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    destination_calls = 0
+    availability_calls = 0
+    arguments = _builder_arguments(tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "_project_layout",
+        lambda: (
+            tmp_path / "scripts" / "inventory.py",
+            tmp_path,
+            tmp_path / ".venv" / "Lib" / "site-packages",
+            tmp_path / "src",
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "verify_inventory_builder_preflight",
+        lambda *_args: calls.append("preflight") or _builder_preflight(),
+    )
+
+    def destinations(*_args: object) -> None:
+        nonlocal destination_calls
+        destination_calls += 1
+        calls.append(f"destinations:{destination_calls}")
+        if failure_point == (
+            "first_destinations" if destination_calls == 1 else "second_destinations"
+        ):
+            raise cli.InventoryCLIError("private path C:/secret/output")
+
+    def input_contract(*_args: object, **_kwargs: object) -> None:
+        calls.append("input_contract")
+        if failure_point == "input_contract":
+            raise cli.InventoryCLIError("private patient identifier")
+
+    def availability(*_args: object, **_kwargs: object) -> None:
+        nonlocal availability_calls
+        availability_calls += 1
+        calls.append(f"availability:{availability_calls}")
+        if failure_point == (
+            "first_availability" if availability_calls == 1 else "second_availability"
+        ):
+            raise cli.InventoryCLIError("private authorization location")
+
+    monkeypatch.setattr(cli, "_verify_production_output_destinations", destinations)
+    monkeypatch.setattr(cli, "verify_inventory_builder_input_contract", input_contract)
+    monkeypatch.setattr(
+        cli,
+        "verify_inventory_builder_authorization_available",
+        availability,
+    )
+    for name in _PREFLIGHT_FORBIDDEN_CAPABILITIES:
+        monkeypatch.setattr(
+            cli,
+            name,
+            lambda *_args, _name=name, **_kwargs: pytest.fail(
+                f"refused preflight reached {_name}"
+            ),
+        )
+
+    with pytest.raises(cli.InventoryControlsStageError) as refusal:
+        cli.run_inventory_preflight_only(arguments)
+
+    assert refusal.value.stage == expected_stage
+    assert "secret" not in str(refusal.value)
+    assert "patient" not in str(refusal.value)
+    assert calls == expected_calls
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_stage"),
+    (
+        (
+            cli.InventoryBuilderPreflightStageError("runtime_environment"),
+            "runtime_environment",
+        ),
+        (
+            cli.InventoryControlsStageError("authorization_state"),
+            "authorization_state",
+        ),
+        (RuntimeError("private patient p001 at C:/secret"), "unclassified"),
+    ),
+)
+def test_preflight_only_main_emits_only_sanitized_stage_json(
+    failure: Exception,
+    expected_stage: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    arguments = SimpleNamespace(preflight_only=True)
+    parser = SimpleNamespace(parse_args=lambda _argv: arguments)
+    monkeypatch.setattr(cli, "_parser", lambda: parser)
+    monkeypatch.setattr(
+        cli,
+        "run_inventory_preflight_only",
+        lambda _arguments: (_ for _ in ()).throw(failure),
+    )
+
+    assert cli.main([]) == 3
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "authorization_consumed": False,
+        "code": f"OODV2-PF-{expected_stage.replace('_', '-').upper()}",
+        "official_source_content_accessed": False,
+        "protocol_artifact_written": False,
+        "stage": expected_stage,
+        "status": "OOD_V2_INVENTORY_PREFLIGHT_REFUSED",
+    }
+    assert "p001" not in captured.err
+    assert "secret" not in captured.err
+
+
+def test_preflight_only_main_emits_verified_json_without_entering_build(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    arguments = SimpleNamespace(preflight_only=True)
+    parser = SimpleNamespace(parse_args=lambda _argv: arguments)
+    monkeypatch.setattr(cli, "_parser", lambda: parser)
+    monkeypatch.setattr(cli, "run_inventory_preflight_only", lambda _arguments: None)
+    monkeypatch.setattr(
+        cli,
+        "run_inventory_build",
+        lambda _arguments: pytest.fail("preflight-only entered the production build"),
+    )
+
+    assert cli.main([]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out == (
+        cli._controls_report(
+            status="OOD_V2_INVENTORY_PREFLIGHT_VERIFIED",
+            stage="complete",
+        )
+        + "\n"
+    )
+
+
 def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -683,6 +1024,11 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
         observed_contract.update(boundary=boundary, **kwargs)
 
     monkeypatch.setattr(cli, "verify_inventory_builder_input_contract", input_contract)
+    monkeypatch.setattr(
+        cli,
+        "verify_inventory_builder_authorization_available",
+        lambda *_args, **_kwargs: calls.append("availability"),
+    )
     observed_authorization: dict[str, object] = {}
 
     def authorize(boundary: object, **kwargs: object) -> str:
@@ -729,6 +1075,9 @@ def test_inventory_builder_postflight_closes_exact_in_memory_outputs(
         "preflight",
         "destinations",
         "input_contract",
+        "availability",
+        "destinations",
+        "availability",
         "authorization",
         "raw_bindings",
         "build",
@@ -821,9 +1170,10 @@ def test_inventory_builder_rejects_altered_schema_before_contract_or_raw_access(
             ),
         )
 
-    with pytest.raises(cli.InventoryCLIError, match="schema differs from the frozen contract"):
+    with pytest.raises(cli.InventoryControlsStageError) as refusal:
         cli.run_inventory_build(arguments)
 
+    assert refusal.value.stage == "metadata_schema"
     assert calls == ["preflight", "destinations"]
 
 
@@ -879,22 +1229,37 @@ def test_inventory_builder_rejects_altered_path_before_authorization_or_raw_hash
             ),
         )
 
-    with pytest.raises(cli.InventoryCLIError, match="input contract refused"):
+    with pytest.raises(cli.InventoryControlsStageError) as refusal:
         cli.run_inventory_build(arguments)
 
+    assert refusal.value.stage == "input_contract"
     assert calls == ["preflight", "destinations", "input_contract"]
 
 
 @pytest.mark.parametrize(
     ("failure_stage", "expected_calls"),
     (
-        ("authorization", ["preflight", "destinations", "input_contract", "authorization"]),
+        (
+            "authorization",
+            [
+                "preflight",
+                "destinations",
+                "input_contract",
+                "availability",
+                "destinations",
+                "availability",
+                "authorization",
+            ],
+        ),
         (
             "raw_bindings",
             [
                 "preflight",
                 "destinations",
                 "input_contract",
+                "availability",
+                "destinations",
+                "availability",
                 "authorization",
                 "raw_bindings",
             ],
@@ -932,6 +1297,11 @@ def test_inventory_builder_boundary_failures_prevent_inventory_build(
         cli,
         "verify_inventory_builder_input_contract",
         lambda *_args, **_kwargs: calls.append("input_contract"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "verify_inventory_builder_authorization_available",
+        lambda *_args, **_kwargs: calls.append("availability"),
     )
 
     def authorize(*_args: object, **_kwargs: object) -> str:

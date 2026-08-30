@@ -81,6 +81,33 @@ It fixes the exact Git resolver and strengthens the inventory-build boundary;
 it does not change any cohort, preprocessing rule, model, threshold, endpoint,
 gate, or scientific claim.
 
+Frozen X4 revision `6b04c5c6308cfddd9a3b2b06f1ebbe24acc961e9`, whose
+parent YAML hash is
+`sha256:ac3653cd3a83d8d963531e54566487749c0faf03b5bc816ae66bdbde7f21927c`
+and whose parent was frozen at `2026-08-30T02:00:56Z`, then entered its
+production inventory command once. It refused inside runtime provenance before
+the X4 authorization marker, any official source-content read, inventory,
+projection, child, external claim, or output root existed. The first rejection
+was caused by comparing legitimate frozen-module aliases against registry keys
+instead of their canonical `FrozenImporter` specifications. Controls-only
+engineering triage also exposed an empty `six.moves` dynamic namespace,
+relative `torch.ops` and `torch.classes` namespace placeholders, native CPython
+paths reported through the already-verified project alias junction, and two
+host-injected security modules that required explicit binding. X4
+authorization `x4_inventory_build_attempt_1` is therefore permanently retired
+as `RETIRED_UNCONSUMED`; its marker path must remain absent.
+
+X5 is a direct-child operational amendment. It validates canonical frozen
+module identity and only three exact aliases, verifies dynamic namespaces
+through a bound file-backed owner (including relative PyTorch placeholders),
+maps the verified CPython alias to its exact resolved target for native-image
+checks, and requires exact path, size, and
+SHA-256 for the observed Norton and Defender security modules. It also adds a
+repeatable `--preflight-only` branch that runs the exact shared
+pre-consumption controls but cannot consume authorization, read official source
+content, build an inventory, or write protocol artifacts. X5 changes no
+scientific decision.
+
 ## Evidence boundary and v1 history
 
 The aggregate v1 source-support result was already known when both external
@@ -219,15 +246,15 @@ conditioned on scratch emptiness.
 
 Before the inventory builder reads any official archive, metadata, header, or
 inventory byte, a metadata-only preflight requires the exact frozen parent,
-clean pushed implementation revision X4, live remote, protected-path history,
+clean pushed implementation revision X5, live remote, protected-path history,
 tracked parent and complete source blobs, isolated runtime/Git identity,
 bound `__main__`, and absent successor claim/output. It also binds the exact
 parent schema, cohort and exclusion-count invariants, canonical dataset and raw
 source paths/keysets, declared raw size/SHA-256/MD5 values, and exact 7-Zip tool.
 After those checks but before the first official source byte, the builder must
 durably create, without overwrite,
-`artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json`.
-That marker authorizes exactly one X4 preclaim inventory build, remains ignored
+`artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json`.
+That marker authorizes exactly one X5 preclaim inventory build, remains ignored
 and untracked, contains no source identifiers or model output, and is distinct
 from the later waveform one-shot claim. Once consumed it cannot be retried,
 resumed, or reused. The first permitted raw action is to hash every official
@@ -236,10 +263,19 @@ repeats the preflight and marker proof and strict-reloads the exact canonical
 private inventory and public projection, matching physical and logical hashes
 to the in-memory build.
 
+The same exact argument contract can first be run with `--preflight-only`.
+That repeatable branch validates the runtime, Git, parent, namespace, schema,
+raw-path metadata, 7-Zip binding, both absent authorization paths, and absent
+private/public destinations, then returns fixed path-free JSON. It never calls
+authorization consumption, official-source hashing, inventory construction,
+writers, or postflight. Production reuses the same shared control function and
+immediately rechecks destination and authorization absence before atomically
+consuming X5.
+
 The child binds the marker's exact canonical path, file SHA-256, and logical
-self-hash. At Y, the verifier reconstructs its expected X4 bytes from the
-parent hash, child-bound X4/source/Python/Git identities, and frozen
-source-bound authorization constants without requiring HEAD to return to X4;
+self-hash. At Y, the verifier reconstructs its expected X5 bytes from the
+parent hash, child-bound X5/source/Python/Git identities, and frozen
+source-bound authorization constants without requiring HEAD to return to X5;
 it rechecks those bytes during initial input verification, immediately before
 the external claim, after evaluation, and during terminal bundle verification.
 
@@ -253,14 +289,25 @@ import-root projection inside the complete site tree. Every file-backed
 `sys.modules` origin, namespace search location, built-in/frozen loader, the
 exact `__main__`, and every loaded native image is audited. A `.pyc`, shadow
 module, unbound namespace, or non-OS native image outside the bound CPython or
-site tree fails closed. On the uv Windows runtime, `sys.executable` is the
+site tree fails closed. Frozen entries are verified through their canonical
+`FrozenImporter` specification and canonical registry identity; only
+`importlib._bootstrap→_frozen_importlib`,
+`importlib._bootstrap_external→_frozen_importlib_external`, and
+`os.path→ntpath` may use alias keys. An empty dynamic namespace is accepted
+only when a bound file-backed owner such as the exact installed `six.py`
+authenticates it. On the uv Windows runtime, `sys.executable` is the
 separately hash-bound venv redirector while PSAPI must observe the exact bound
 base-tree `python.exe` as the process image; the redirector is not falsely
-required to remain loaded.
+required to remain loaded. Native paths reported through the one verified
+CPython alias junction are mapped to the corresponding exact resolved-target
+file before ancestry checks. The loaded host-security set must also contain
+exactly the bound Norton `aswAMSI.dll` and Defender `MpOav.dll` paths, sizes,
+and SHA-256 hashes; an absent, relocated, changed, or additional unbound
+injected image fails closed.
 
 Every tracked `src/ecg_trust/**/*.py` file and all four inventory/freeze/
 evaluate/verify entrypoints are bound by exact path, size, SHA-256, worktree
-bytes, and X4/Y Git blobs. Git resolves only from the exact direct Windows
+bytes, and X5/Y Git blobs. Git resolves only from the exact direct Windows
 installation root `C:\Program Files\Git`: the `cmd\git.exe` launcher and
 `mingw64\bin\git.exe` binary are derived from that root without `PATH` lookup,
 then their bytes, direct ancestry, and the full `mingw64` runtime tree are
@@ -367,10 +414,11 @@ denominator-integrity gates, not additional inferential endpoints.
 
 The parent and exact child must be committed and pushed before access. The first
 frozen successor revision `85b55d0...`, tag-amended revision `b5727c4...`,
-private-auth revision `6b6ddfd...`, and X4 form three consecutive sole-parent
+private-auth revision `6b6ddfd...`, X4, and X5 form four consecutive sole-parent
 amendments. The first two amendments each modify the same seven frozen paths.
-X4 has sole parent `6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6` and modifies all and
-only these eleven existing paths, each with Git status `M`:
+Historical X4 has sole parent `6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6`
+and modifies all and only these eleven existing paths, each with Git status
+`M`:
 
 - `configs/trust_sentinel_ood_external_v2_1.yaml`;
 - `docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md`;
@@ -384,14 +432,29 @@ only these eleven existing paths, each with Git status `M`:
 - `tests/unit/test_ood_v2_pipeline.py`; and
 - `tests/unit/test_ood_v2_protocol_closure.py`.
 
-Every historical parent byte and exact diff is independently verified. X4 and
-child-freeze execution revision Y are also consecutive: Y has X4 as its sole
-parent, exactly one commit lies in `X4..Y`, and that commit adds only the
+X5 has exact sole parent `6b04c5c6308cfddd9a3b2b06f1ebbe24acc961e9`
+and modifies all and only these nine existing paths, also with Git status
+`M`:
+
+- `configs/trust_sentinel_ood_external_v2_1.yaml`;
+- `docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md`;
+- `scripts/build_trust_sentinel_ood_v2_inventory.py`;
+- `src/ecg_trust/ood_v2/models.py`;
+- `src/ecg_trust/ood_v2/pipeline.py`;
+- `tests/unit/test_ood_v2_inventory_cli.py`;
+- `tests/unit/test_ood_v2_models.py`;
+- `tests/unit/test_ood_v2_pipeline.py`; and
+- `tests/unit/test_ood_v2_protocol_closure.py`.
+
+Every historical parent byte and exact diff is independently verified. X5 and
+child-freeze execution revision Y are also consecutive: Y has X5 as its sole
+parent, exactly one commit lies in `X5..Y`, and that commit adds only the
 tracked child plus its aggregate public inventory projection. The private
-inventory and durable X4 inventory-build marker remain ignored and untracked.
+inventory and durable X5 inventory-build marker remain ignored and untracked;
+the retired X4 marker remains absent.
 The only Git remote is `origin`, its fetch and push URL are exactly
 `https://github.com/Ahmad986Ferdaws/ecg-trust-lab.git`, and
-`refs/remotes/origin/main` must equal X4 at child freeze and Y immediately
+`refs/remotes/origin/main` must equal X5 at child freeze and Y immediately
 before the claim and after evaluation. A live `git ls-remote --symref` against
 the exact HTTPS URL—not a symbolic local remote—must return exactly the HEAD
 symref, HEAD and `refs/heads/main` at that revision, plus the required pinned
@@ -419,17 +482,20 @@ blob equals both the worktree bytes and the frozen SHA-256. At those same
 boundaries, `git log --full-history --all --reflog --format=%H -- <exact protected glob
 pathspecs>` must return empty output for the entire external raw-data tree,
 both protocols' complete private-preflight trees, both output/claim namespaces,
-the durable X4 inventory-build marker, all retained staging namespaces, and
+both the retired X4 and current X5 inventory-build marker paths, all retained
+staging namespaces, and
 the isolated runtime-root namespace. This
 proves absence of those protected pathnames from local reachable refs and
 reflogs. It does not—and Git cannot—prove the content absence of unreachable
 objects that are not named by those refs/reflogs; no stronger repository-wide
 purge claim is made.
 
-The durable X4 inventory-build authorization is not the external one-shot
+The durable X5 inventory-build authorization is not the external one-shot
 claim: it is consumed before metadata inventory source-byte access and does not
 authorize waveform decoding, quality, model, score, or endpoint access. After
-it is consumed, no X4 inventory retry, resume, or marker reuse is allowed.
+it is consumed, no X5 inventory retry, resume, or marker reuse is allowed. The
+X4 authorization was never consumed and is permanently retired; it cannot be
+revived or substituted for X5.
 
 The implementation durably creates the armed marker, including parent-
 directory persistence, and only then atomically creates the permanent adjacent

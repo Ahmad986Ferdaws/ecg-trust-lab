@@ -374,7 +374,159 @@ def test_x4_amendment_closes_failed_x3_lineage_and_exact_git_resolution() -> Non
     )
 
 
-def test_x4_inventory_authorization_counts_and_seven_zip_contract_are_exact() -> None:
+def test_x5_amendment_retires_unconsumed_x4_and_closes_runtime_provenance() -> None:
+    modified_paths = [
+        "configs/trust_sentinel_ood_external_v2_1.yaml",
+        "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
+        "scripts/build_trust_sentinel_ood_v2_inventory.py",
+        "src/ecg_trust/ood_v2/models.py",
+        "src/ecg_trust/ood_v2/pipeline.py",
+        "tests/unit/test_ood_v2_inventory_cli.py",
+        "tests/unit/test_ood_v2_models.py",
+        "tests/unit/test_ood_v2_pipeline.py",
+        "tests/unit/test_ood_v2_protocol_closure.py",
+    ]
+    payload = _successor_parent_yaml()
+    design = cast(dict[str, Any], payload["design_history"])
+    assert modified_paths == list(
+        pipeline.SUCCESSOR_RUNTIME_PREFLIGHT_AMENDMENT_MODIFIED_PATHS
+    )
+
+    assert design["x4_runtime_provenance_preflight"] == {
+        "amendment": (
+            "validate_canonical_frozen_modules_dynamic_namespaces_python_alias_"
+            "native_images_and_exact_host_security_modules_add_controls_only_"
+            "preflight_and_issue_unconsumed_x5_authorization"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_predecessor_inventory_builder_revision": 1,
+            "exact_modified_paths": modified_paths,
+            "sole_parent": "6b04c5c6308cfddd9a3b2b06f1ebbe24acc961e9",
+            "status_for_every_path": "modified",
+        },
+        "controls_only_engineering_triage_observed_follow_on_runtime_refusals": True,
+        "new_successor_external_source_archive_header_record_metadata_or_"
+        "waveform_byte_read": False,
+        "new_successor_trained_checkpoint_or_inference_access_occurred": False,
+        "new_x5_inventory_build_authorization_id": "x5_inventory_build_attempt_1",
+        "observed_failure": "module_falsely_claims_a_frozen_origin",
+        "operational_amendment_only": True,
+        "outcome": "refused_before_x4_inventory_build_authorization_consumption",
+        "predecessor_inventory_builder_frozen_at_utc": "2026-08-30T02:00:56Z",
+        "predecessor_inventory_builder_implementation_revision": (
+            "6b04c5c6308cfddd9a3b2b06f1ebbe24acc961e9"
+        ),
+        "predecessor_inventory_builder_parent_config_file_sha256": (
+            "sha256:ac3653cd3a83d8d963531e54566487749c0faf03b5bc816ae66bdbde7f21927c"
+        ),
+        "root_causes": [
+            "legitimate_frozen_module_aliases_were_compared_to_sys_modules_keys",
+            "empty_dynamic_six_moves_namespace_was_rejected_before_its_bound_owner",
+            "relative_torch_dynamic_namespace_placeholders_were_treated_as_file_origins",
+            "verified_cpython_alias_native_paths_were_not_mapped_to_the_bound_target",
+            "host_injected_security_modules_were_not_exactly_bound",
+        ],
+        "scientific_protocol_change": False,
+        "successor_external_access_armed_marker_created": False,
+        "successor_external_one_shot_claim_created": False,
+        "successor_inventory_created": False,
+        "successor_output_root_created": False,
+        "successor_parent_protocol_byte_read": True,
+        "x4_inventory_build_authorization_consumed": False,
+        "x4_inventory_build_authorization_id": "x4_inventory_build_attempt_1",
+        "x4_inventory_build_authorization_marker_created": False,
+        "x4_inventory_build_authorization_path": (
+            "artifacts/trust_sentinel/"
+            ".ood_external_v2_1.x4-inventory-build-attempt.json"
+        ),
+        "x4_inventory_build_authorization_state": "RETIRED_UNCONSUMED",
+    }
+
+    runtime = cast(dict[str, Any], payload["runtime"])
+    module_audit = cast(dict[str, Any], runtime["loaded_module_origin_audit"])
+    assert module_audit == {
+        "all_sys_modules_entries_checked": True,
+        "built_in_and_frozen_loader_ownership_verified": True,
+        "cpython_alias_native_paths_mapped_to_exact_resolved_target": True,
+        "dynamic_originless_namespace_requires_bound_file_backed_owner": True,
+        "every_loaded_native_image_enumerated": True,
+        "exact_main_must_be_one_of_four_bound_operational_entrypoints": True,
+        "frozen_module_canonical_spec_and_exact_alias_map_verified": True,
+        "host_security_native_module_set": "exact_required_paths_sizes_and_sha256",
+        "host_security_native_modules": [
+            {
+                "path": r"C:\Program Files\Norton\Suite\aswAMSI.dll",
+                "sha256": (
+                    "5cb95df5fe2800f297c223fff08c710a0409c4c88b89f07b60ef33d2e2e2704c"
+                ),
+                "size_bytes": 1_007_544,
+            },
+            {
+                "path": (
+                    r"C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.26070.9-0\MpOav.dll"
+                ),
+                "sha256": (
+                    "2d5e72b81c236db1fd30978e2ad6a20d241945090b90f2cc2a36993469dc144f"
+                ),
+                "size_bytes": 673_816,
+            },
+        ],
+        "namespace_search_locations_must_enter_bound_trees": True,
+        "non_OS_native_images_must_enter_complete_cpython_or_site_packages_tree": True,
+        "process_main_image": "exact_resolved_cpython_base_tree_python_exe",
+        "pyc_pyo_and_unbound_file_origins": "forbidden",
+        "uv_redirector": "separately_hash_bound_but_not_required_to_remain_loaded",
+    }
+    assert dict(pipeline.ALLOWED_FROZEN_MODULE_ALIASES) == {
+        "importlib._bootstrap": "_frozen_importlib",
+        "importlib._bootstrap_external": "_frozen_importlib_external",
+        "os.path": "ntpath",
+    }
+    assert {
+        item["path"]: (item["size_bytes"], "sha256:" + item["sha256"])
+        for item in module_audit["host_security_native_modules"]
+    } == dict(pipeline.EXPECTED_HOST_SECURITY_NATIVE_MODULES)
+
+    isolated = cast(dict[str, Any], runtime["isolated_launcher"])
+    assert isolated["inventory_builder_boundary"] == {
+        "controls_only_failure_disclosure": (
+            "stable_stage_code_without_exception_path_or_external_identifier"
+        ),
+        "controls_only_mode": (
+            "exact_shared_preconsumption_path_repeatable_no_marker_raw_content_"
+            "or_output_write"
+        ),
+        "historical_x4_and_current_x5_authorization_paths_checked_before_"
+        "authorization": True,
+        "postflight_before_success_report": (
+            "exact_same_preflight_plus_strict_private_public_output_hashes"
+        ),
+        "preflight_before_any_raw_or_inventory_read": (
+            "frozen_parent_clean_X_live_remote_history_runtime_git_source_main_"
+            "and_absent_claim_output"
+        ),
+        "private_public_inventory_destinations_must_be_absent_before_"
+        "authorization": True,
+    }
+    assert pipeline.INVENTORY_BUILDER_PREFLIGHT_STAGES == (
+        "parent_lineage",
+        "runtime_environment",
+        "git_source_provenance",
+        "namespace_state",
+        "closing_control_state",
+    )
+
+    protected = cast(
+        dict[str, Any],
+        cast(dict[str, Any], payload["revision_boundary"])[
+            "forbidden_private_history"
+        ],
+    )["paths"]
+    assert pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+    assert pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH in protected
+
+
+def test_x5_inventory_authorization_counts_and_seven_zip_contract_are_exact() -> None:
     payload = _successor_parent_yaml()
     inventory = cast(dict[str, Any], payload["successor_inventory_contract"])
     assert inventory["exact_zzu_exclusion_counts"] == {
@@ -416,7 +568,7 @@ def test_x4_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
     one_shot = cast(dict[str, Any], payload["one_shot_external_access"])
     assert one_shot["inventory_build_authorization"] == {
         "artifact_type": "ecg_trust.ood_external_v2_1_inventory_builder_attempt",
-        "authorization_id": "x4_inventory_build_attempt_1",
+        "authorization_id": "x5_inventory_build_attempt_1",
         "contains_external_source_bytes_or_identifiers": False,
         "contains_model_outputs_embeddings_or_scores": False,
         "creation": "atomic_create_new_no_overwrite",
@@ -430,12 +582,13 @@ def test_x4_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "maximum_consumptions": 1,
         "path": (
             "artifacts/trust_sentinel/"
-            ".ood_external_v2_1.x4-inventory-build-attempt.json"
+            ".ood_external_v2_1.x5-inventory-build-attempt.json"
         ),
         "postconsumption_first_raw_action": (
             "hash_every_official_source_against_exact_parent_size_sha256_and_md5"
         ),
         "preconsumption_requirements": [
+            "repeatable_controls_only_preflight_passed_with_no_durable_state",
             "exact_frozen_parent_schema_and_count_invariants_verified",
             "exact_canonical_dataset_root_and_raw_source_path_keysets_verified",
             "exact_bound_7zip_tool_identity_verified",
@@ -443,7 +596,15 @@ def test_x4_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         ],
         "retention": "permanent",
         "retry_resume_or_reuse": "forbidden",
-        "scope": "sole_x4_preclaim_inventory_build_attempt",
+        "scope": "sole_x5_preclaim_inventory_build_attempt",
+        "superseded_authorization_consumed": False,
+        "superseded_authorization_must_remain_absent": True,
+        "superseded_authorization_path": (
+            "artifacts/trust_sentinel/"
+            ".ood_external_v2_1.x4-inventory-build-attempt.json"
+        ),
+        "superseded_authorization_state": "RETIRED_UNCONSUMED",
+        "supersedes_unconsumed_authorization_id": "x4_inventory_build_attempt_1",
         "timing": (
             "after_exact_preflight_path_schema_and_tool_binding_before_first_"
             "official_source_byte"
@@ -458,7 +619,7 @@ def test_x4_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "scope": "after_external_one_shot_claim_entry_first_becomes_visible",
     }
     assert "retry_resume_or_second_inference" not in one_shot
-    assert "durable_x4_inventory_build_authorization_marker_verified" in one_shot[
+    assert "durable_x5_inventory_build_authorization_marker_verified" in one_shot[
         "prerequisites"
     ]
 
@@ -469,8 +630,17 @@ def test_x4_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "6b6ddfd0e26c2c65265e7c128bafb3a13c0bf9a6",
         "sha256:9b0358be1d4a12ca1771c57d8387c1b332bbef5698e01d3da2707f59157a586c",
         "2026-08-30T00:50:40Z",
+        "6b04c5c6308cfddd9a3b2b06f1ebbe24acc961e9",
+        "sha256:ac3653cd3a83d8d963531e54566487749c0faf03b5bc816ae66bdbde7f21927c",
+        "2026-08-30T02:00:56Z",
         r"C:\Program Files\Git",
-        "artifacts/trust_sentinel/.ood_external_v2_1.x4-inventory-build-attempt.json",
+        "x4_inventory_build_attempt_1",
+        "artifacts/trust_sentinel/.ood_external_v2_1.x5-inventory-build-attempt.json",
+        "RETIRED_UNCONSUMED",
+        "--preflight-only",
+        "relative `torch.ops` and `torch.classes` namespace placeholders",
+        "aswAMSI.dll",
+        "MpOav.dll",
         "no-retry rule is absolute",
     )
     assert all(literal in protocol for literal in required_literals)
@@ -1298,6 +1468,7 @@ def test_private_history_query_covers_every_forbidden_path_and_fails_closed(
         pipeline.SUCCESSOR_OUTPUT_PATH,
         pipeline.PREDECESSOR_CLAIM_PATH,
         pipeline.SUCCESSOR_CLAIM_PATH,
+        pipeline.HISTORICAL_X4_INVENTORY_BUILDER_ATTEMPT_PATH,
         pipeline.SUCCESSOR_INVENTORY_BUILDER_ATTEMPT_PATH,
         ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
         ":(glob)artifacts/trust_sentinel/.ood_external_v2_1.staging-*/**",
