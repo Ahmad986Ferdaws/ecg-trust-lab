@@ -295,10 +295,10 @@ def test_constants_match_authoritative_frozen_parent() -> None:
     assert OOD_V2_ARTIFACT_TYPE == "ecg_trust.ood_external_v2_1_result"
     assert OOD_V2_RESULT_FILENAME == "ood-external-v2-1-result.json"
     assert OOD_V2_PARENT_CONFIG_SHA256 == (
-        "sha256:2b6696d07c1fbab1e31eccb3d8d48fdc6251d12301df6ca604b8af1d02b7dd10"
+        "sha256:4b5b54a695fda09241ebb9c6d2503b10fe05b0a38cbd279ab702f2d8b52105c2"
     )
     if OOD_V2_PARENT_CONFIG_SHA256 == "sha256:" + "0" * 64:
-        pytest.skip("temporary X10 config hash sentinel awaiting final shared freeze")
+        pytest.skip("temporary X11 config hash sentinel awaiting final shared freeze")
     parent_bytes = Path(
         "configs/trust_sentinel_ood_external_v2_1.yaml"
     ).read_bytes()

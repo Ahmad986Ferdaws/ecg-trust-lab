@@ -1131,8 +1131,8 @@ def test_real_launcher_help_reexecutes_isolated_and_leaves_no_runtime_root(
     assert completed.returncode == 0, completed.stderr
     assert "usage:" in completed.stdout
     if script_name == "freeze_trust_sentinel_ood_external_v2.py":
-        assert "X10 child-freeze controls" in completed.stdout
-        assert "X9" not in completed.stdout
+        assert "X11 child-freeze controls" in completed.stdout
+        assert "X10" not in completed.stdout
     after = {path.name for path in runtime_parent.glob(".ood_external_v2_1.runtime-*")}
     assert after == before
 
@@ -1301,7 +1301,7 @@ def test_child_freeze_preflight_only_is_repeatable_and_canonical(
     assert observed["seven_zip_executable"] == Path("7z")
 
 
-def test_x10_child_freeze_preflight_refusal_before_marker_is_sanitized(
+def test_x11_child_freeze_preflight_refusal_before_marker_is_sanitized(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1314,7 +1314,7 @@ def test_x10_child_freeze_preflight_refusal_before_marker_is_sanitized(
     monkeypatch.setattr(
         freeze_cli,
         "freeze_external_v2_child_contract",
-        lambda **_: pytest.fail("X10 preflight refusal consumed the authorization marker"),
+        lambda **_: pytest.fail("X11 preflight refusal consumed the authorization marker"),
     )
 
     assert freeze_cli.main(_freeze_arguments(preflight_only=True)) == 3
@@ -1341,7 +1341,7 @@ def test_x10_child_freeze_preflight_refusal_before_marker_is_sanitized(
     assert "patient" not in captured.err
 
 
-def test_x10_child_freeze_post_marker_failure_is_terminal_and_never_retriable(
+def test_x11_child_freeze_post_marker_failure_is_terminal_and_never_retriable(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -187,7 +187,7 @@ EXPECTED_PARENT_CONFIG_SHA256: Final = (
     "sha256:3aacb31be939d1a2bea96bb29f193d60a4b54c38a40a1a7e2a490cfe60c3b0d9"
 )
 EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256: Final[str | None] = (
-    "sha256:2b6696d07c1fbab1e31eccb3d8d48fdc6251d12301df6ca604b8af1d02b7dd10"
+    "sha256:4b5b54a695fda09241ebb9c6d2503b10fe05b0a38cbd279ab702f2d8b52105c2"
 )
 SUCCESSOR_PROTOCOL_ID: Final = PROTOCOL_ID
 PREDECESSOR_TERMINATION_PATH: Final = (
@@ -324,14 +324,43 @@ HISTORICAL_X9_CHILD_FREEZE_FAILURE_FILE_SHA256: Final = (
 HISTORICAL_X9_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256: Final = (
     "sha256:eaf06d21140c7f69f251ab4c288920dc7b9f2331939f4cae7c24aca389ab8aa2"
 )
-SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH: Final = (
+HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH: Final = (
     "artifacts/trust_sentinel/.ood_external_v2_1.x10-child-freeze-attempt.json"
+)
+HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_FILE_SHA256: Final = (
+    "sha256:d91989e8c1d0590428ca8ae8461afb61791b236629439e554f08abe5fed871b4"
+)
+HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256: Final = (
+    "sha256:f094848bc7620b52259f85c0b42fac126ccd2f10d5733993b4138c25233bf298"
+)
+HISTORICAL_X10_CHILD_FREEZE_PROJECT_SOURCE_TREE_SHA256: Final = (
+    "sha256:5834ebeb46c18caf682ce87684984760ee23e88939bafa642b7276028b5de69d"
+)
+HISTORICAL_X10_CHILD_FREEZE_PYTHON_ENVIRONMENT_SHA256: Final = (
+    "sha256:d834e2cf3e6cf1ec7fbf09607cb6fb8b5a05824dfdfba15445e2e5dad74c9188"
+)
+HISTORICAL_X10_GIT_RUNTIME_TREE_SHA256: Final = (
+    "sha256:086bd1898a3859d59d4c7184f1039d73cdf75c07de76f70fc375495ed922d9e2"
+)
+HISTORICAL_X10_CHILD_FROZEN_AT_UTC: Final = "2026-08-30T12:13:06Z"
+HISTORICAL_X10_CHILD_FREEZE_PROTOCOL_ATTEMPT_ORDINAL: Final = 2
+HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH: Final = (
+    "artifacts/trust_sentinel/.ood_external_v2_1.x10-child-freeze-failure.json"
+)
+HISTORICAL_X10_CHILD_FREEZE_FAILURE_FILE_SHA256: Final = (
+    "sha256:d1f1b449af5c390d05b78a423b7ead663190a4ee6908a14eedc425561b369f82"
+)
+HISTORICAL_X10_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256: Final = (
+    "sha256:395d9531e84dd24d766c039e62a9daf878f4cb798c82c0292e2dfe6068a24210"
+)
+SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH: Final = (
+    "artifacts/trust_sentinel/.ood_external_v2_1.x11-child-freeze-attempt.json"
 )
 SUCCESSOR_CHILD_FREEZE_ATTEMPT_ARTIFACT_TYPE: Final = (
     "ecg_trust.ood_external_v2_1_child_freeze_attempt"
 )
 SUCCESSOR_CHILD_FREEZE_FAILURE_PATH: Final = (
-    "artifacts/trust_sentinel/.ood_external_v2_1.x10-child-freeze-failure.json"
+    "artifacts/trust_sentinel/.ood_external_v2_1.x11-child-freeze-failure.json"
 )
 SUCCESSOR_CHILD_FREEZE_FAILURE_ARTIFACT_TYPE: Final = (
     "ecg_trust.ood_external_v2_1_child_freeze_failure"
@@ -353,6 +382,8 @@ FORBIDDEN_GIT_HISTORY_PATHS: Final[tuple[str, ...]] = (
     SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH,
     HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_PATH,
     HISTORICAL_X9_CHILD_FREEZE_FAILURE_PATH,
+    HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH,
+    HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH,
     SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
     SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
     ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
@@ -860,6 +891,13 @@ NINTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
     "sha256:790251613a94052a88eb9f8598021d9bb3684707cd0a865c74b62dcb76c8417b"
 )
 NINTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC: Final = "2026-08-30T09:49:39Z"
+TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION: Final = (
+    "eeac4217139d5c3f44efd9bf4b0b9f749f8da4d0"
+)
+TENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256: Final = (
+    "sha256:2b6696d07c1fbab1e31eccb3d8d48fdc6251d12301df6ca604b8af1d02b7dd10"
+)
+TENTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC: Final = "2026-08-30T11:32:47Z"
 SUCCESSOR_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "configs/trust_sentinel_ood_external_v2_1.yaml",
     "docs/TRUST_SENTINEL_OOD_EXTERNAL_V2_1_PROTOCOL.md",
@@ -953,6 +991,9 @@ SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS: Final[tuple[str, ...]] = (
     "tests/unit/test_ood_v2_protocol_closure.py",
 )
 SUCCESSOR_CHILD_FREEZE_DECISION_BINDING_AMENDMENT_MODIFIED_PATHS: Final[
+    tuple[str, ...]
+] = SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS
+SUCCESSOR_CHILD_FREEZE_SERIALIZATION_AMENDMENT_MODIFIED_PATHS: Final[
     tuple[str, ...]
 ] = SUCCESSOR_CHILD_FREEZE_AMENDMENT_MODIFIED_PATHS
 _ARCHIVE_MEMBER_ROLES: Final[tuple[str, ...]] = (
@@ -1080,7 +1121,7 @@ class InventoryBuilderPreflightStageError(OODExternalV2IntegrityError):
 
 
 class ChildFreezePreflightStageError(OODExternalV2IntegrityError):
-    """Sanitized, controls-only X10 child-freeze preflight refusal."""
+    """Sanitized, controls-only X11 child-freeze preflight refusal."""
 
     def __init__(self, stage: str) -> None:
         if stage not in CHILD_FREEZE_PREFLIGHT_STAGES:
@@ -1090,7 +1131,7 @@ class ChildFreezePreflightStageError(OODExternalV2IntegrityError):
 
 
 class ChildFreezeAttemptError(OODExternalV2ExecutionError):
-    """Sanitized terminal refusal after the X10 marker became visible."""
+    """Sanitized terminal refusal after the X11 marker became visible."""
 
     def __init__(
         self,
@@ -1117,7 +1158,7 @@ class ChildFreezeAttemptError(OODExternalV2ExecutionError):
         self.output_state = output_state
         self.official_source_content_accessed = official_source_content_accessed
         self.failure_receipt_written = failure_receipt_written
-        super().__init__("X10 child freeze failed after authorization consumption")
+        super().__init__("X11 child freeze failed after authorization consumption")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1357,7 +1398,7 @@ class InventoryBuilderPostflight:
 
 @dataclass(frozen=True, slots=True)
 class ChildFreezePreflight:
-    """Content-free proof that the single X10 child-freeze attempt may begin."""
+    """Content-free proof that the single X11 child-freeze attempt may begin."""
 
     status: str
     parent: OODExternalV2ParentConfig
@@ -2538,10 +2579,10 @@ def verify_successor_parent_preflight(
         "decision_json_or_scientific_setting_change": False,
         "new_x10_child_freeze_authorization_id": "x10_child_freeze_attempt_1",
         "new_x10_child_freeze_authorization_path": (
-            SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+            HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH
         ),
         "new_x10_child_freeze_failure_receipt_path": (
-            SUCCESSOR_CHILD_FREEZE_FAILURE_PATH
+            HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH
         ),
         "operational_amendment_only": True,
         "root_cause": {
@@ -2602,6 +2643,101 @@ def verify_successor_parent_preflight(
     }:
         raise OODExternalV2ConfigError(
             "successor X9/X10 child-freeze amendment declaration differs"
+        )
+    x11_amendment = _mapping(
+        design.get("x10_child_freeze_failure_and_x11_authorization"),
+        "successor X10 failure and X11 child-freeze amendment",
+    )
+    if x11_amendment != {
+        "amendment": (
+            "materialize_runtime_bindings_as_a_verified_plain_dict_require_a_"
+            "successful_preauthorization_canonical_json_probe_preserve_all_x8_"
+            "x9_x10_evidence_and_issue_one_new_x11_authorization"
+        ),
+        "amendment_revision_contract": {
+            "commit_count_after_x10_implementation_revision": 1,
+            "exact_modified_paths": list(
+                SUCCESSOR_CHILD_FREEZE_SERIALIZATION_AMENDMENT_MODIFIED_PATHS
+            ),
+            "sole_parent": TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+            "status_for_every_path": "modified",
+        },
+        "decision_json_or_scientific_setting_change": False,
+        "inventory_or_model_policy_threshold_change": False,
+        "new_x11_child_freeze_authorization_id": "x11_child_freeze_attempt_1",
+        "new_x11_child_freeze_authorization_path": (
+            SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+        ),
+        "new_x11_child_freeze_failure_receipt_path": (
+            SUCCESSOR_CHILD_FREEZE_FAILURE_PATH
+        ),
+        "operational_amendment_only": True,
+        "root_cause": {
+            "category": "runtime_bindings_mapping_proxy_not_canonical_json_serializable",
+            "failing_boundary": "child_contract_canonical_json_serialization",
+            "failure_was_operational_not_scientific": True,
+            "raised_error": "ExternalV2BundleError",
+            "runtime_bindings_runtime_type": "types.MappingProxyType",
+            "verified_remedy": (
+                "materialize_runtime_bindings_as_plain_dict_and_require_"
+                "preauthorization_canonical_json_probe"
+            ),
+        },
+        "scientific_protocol_change": False,
+        "x10_authorization_and_receipt_retention": (
+            "exact_artifacts_permanently_retained_ignored_untracked_and_never_reused"
+        ),
+        "x10_frozen_at_utc": TENTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC,
+        "x10_implementation_revision": TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        "x10_parent_config_file_sha256": TENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        "x10_production_child_freeze": {
+            "authorization_consumed": True,
+            "authorization_id": "x10_child_freeze_attempt_1",
+            "authorization_marker_artifact_sha256": (
+                HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256
+            ),
+            "authorization_marker_created": True,
+            "authorization_marker_file_sha256": (
+                HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_FILE_SHA256
+            ),
+            "authorization_path": HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH,
+            "authorization_state": "CONSUMED_FAILED_RETAINED",
+            "child_contract_created": False,
+            "child_frozen_at_utc": HISTORICAL_X10_CHILD_FROZEN_AT_UTC,
+            "evaluation_or_metric_execution_occurred": False,
+            "exact_failure_stage": "decision_and_child_materialization",
+            "external_one_shot_claim_created": False,
+            "failure_reason": "UNEXPECTED_INTERNAL_FAILURE",
+            "failure_receipt_artifact_sha256": (
+                HISTORICAL_X10_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256
+            ),
+            "failure_receipt_created": True,
+            "failure_receipt_file_sha256": (
+                HISTORICAL_X10_CHILD_FREEZE_FAILURE_FILE_SHA256
+            ),
+            "failure_receipt_path": HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH,
+            "failure_stage_ordinal": 9,
+            "git_runtime_tree_sha256": HISTORICAL_X10_GIT_RUNTIME_TREE_SHA256,
+            "official_source_content_accessed": True,
+            "output_state": "NONE",
+            "project_source_tree_sha256": (
+                HISTORICAL_X10_CHILD_FREEZE_PROJECT_SOURCE_TREE_SHA256
+            ),
+            "protocol_child_freeze_attempt_ordinal": (
+                HISTORICAL_X10_CHILD_FREEZE_PROTOCOL_ATTEMPT_ORDINAL
+            ),
+            "python_environment_sha256": (
+                HISTORICAL_X10_CHILD_FREEZE_PYTHON_ENVIRONMENT_SHA256
+            ),
+            "quality_policy_execution_occurred": False,
+            "runtime_cleanup_state": "CLEAN",
+            "successor_output_root_created": False,
+            "trained_checkpoint_or_model_access_occurred": False,
+            "waveform_sample_decode_occurred": False,
+        },
+    }:
+        raise OODExternalV2ConfigError(
+            "successor X10/X11 child-freeze amendment declaration differs"
         )
     revision_boundary = _mapping(
         payload.get("revision_boundary"),
@@ -3120,13 +3256,14 @@ def verify_successor_parent_preflight(
         )
     if child_freeze_authorization != {
         "artifact_type": SUCCESSOR_CHILD_FREEZE_ATTEMPT_ARTIFACT_TYPE,
-        "authorization_id": "x10_child_freeze_attempt_1",
+        "authorization_id": "x11_child_freeze_attempt_1",
         "child_contract_binding": {
             "field": "child_freeze_attempt",
             "inventory_builder_attempt_remains_exact_x8_marker": True,
             "legacy_demo_policy_identity_is_exact_file_hash_only": True,
-            "x10_failure_receipt_must_be_absent": True,
-            "x9_attempt_and_failure_receipt_bound_as_historical_lineage": True,
+            "runtime_bindings_materialized_as_exact_ordered_plain_dict": True,
+            "x11_failure_receipt_must_be_absent": True,
+            "x9_x10_attempts_and_failure_receipts_bound_as_historical_lineage": True,
         },
         "contains_external_source_bytes_or_identifiers": False,
         "contains_model_outputs_embeddings_or_scores": False,
@@ -3206,27 +3343,32 @@ def verify_successor_parent_preflight(
         "git_ignored_and_untracked": True,
         "maximum_consumptions": 1,
         "path": SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
+        "preauthorization_canonical_json_serializability_probe": "required",
         "preconsumption_requirements": [
-            "exact_x10_parent_lineage_clean_head_live_remote_history_runtime_and_"
+            "exact_x11_parent_lineage_clean_head_live_remote_history_runtime_and_"
             "source_tree_verified",
             "exact_historical_x8_inventory_authorization_marker_verified",
             "x8_inventory_build_failure_receipt_absent",
             "exact_historical_x9_child_freeze_authorization_marker_and_failure_"
+            "receipt_verified",
+            "exact_historical_x10_child_freeze_authorization_marker_and_failure_"
             "receipt_verified",
             "exact_x8_private_inventory_and_public_projection_hashes_counts_and_"
             "semantics_verified",
             "exact_x8_archive_closure_summaries_revalidated_without_inventory_rebuild",
             "exact_legacy_demo_policy_file_hash_only_source_calibration_and_runtime_"
             "decision_bindings_verified",
+            "runtime_bindings_materialized_as_exact_ordered_plain_dict_and_"
+            "canonical_json_probe_passed",
             "exact_child_timestamp_and_destination_validated",
-            "x10_child_freeze_attempt_marker_failure_receipt_and_child_destination_"
+            "x11_child_freeze_attempt_marker_failure_receipt_and_child_destination_"
             "absent",
             "external_waveform_one_shot_claim_and_successor_output_root_absent",
         ],
         "prepublication_requirements": [
             "full_nested_child_contract_bytes_decode_and_semantic_validation_completed",
-            "exact_x8_inventory_and_x9_failure_lineage_reverified",
-            "x10_failure_receipt_and_child_destination_absent",
+            "exact_x8_inventory_and_x9_x10_failure_lineage_reverified",
+            "x11_failure_receipt_and_child_destination_absent",
         ],
         "private_inventory_artifact_sha256": (
             HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256
@@ -3240,15 +3382,18 @@ def verify_successor_parent_preflight(
         "public_projection_path": SUCCESSOR_PUBLIC_PROJECTION_PATH,
         "retention": "permanent",
         "retry_resume_or_reuse": "forbidden_after_marker_visibility",
+        "runtime_bindings_child_json_type": "plain_dict",
+        "runtime_bindings_exact_order": "required_runtime_binding_paths",
         "scope": (
-            "sole_x10_child_freeze_attempt_reusing_exact_successful_x8_inventory_"
-            "after_consumed_failed_x9"
+            "sole_x11_child_freeze_attempt_reusing_exact_successful_x8_inventory_"
+            "after_consumed_failed_x9_and_x10"
         ),
         "timing": (
             "after_repeatable_controls_only_preflight_before_first_official_source_"
             "content_reverification"
         ),
         "visibility_consumes_authorization_before_durability_completion": True,
+        "protocol_child_freeze_attempt_ordinal": 3,
         "x8_frozen_at_utc": EIGHTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC,
         "x8_implementation_revision": EIGHTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         "x8_inventory_build_authorization_marker_artifact_sha256": (
@@ -3295,6 +3440,44 @@ def verify_successor_parent_preflight(
         "x9_frozen_at_utc": NINTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC,
         "x9_implementation_revision": NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         "x9_parent_config_file_sha256": NINTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        "x10_child_freeze_authorization_consumed_failed_retained": True,
+        "x10_child_freeze_authorization_marker_artifact_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "x10_child_freeze_authorization_marker_file_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_FILE_SHA256
+        ),
+        "x10_child_freeze_authorization_path": (
+            HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH
+        ),
+        "x10_child_freeze_failure_reason": "UNEXPECTED_INTERNAL_FAILURE",
+        "x10_child_freeze_failure_receipt_artifact_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256
+        ),
+        "x10_child_freeze_failure_receipt_file_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_FAILURE_FILE_SHA256
+        ),
+        "x10_child_freeze_failure_receipt_path": (
+            HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH
+        ),
+        "x10_child_freeze_failure_stage": "decision_and_child_materialization",
+        "x10_child_freeze_failure_stage_ordinal": 9,
+        "x10_child_freeze_official_source_content_accessed": True,
+        "x10_child_freeze_output_state": "NONE",
+        "x10_child_frozen_at_utc": HISTORICAL_X10_CHILD_FROZEN_AT_UTC,
+        "x10_frozen_at_utc": TENTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC,
+        "x10_git_runtime_tree_sha256": HISTORICAL_X10_GIT_RUNTIME_TREE_SHA256,
+        "x10_implementation_revision": TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        "x10_parent_config_file_sha256": TENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        "x10_project_source_tree_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_PROJECT_SOURCE_TREE_SHA256
+        ),
+        "x10_protocol_child_freeze_attempt_ordinal": (
+            HISTORICAL_X10_CHILD_FREEZE_PROTOCOL_ATTEMPT_ORDINAL
+        ),
+        "x10_python_environment_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_PYTHON_ENVIRONMENT_SHA256
+        ),
     }:
         raise OODExternalV2ConfigError(
             "successor child freeze authorization differs"
@@ -3325,8 +3508,10 @@ def verify_successor_parent_preflight(
             "x8_inventory_build_failure_receipt_absent",
             "exact_retained_x9_consumed_failed_child_freeze_authorization_marker_"
             "and_failure_receipt_verified",
-            "durable_x10_child_freeze_authorization_marker_verified",
-            "x10_child_freeze_failure_receipt_absent",
+            "exact_retained_x10_consumed_failed_child_freeze_authorization_marker_"
+            "and_failure_receipt_verified",
+            "durable_x11_child_freeze_authorization_marker_verified",
+            "x11_child_freeze_failure_receipt_absent",
             "output_root_absent",
             "clean_committed_revision",
         ]
@@ -5250,7 +5435,7 @@ def _verify_successor_amendment_revision(
     )
     _verify_exact_modification_child(
         project_root,
-        child_revision=revision,
+        child_revision=TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         parent_revision=NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         modified_paths=SUCCESSOR_CHILD_FREEZE_DECISION_BINDING_AMENDMENT_MODIFIED_PATHS,
         context="child-freeze decision-binding successor amendment",
@@ -5261,6 +5446,20 @@ def _verify_successor_amendment_revision(
         relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
         expected_file_sha256=NINTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
         context="ninth frozen successor parent",
+    )
+    _verify_exact_modification_child(
+        project_root,
+        child_revision=revision,
+        parent_revision=TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        modified_paths=SUCCESSOR_CHILD_FREEZE_SERIALIZATION_AMENDMENT_MODIFIED_PATHS,
+        context="child-freeze serialization successor amendment",
+    )
+    _verify_historical_revision_blob(
+        project_root,
+        revision=TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        relative_path=SUCCESSOR_PARENT_CONFIG_PATH,
+        expected_file_sha256=TENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        context="tenth frozen successor parent",
     )
 
 
@@ -8158,6 +8357,169 @@ def _verify_historical_x9_child_freeze_artifacts(project_root: Path) -> None:
         )
 
 
+def _historical_x10_child_freeze_attempt_bytes() -> bytes:
+    body: dict[str, object] = {
+        "artifact_type": SUCCESSOR_CHILD_FREEZE_ATTEMPT_ARTIFACT_TYPE,
+        "authorization_consumption_ordinal": 1,
+        "authorization_id": "x10_child_freeze_attempt_1",
+        "child_contract_relative_path": SUCCESSOR_CHILD_CONFIG_PATH,
+        "child_frozen_at_utc": HISTORICAL_X10_CHILD_FROZEN_AT_UTC,
+        "contains_external_source_bytes_or_identifiers": False,
+        "contains_model_outputs_embeddings_or_scores": False,
+        "declared_counts": {
+            "challenge_records": 1_000,
+            "selected_records_total": 13_328,
+            "zzu_patients": 10_350,
+            "zzu_records": 12_328,
+        },
+        "external_one_shot_claim_consumed_at_marker_creation": False,
+        "git_runtime_tree_sha256": HISTORICAL_X10_GIT_RUNTIME_TREE_SHA256,
+        "historical_x8_failure_receipt_required_absent": True,
+        "historical_x8_inventory_builder_attempt_artifact_sha256": (
+            HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "historical_x8_inventory_builder_attempt_file_sha256": (
+            HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
+        ),
+        "historical_x8_inventory_builder_attempt_path": (
+            HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_PATH
+        ),
+        "historical_x8_private_inventory_artifact_sha256": (
+            HISTORICAL_X8_PRIVATE_INVENTORY_ARTIFACT_SHA256
+        ),
+        "historical_x8_private_inventory_file_sha256": (
+            HISTORICAL_X8_PRIVATE_INVENTORY_FILE_SHA256
+        ),
+        "historical_x8_public_projection_artifact_sha256": (
+            HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
+        ),
+        "historical_x8_public_projection_file_sha256": (
+            HISTORICAL_X8_PUBLIC_PROJECTION_FILE_SHA256
+        ),
+        "historical_x9_authorization_consumed_failed_retained": True,
+        "historical_x9_child_freeze_attempt_artifact_sha256": (
+            HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "historical_x9_child_freeze_attempt_file_sha256": (
+            HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_FILE_SHA256
+        ),
+        "historical_x9_child_freeze_attempt_path": (
+            HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_PATH
+        ),
+        "historical_x9_child_freeze_failure_receipt_artifact_sha256": (
+            HISTORICAL_X9_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256
+        ),
+        "historical_x9_child_freeze_failure_receipt_file_sha256": (
+            HISTORICAL_X9_CHILD_FREEZE_FAILURE_FILE_SHA256
+        ),
+        "historical_x9_child_freeze_failure_receipt_path": (
+            HISTORICAL_X9_CHILD_FREEZE_FAILURE_PATH
+        ),
+        "historical_x9_failure_official_source_content_accessed": True,
+        "historical_x9_failure_output_state": "NONE",
+        "historical_x9_failure_reason": "STAGE_REFUSED",
+        "historical_x9_failure_stage": "decision_and_child_materialization",
+        "historical_x9_failure_stage_ordinal": 9,
+        "implementation_revision": TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        "inventory_builder_authorization_reused": False,
+        "maximum_consumptions": 1,
+        "parent_config_file_sha256": TENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        "project_source_tree_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_PROJECT_SOURCE_TREE_SHA256
+        ),
+        "protocol_child_freeze_attempt_ordinal": (
+            HISTORICAL_X10_CHILD_FREEZE_PROTOCOL_ATTEMPT_ORDINAL
+        ),
+        "protocol_id": PROTOCOL_ID,
+        "python_environment_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_PYTHON_ENVIRONMENT_SHA256
+        ),
+        "schema_version": 1,
+        "state": "PRECLAIM_CHILD_FREEZE_AUTHORIZATION_CONSUMED",
+    }
+    if canonical_sha256(body) != HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256:
+        raise OODExternalV2IntegrityError(
+            "frozen X10 child freeze attempt artifact constants are inconsistent"
+        )
+    body["artifact_sha256"] = HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256
+    payload = canonical_json_bytes(body)
+    if sha256_bytes(payload) != HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_FILE_SHA256:
+        raise OODExternalV2IntegrityError(
+            "frozen X10 child freeze attempt file constants are inconsistent"
+        )
+    return payload
+
+
+def _historical_x10_child_freeze_failure_bytes() -> bytes:
+    body: dict[str, object] = {
+        "artifact_type": SUCCESSOR_CHILD_FREEZE_FAILURE_ARTIFACT_TYPE,
+        "authorization_consumed": True,
+        "authorization_id": "x10_child_freeze_attempt_1",
+        "authorization_marker_artifact_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "authorization_marker_file_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_FILE_SHA256
+        ),
+        "contains_external_source_bytes_or_identifiers": False,
+        "contains_model_outputs_embeddings_or_scores": False,
+        "external_one_shot_claim_consumed": False,
+        "failure_reason": "UNEXPECTED_INTERNAL_FAILURE",
+        "failure_requires_new_frozen_amendment_and_authorization_id": True,
+        "failure_stage": "decision_and_child_materialization",
+        "failure_stage_ordinal": 9,
+        "implementation_revision": TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        "official_source_content_accessed": True,
+        "output_state": "NONE",
+        "parent_config_file_sha256": TENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        "protocol_id": PROTOCOL_ID,
+        "quality_model_score_logit_probability_or_metric_observed": False,
+        "retry_resume_or_reuse_authorized": False,
+        "schema_version": 1,
+        "state": "PRECLAIM_CHILD_FREEZE_FAILED",
+        "waveform_sample_decode_occurred": False,
+    }
+    if canonical_sha256(body) != HISTORICAL_X10_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256:
+        raise OODExternalV2IntegrityError(
+            "frozen X10 child freeze failure artifact constants are inconsistent"
+        )
+    body["artifact_sha256"] = HISTORICAL_X10_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256
+    payload = canonical_json_bytes(body)
+    if sha256_bytes(payload) != HISTORICAL_X10_CHILD_FREEZE_FAILURE_FILE_SHA256:
+        raise OODExternalV2IntegrityError(
+            "frozen X10 child freeze failure file constants are inconsistent"
+        )
+    return payload
+
+
+def _verify_historical_x10_child_freeze_artifacts(project_root: Path) -> None:
+    _verify_historical_x9_child_freeze_artifacts(project_root)
+    for relative_path, expected, context in (
+        (
+            HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH,
+            _historical_x10_child_freeze_attempt_bytes(),
+            "historical X10 child freeze attempt marker",
+        ),
+        (
+            HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH,
+            _historical_x10_child_freeze_failure_bytes(),
+            "historical X10 child freeze failure receipt",
+        ),
+    ):
+        path = _resolve_project_relative(
+            project_root,
+            relative_path,
+            require_file=True,
+        )
+        if _read_bounded(path, _CHILD_MAX_BYTES, context) != expected:
+            raise OODExternalV2IntegrityError(f"{context} differs")
+        _require_git_ignored_and_untracked(
+            project_root,
+            relative_path,
+            context=context,
+        )
+
+
 def _child_freeze_attempt_body_from_identity(
     *,
     parent_config_file_sha256: str,
@@ -8172,7 +8534,7 @@ def _child_freeze_attempt_body_from_identity(
     body: dict[str, object] = {
         "artifact_type": SUCCESSOR_CHILD_FREEZE_ATTEMPT_ARTIFACT_TYPE,
         "authorization_consumption_ordinal": 1,
-        "authorization_id": "x10_child_freeze_attempt_1",
+        "authorization_id": "x11_child_freeze_attempt_1",
         "child_contract_relative_path": SUCCESSOR_CHILD_CONFIG_PATH,
         "child_frozen_at_utc": frozen_at_utc.astimezone(UTC)
         .isoformat()
@@ -8233,12 +8595,36 @@ def _child_freeze_attempt_body_from_identity(
         "historical_x9_failure_reason": "STAGE_REFUSED",
         "historical_x9_failure_stage": "decision_and_child_materialization",
         "historical_x9_failure_stage_ordinal": 9,
+        "historical_x10_authorization_consumed_failed_retained": True,
+        "historical_x10_child_freeze_attempt_artifact_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "historical_x10_child_freeze_attempt_file_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_FILE_SHA256
+        ),
+        "historical_x10_child_freeze_attempt_path": (
+            HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH
+        ),
+        "historical_x10_child_freeze_failure_receipt_artifact_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256
+        ),
+        "historical_x10_child_freeze_failure_receipt_file_sha256": (
+            HISTORICAL_X10_CHILD_FREEZE_FAILURE_FILE_SHA256
+        ),
+        "historical_x10_child_freeze_failure_receipt_path": (
+            HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH
+        ),
+        "historical_x10_failure_official_source_content_accessed": True,
+        "historical_x10_failure_output_state": "NONE",
+        "historical_x10_failure_reason": "UNEXPECTED_INTERNAL_FAILURE",
+        "historical_x10_failure_stage": "decision_and_child_materialization",
+        "historical_x10_failure_stage_ordinal": 9,
         "implementation_revision": implementation_revision,
         "inventory_builder_authorization_reused": False,
         "maximum_consumptions": 1,
         "parent_config_file_sha256": parent_config_file_sha256,
         "project_source_tree_sha256": project_source_tree_sha256,
-        "protocol_child_freeze_attempt_ordinal": 2,
+        "protocol_child_freeze_attempt_ordinal": 3,
         "protocol_id": PROTOCOL_ID,
         "python_environment_sha256": python_environment_sha256,
         "schema_version": 1,
@@ -8292,7 +8678,7 @@ def _child_freeze_failure_body(
     body: dict[str, object] = {
         "artifact_type": SUCCESSOR_CHILD_FREEZE_FAILURE_ARTIFACT_TYPE,
         "authorization_consumed": True,
-        "authorization_id": "x10_child_freeze_attempt_1",
+        "authorization_id": "x11_child_freeze_attempt_1",
         "authorization_marker_artifact_sha256": attempt["artifact_sha256"],
         "authorization_marker_file_sha256": sha256_bytes(
             _child_freeze_attempt_bytes(preflight)
@@ -8351,14 +8737,14 @@ def _verify_child_freeze_marker(
     observed = _read_bounded(
         marker,
         _CHILD_MAX_BYTES,
-        "X10 child freeze attempt marker",
+        "X11 child freeze attempt marker",
     )
     if observed != expected_bytes:
-        raise OODExternalV2IntegrityError("X10 child freeze attempt marker differs")
+        raise OODExternalV2IntegrityError("X11 child freeze attempt marker differs")
     _require_git_ignored_and_untracked(
         project_root,
         SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
-        context="X10 child freeze attempt marker",
+        context="X11 child freeze attempt marker",
     )
     return sha256_bytes(observed)
 
@@ -8373,10 +8759,10 @@ def verify_child_freeze_authorization_available(
     root = _strict_project_root(project_root)
     if root != preflight.project_root:
         raise OODExternalV2IntegrityError("child freeze preflight project root differs")
-    _verify_historical_x9_child_freeze_artifacts(root)
+    _verify_historical_x10_child_freeze_artifacts(root)
     for relative_path, context in (
-        (SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH, "X10 child freeze authorization"),
-        (SUCCESSOR_CHILD_FREEZE_FAILURE_PATH, "X10 child freeze failure receipt"),
+        (SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH, "X11 child freeze authorization"),
+        (SUCCESSOR_CHILD_FREEZE_FAILURE_PATH, "X11 child freeze failure receipt"),
     ):
         candidate = _resolve_project_relative(root, relative_path, require_file=False)
         if candidate.exists() or _is_indirect(candidate):
@@ -8442,12 +8828,12 @@ def record_child_freeze_failure(
     )
     if receipt.exists() or _is_indirect(receipt):
         raise OODExternalV2IntegrityError(
-            "X10 child freeze failure receipt already exists"
+            "X11 child freeze failure receipt already exists"
         )
     _require_git_ignored_and_untracked(
         root,
         SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
-        context="X10 child freeze failure receipt",
+        context="X11 child freeze failure receipt",
     )
     payload = _child_freeze_failure_bytes(
         preflight,
@@ -8480,19 +8866,19 @@ def record_child_freeze_failure(
     )
     if not visible or not published:
         raise OODExternalV2IntegrityError(
-            "X10 child freeze failure receipt publication was not witnessed"
+            "X11 child freeze failure receipt publication was not witnessed"
         )
     observed = _read_bounded(
         receipt,
         _CHILD_MAX_BYTES,
-        "X10 child freeze failure receipt",
+        "X11 child freeze failure receipt",
     )
     if observed != payload:
-        raise OODExternalV2IntegrityError("X10 child freeze failure receipt differs")
+        raise OODExternalV2IntegrityError("X11 child freeze failure receipt differs")
     _require_git_ignored_and_untracked(
         root,
         SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
-        context="X10 child freeze failure receipt",
+        context="X11 child freeze failure receipt",
     )
     return sha256_bytes(observed)
 
@@ -8600,7 +8986,7 @@ def _verify_child_inventory_builder_attempt(
     project_root: str | Path,
 ) -> None:
     root = _strict_project_root(project_root)
-    _verify_historical_x9_child_freeze_artifacts(root)
+    _verify_historical_x10_child_freeze_artifacts(root)
     observed_file_sha256 = HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
     if (
         child.inventory_builder_attempt.file_sha256 != observed_file_sha256
@@ -8664,12 +9050,12 @@ def _verify_child_inventory_builder_attempt(
     )
     if child_freeze_failure.exists() or _is_indirect(child_freeze_failure):
         raise OODExternalV2IntegrityError(
-            "child verification is forbidden after an X10 child freeze failure"
+            "child verification is forbidden after an X11 child freeze failure"
         )
     _require_git_ignored_and_untracked(
         root,
         SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
-        context="absent X10 child freeze failure receipt",
+        context="absent X11 child freeze failure receipt",
     )
 
 
@@ -9172,7 +9558,7 @@ def verify_child_freeze_preflight(
     output_path: str | Path,
     seven_zip_executable: str | Path = "7z",
 ) -> ChildFreezePreflight:
-    """Verify X10 controls without reading official/private content or writing state."""
+    """Verify X11 controls without reading official/private content or writing state."""
 
     def parent_lineage() -> tuple[Path, OODExternalV2ParentConfig, str]:
         root_value = _strict_project_root(project_root)
@@ -9243,7 +9629,7 @@ def verify_child_freeze_preflight(
     )
 
     def x8_inventory_evidence() -> tuple[Path, Path, Path]:
-        _verify_historical_x9_child_freeze_artifacts(root)
+        _verify_historical_x10_child_freeze_artifacts(root)
         inventory_file = _require_project_file(
             root,
             Path(os.path.abspath(os.fspath(inventory_path))),
@@ -9297,10 +9683,10 @@ def verify_child_freeze_preflight(
     def decision_and_runtime_bindings() -> tuple[
         Mapping[str, BoundFile], Mapping[str, str]
     ]:
-        return (
-            _verify_child_freeze_decision_bindings(root),
-            _freeze_child_runtime_bindings(root),
-        )
+        decisions = _verify_child_freeze_decision_bindings(root)
+        runtime = _freeze_child_runtime_bindings(root)
+        _probe_child_freeze_binding_serialization(decisions, runtime)
+        return decisions, runtime
 
     decision_bindings, runtime_bindings = cast(
         tuple[Mapping[str, BoundFile], Mapping[str, str]],
@@ -9372,7 +9758,7 @@ def verify_child_freeze_preflight(
             )
         if destination.exists() or _is_indirect(destination):
             raise OODExternalV2IntegrityError(
-                "child contract destination must remain absent before X10"
+                "child contract destination must remain absent before X11"
             )
         output_root = _resolve_project_relative(
             root,
@@ -9401,7 +9787,7 @@ def verify_child_freeze_preflight(
         )
         if attempt_path.parent != receipt_path.parent:
             raise OODExternalV2ConfigError(
-                "X10 protocol artifacts must share one parent directory"
+                "X11 protocol artifacts must share one parent directory"
             )
         return (
             frozen,
@@ -9488,6 +9874,10 @@ def verify_child_freeze_preflight(
             raise OODExternalV2IntegrityError(
                 "decision or runtime bindings changed during child-freeze preflight"
             )
+        _probe_child_freeze_binding_serialization(
+            decision_bindings,
+            runtime_bindings,
+        )
         verify_child_freeze_authorization_available(preflight, project_root=root)
 
     _child_freeze_preflight_stage("closing_control_state", closing_control_state)
@@ -9524,7 +9914,7 @@ def _verify_child_freeze_raw_source_bindings(
     return observed
 
 
-def _freeze_external_v2_child_contract_after_x10_authorization(
+def _freeze_external_v2_child_contract_after_x11_authorization(
     *,
     preflight: ChildFreezePreflight,
     stage_callback: Callable[[str], None] | None,
@@ -9550,7 +9940,7 @@ def _freeze_external_v2_child_contract_after_x10_authorization(
     output_path = preflight.output_path
     seven_zip_executable = preflight.seven_zip_executable
     frozen_at_utc = preflight.frozen_at_utc.isoformat()
-    _verify_historical_x9_child_freeze_artifacts(root)
+    _verify_historical_x10_child_freeze_artifacts(root)
     builder_attempt_file_sha256 = HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_FILE_SHA256
     builder_attempt_artifact_sha256 = (
         HISTORICAL_X8_INVENTORY_BUILDER_ATTEMPT_ARTIFACT_SHA256
@@ -9801,7 +10191,7 @@ def _freeze_external_v2_child_contract_after_x10_authorization(
             }
             for name, binding in raw_bindings.items()
         },
-        "runtime_bindings": runtime_bindings,
+        "runtime_bindings": _ordered_runtime_bindings_dict(runtime_bindings),
         "runtime_environment": _runtime_environment_dict(runtime_environment),
         "schema_version": 1,
     }
@@ -9849,7 +10239,7 @@ def _freeze_external_v2_child_contract_after_x10_authorization(
         )
     _verify_git_remote_state(root, expected_revision=revision)
     _verify_private_history_absent(root)
-    _verify_historical_x9_child_freeze_artifacts(root)
+    _verify_historical_x10_child_freeze_artifacts(root)
     if _verify_historical_x8_inventory_builder_evidence(root) != (
         builder_attempt_file_sha256
     ):
@@ -9945,7 +10335,7 @@ def freeze_external_v2_child_contract(
     child_visibility_witness: Callable[[], None] | None = None,
     child_publication_witness: Callable[[], None] | None = None,
 ) -> OODExternalV2ChildContract:
-    """Consume X10 once and freeze the child without scientific evaluation."""
+    """Consume X11 once and freeze the child without scientific evaluation."""
 
     for callback, context in (
         (stage_callback, "stage_callback"),
@@ -10045,7 +10435,7 @@ def freeze_external_v2_child_contract(
             raise ChildFreezePreflightStageError("closing_control_state") from None
         if marker_state != "EXACT":
             raise OODExternalV2ExecutionError(
-                "X10 child freeze authorization state is unverifiable"
+                "X11 child freeze authorization state is unverifiable"
             ) from None
         authorization_visible = True
         failure_receipt_visible = False
@@ -10084,7 +10474,7 @@ def freeze_external_v2_child_contract(
         ) from None
 
     try:
-        return _freeze_external_v2_child_contract_after_x10_authorization(
+        return _freeze_external_v2_child_contract_after_x11_authorization(
             preflight=preflight,
             stage_callback=transition,
             source_access_witness=mark_source_accessed,
@@ -10095,7 +10485,7 @@ def freeze_external_v2_child_contract(
     except BaseException as error:
         if not authorization_visible:
             raise OODExternalV2ExecutionError(
-                "X10 child freeze authorization state is unverifiable"
+                "X11 child freeze authorization state is unverifiable"
             ) from None
         output_state: str
         if expected_child_bytes is None:
@@ -14194,6 +14584,51 @@ def _freeze_child_runtime_bindings(root: Path) -> Mapping[str, str]:
             "child runtime bindings differ from the exact evaluator set"
         )
     return MappingProxyType(bindings)
+
+
+def _ordered_runtime_bindings_dict(
+    runtime_bindings: Mapping[str, str],
+) -> dict[str, str]:
+    """Return the exact runtime table as a canonical-JSON-safe plain dict."""
+
+    if not isinstance(runtime_bindings, Mapping):
+        raise OODExternalV2IntegrityError("child runtime bindings must be a mapping")
+    if tuple(runtime_bindings) != REQUIRED_RUNTIME_BINDING_PATHS:
+        raise OODExternalV2IntegrityError(
+            "child runtime bindings differ from the exact ordered evaluator set"
+        )
+    serialized = {
+        relative_path: _digest(
+            runtime_bindings[relative_path],
+            f"runtime binding {relative_path}",
+        )
+        for relative_path in REQUIRED_RUNTIME_BINDING_PATHS
+    }
+    if type(serialized) is not dict or tuple(serialized) != REQUIRED_RUNTIME_BINDING_PATHS:
+        raise OODExternalV2IntegrityError(
+            "child runtime bindings could not be materialized in exact order"
+        )
+    return serialized
+
+
+def _probe_child_freeze_binding_serialization(
+    decision_bindings: Mapping[str, BoundFile],
+    runtime_bindings: Mapping[str, str],
+) -> None:
+    """Prove the exact child binding fragment is canonical-JSON serializable."""
+
+    decision_order = ("demo_policy", "source_calibration_result")
+    if tuple(decision_bindings) != decision_order:
+        raise OODExternalV2IntegrityError(
+            "child decision bindings differ from their exact ordered set"
+        )
+    probe: dict[str, object] = {
+        "decision_bindings": {
+            name: _bound_file_dict(decision_bindings[name]) for name in decision_order
+        },
+        "runtime_bindings": _ordered_runtime_bindings_dict(runtime_bindings),
+    }
+    canonical_json_bytes(probe)
 
 
 def _bound_file_dict(value: BoundFile) -> dict[str, object]:

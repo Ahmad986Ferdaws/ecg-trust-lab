@@ -1182,7 +1182,7 @@ def test_x8_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "scope": "after_external_one_shot_claim_entry_first_becomes_visible",
     }
     assert "retry_resume_or_second_inference" not in one_shot
-    assert one_shot["prerequisites"][-9:] == [
+    assert one_shot["prerequisites"][-10:] == [
         "exact_retained_x6_consumed_failed_inventory_build_authorization_marker_verified",
         "exact_retained_x7_consumed_failed_inventory_build_authorization_marker_"
         "and_failure_receipt_verified",
@@ -1190,8 +1190,10 @@ def test_x8_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
         "x8_inventory_build_failure_receipt_absent",
         "exact_retained_x9_consumed_failed_child_freeze_authorization_marker_"
         "and_failure_receipt_verified",
-        "durable_x10_child_freeze_authorization_marker_verified",
-        "x10_child_freeze_failure_receipt_absent",
+        "exact_retained_x10_consumed_failed_child_freeze_authorization_marker_"
+        "and_failure_receipt_verified",
+        "durable_x11_child_freeze_authorization_marker_verified",
+        "x11_child_freeze_failure_receipt_absent",
         "output_root_absent",
         "clean_committed_revision",
     ]
@@ -1297,15 +1299,15 @@ def test_x8_inventory_authorization_counts_and_seven_zip_contract_are_exact() ->
     assert "single_directory_rmdir_only" not in protocol
 
 
-def test_x10_child_freeze_amendment_preserves_x8_and_x9_failure() -> None:
+def test_x11_child_freeze_amendment_preserves_x8_x9_and_x10_failure() -> None:
     payload = _successor_parent_yaml()
-    assert payload["frozen_at_utc"] == "2026-08-30T11:32:47Z"
+    assert payload["frozen_at_utc"] == "2026-08-30T13:00:48Z"
     assert pipeline.EXPECTED_SUCCESSOR_PARENT_CONFIG_SHA256 == (
-        "sha256:2b6696d07c1fbab1e31eccb3d8d48fdc6251d12301df6ca604b8af1d02b7dd10"
+        "sha256:4b5b54a695fda09241ebb9c6d2503b10fe05b0a38cbd279ab702f2d8b52105c2"
     )
 
     modified_paths = list(
-        pipeline.SUCCESSOR_CHILD_FREEZE_DECISION_BINDING_AMENDMENT_MODIFIED_PATHS
+        pipeline.SUCCESSOR_CHILD_FREEZE_SERIALIZATION_AMENDMENT_MODIFIED_PATHS
     )
     assert modified_paths == [
         "configs/trust_sentinel_ood_external_v2_1.yaml",
@@ -1528,10 +1530,10 @@ def test_x10_child_freeze_amendment_preserves_x8_and_x9_failure() -> None:
         "x10_child_freeze_attempt_1"
     )
     assert x10_design["new_x10_child_freeze_authorization_path"] == (
-        pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH
     )
     assert x10_design["new_x10_child_freeze_failure_receipt_path"] == (
-        pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH
     )
     assert x10_design["operational_amendment_only"] is True
     assert x10_design["scientific_protocol_change"] is False
@@ -1539,6 +1541,114 @@ def test_x10_child_freeze_amendment_preserves_x8_and_x9_failure() -> None:
     assert x10_design["amendment_revision_contract"] == {
         "commit_count_after_x9_implementation_revision": 1,
         "sole_parent": pipeline.NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        "exact_modified_paths": modified_paths,
+        "status_for_every_path": "modified",
+    }
+    x11_design = cast(
+        dict[str, Any],
+        design_history["x10_child_freeze_failure_and_x11_authorization"],
+    )
+    assert set(x11_design) == {
+        "x10_implementation_revision",
+        "x10_parent_config_file_sha256",
+        "x10_frozen_at_utc",
+        "x10_production_child_freeze",
+        "root_cause",
+        "x10_authorization_and_receipt_retention",
+        "new_x11_child_freeze_authorization_id",
+        "new_x11_child_freeze_authorization_path",
+        "new_x11_child_freeze_failure_receipt_path",
+        "operational_amendment_only",
+        "scientific_protocol_change",
+        "decision_json_or_scientific_setting_change",
+        "inventory_or_model_policy_threshold_change",
+        "amendment",
+        "amendment_revision_contract",
+    }
+    assert x11_design["x10_implementation_revision"] == (
+        pipeline.TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+    )
+    assert x11_design["x10_parent_config_file_sha256"] == (
+        pipeline.TENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+    )
+    assert x11_design["x10_frozen_at_utc"] == (
+        pipeline.TENTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC
+    )
+    assert x11_design["x10_production_child_freeze"] == {
+        "authorization_id": "x10_child_freeze_attempt_1",
+        "authorization_path": pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH,
+        "authorization_marker_created": True,
+        "authorization_consumed": True,
+        "authorization_state": "CONSUMED_FAILED_RETAINED",
+        "authorization_marker_file_sha256": (
+            pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_FILE_SHA256
+        ),
+        "authorization_marker_artifact_sha256": (
+            pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256
+        ),
+        "protocol_child_freeze_attempt_ordinal": (
+            pipeline.HISTORICAL_X10_CHILD_FREEZE_PROTOCOL_ATTEMPT_ORDINAL
+        ),
+        "child_frozen_at_utc": pipeline.HISTORICAL_X10_CHILD_FROZEN_AT_UTC,
+        "project_source_tree_sha256": (
+            pipeline.HISTORICAL_X10_CHILD_FREEZE_PROJECT_SOURCE_TREE_SHA256
+        ),
+        "python_environment_sha256": (
+            pipeline.HISTORICAL_X10_CHILD_FREEZE_PYTHON_ENVIRONMENT_SHA256
+        ),
+        "git_runtime_tree_sha256": pipeline.HISTORICAL_X10_GIT_RUNTIME_TREE_SHA256,
+        "failure_receipt_path": pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH,
+        "failure_receipt_created": True,
+        "failure_receipt_file_sha256": (
+            pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_FILE_SHA256
+        ),
+        "failure_receipt_artifact_sha256": (
+            pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256
+        ),
+        "exact_failure_stage": "decision_and_child_materialization",
+        "failure_stage_ordinal": 9,
+        "failure_reason": "UNEXPECTED_INTERNAL_FAILURE",
+        "official_source_content_accessed": True,
+        "output_state": "NONE",
+        "child_contract_created": False,
+        "waveform_sample_decode_occurred": False,
+        "quality_policy_execution_occurred": False,
+        "trained_checkpoint_or_model_access_occurred": False,
+        "evaluation_or_metric_execution_occurred": False,
+        "external_one_shot_claim_created": False,
+        "successor_output_root_created": False,
+        "runtime_cleanup_state": "CLEAN",
+    }
+    assert x11_design["root_cause"] == {
+        "category": "runtime_bindings_mapping_proxy_not_canonical_json_serializable",
+        "runtime_bindings_runtime_type": "types.MappingProxyType",
+        "failing_boundary": "child_contract_canonical_json_serialization",
+        "raised_error": "ExternalV2BundleError",
+        "verified_remedy": (
+            "materialize_runtime_bindings_as_plain_dict_and_require_"
+            "preauthorization_canonical_json_probe"
+        ),
+        "failure_was_operational_not_scientific": True,
+    }
+    assert x11_design["x10_authorization_and_receipt_retention"] == (
+        "exact_artifacts_permanently_retained_ignored_untracked_and_never_reused"
+    )
+    assert x11_design["new_x11_child_freeze_authorization_id"] == (
+        "x11_child_freeze_attempt_1"
+    )
+    assert x11_design["new_x11_child_freeze_authorization_path"] == (
+        pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
+    )
+    assert x11_design["new_x11_child_freeze_failure_receipt_path"] == (
+        pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH
+    )
+    assert x11_design["operational_amendment_only"] is True
+    assert x11_design["scientific_protocol_change"] is False
+    assert x11_design["decision_json_or_scientific_setting_change"] is False
+    assert x11_design["inventory_or_model_policy_threshold_change"] is False
+    assert x11_design["amendment_revision_contract"] == {
+        "commit_count_after_x10_implementation_revision": 1,
+        "sole_parent": pipeline.TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
         "exact_modified_paths": modified_paths,
         "status_for_every_path": "modified",
     }
@@ -1568,7 +1678,31 @@ def test_x10_child_freeze_amendment_preserves_x8_and_x9_failure() -> None:
         "create_new",
         "durability",
         "timing",
+        "protocol_child_freeze_attempt_ordinal",
         "exact_ordered_controls_only_preflight_stages",
+        "runtime_bindings_child_json_type",
+        "runtime_bindings_exact_order",
+        "preauthorization_canonical_json_serializability_probe",
+        "x10_implementation_revision",
+        "x10_parent_config_file_sha256",
+        "x10_frozen_at_utc",
+        "x10_child_freeze_authorization_path",
+        "x10_child_freeze_authorization_marker_file_sha256",
+        "x10_child_freeze_authorization_marker_artifact_sha256",
+        "x10_protocol_child_freeze_attempt_ordinal",
+        "x10_child_frozen_at_utc",
+        "x10_project_source_tree_sha256",
+        "x10_python_environment_sha256",
+        "x10_git_runtime_tree_sha256",
+        "x10_child_freeze_failure_receipt_path",
+        "x10_child_freeze_failure_receipt_file_sha256",
+        "x10_child_freeze_failure_receipt_artifact_sha256",
+        "x10_child_freeze_failure_stage",
+        "x10_child_freeze_failure_stage_ordinal",
+        "x10_child_freeze_failure_reason",
+        "x10_child_freeze_official_source_content_accessed",
+        "x10_child_freeze_output_state",
+        "x10_child_freeze_authorization_consumed_failed_retained",
         "x9_implementation_revision",
         "x9_parent_config_file_sha256",
         "x9_frozen_at_utc",
@@ -1614,15 +1748,16 @@ def test_x10_child_freeze_amendment_preserves_x8_and_x9_failure() -> None:
         "failure_after_consumption_requires_new_frozen_amendment_and_new_authorization_id",
         "failure_receipt",
     }
-    assert authorization["authorization_id"] == "x10_child_freeze_attempt_1"
+    assert authorization["authorization_id"] == "x11_child_freeze_attempt_1"
     assert authorization["artifact_type"] == (
         pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_ARTIFACT_TYPE
     )
     assert authorization["path"] == pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH
     assert authorization["scope"] == (
-        "sole_x10_child_freeze_attempt_reusing_exact_successful_x8_inventory_"
-        "after_consumed_failed_x9"
+        "sole_x11_child_freeze_attempt_reusing_exact_successful_x8_inventory_"
+        "after_consumed_failed_x9_and_x10"
     )
+    assert authorization["protocol_child_freeze_attempt_ordinal"] == 3
     assert authorization["maximum_consumptions"] == 1
     assert authorization["create_new"] == "immutable_atomic_create_new_no_overwrite"
     assert authorization["durability"] == (
@@ -1631,6 +1766,65 @@ def test_x10_child_freeze_amendment_preserves_x8_and_x9_failure() -> None:
     assert authorization["exact_ordered_controls_only_preflight_stages"] == list(
         pipeline.CHILD_FREEZE_PREFLIGHT_STAGES
     )
+    assert authorization["runtime_bindings_child_json_type"] == "plain_dict"
+    assert authorization["runtime_bindings_exact_order"] == (
+        "required_runtime_binding_paths"
+    )
+    assert authorization["preauthorization_canonical_json_serializability_probe"] == (
+        "required"
+    )
+    assert authorization["x10_implementation_revision"] == (
+        pipeline.TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
+    )
+    assert authorization["x10_parent_config_file_sha256"] == (
+        pipeline.TENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256
+    )
+    assert authorization["x10_frozen_at_utc"] == (
+        pipeline.TENTH_FROZEN_SUCCESSOR_PARENT_FROZEN_AT_UTC
+    )
+    assert authorization["x10_child_freeze_authorization_path"] == (
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH
+    )
+    assert authorization["x10_child_freeze_authorization_marker_file_sha256"] == (
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_FILE_SHA256
+    )
+    assert authorization[
+        "x10_child_freeze_authorization_marker_artifact_sha256"
+    ] == pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256
+    assert authorization["x10_protocol_child_freeze_attempt_ordinal"] == (
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_PROTOCOL_ATTEMPT_ORDINAL
+    )
+    assert authorization["x10_child_frozen_at_utc"] == (
+        pipeline.HISTORICAL_X10_CHILD_FROZEN_AT_UTC
+    )
+    assert authorization["x10_project_source_tree_sha256"] == (
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_PROJECT_SOURCE_TREE_SHA256
+    )
+    assert authorization["x10_python_environment_sha256"] == (
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_PYTHON_ENVIRONMENT_SHA256
+    )
+    assert authorization["x10_git_runtime_tree_sha256"] == (
+        pipeline.HISTORICAL_X10_GIT_RUNTIME_TREE_SHA256
+    )
+    assert authorization["x10_child_freeze_failure_receipt_path"] == (
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH
+    )
+    assert authorization["x10_child_freeze_failure_receipt_file_sha256"] == (
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_FILE_SHA256
+    )
+    assert authorization["x10_child_freeze_failure_receipt_artifact_sha256"] == (
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256
+    )
+    assert authorization["x10_child_freeze_failure_stage"] == (
+        "decision_and_child_materialization"
+    )
+    assert authorization["x10_child_freeze_failure_stage_ordinal"] == 9
+    assert authorization["x10_child_freeze_failure_reason"] == (
+        "UNEXPECTED_INTERNAL_FAILURE"
+    )
+    assert authorization["x10_child_freeze_official_source_content_accessed"] is True
+    assert authorization["x10_child_freeze_output_state"] == "NONE"
+    assert authorization["x10_child_freeze_authorization_consumed_failed_retained"]
     assert authorization["x9_implementation_revision"] == (
         pipeline.NINTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION
     )
@@ -1710,34 +1904,39 @@ def test_x10_child_freeze_amendment_preserves_x8_and_x9_failure() -> None:
         pipeline.HISTORICAL_X8_PUBLIC_PROJECTION_ARTIFACT_SHA256
     )
     assert authorization["preconsumption_requirements"] == [
-        "exact_x10_parent_lineage_clean_head_live_remote_history_runtime_and_source_"
+        "exact_x11_parent_lineage_clean_head_live_remote_history_runtime_and_source_"
         "tree_verified",
         "exact_historical_x8_inventory_authorization_marker_verified",
         "x8_inventory_build_failure_receipt_absent",
         "exact_historical_x9_child_freeze_authorization_marker_and_failure_receipt_"
+        "verified",
+        "exact_historical_x10_child_freeze_authorization_marker_and_failure_receipt_"
         "verified",
         "exact_x8_private_inventory_and_public_projection_hashes_counts_and_"
         "semantics_verified",
         "exact_x8_archive_closure_summaries_revalidated_without_inventory_rebuild",
         "exact_legacy_demo_policy_file_hash_only_source_calibration_and_runtime_"
         "decision_bindings_verified",
+        "runtime_bindings_materialized_as_exact_ordered_plain_dict_and_canonical_"
+        "json_probe_passed",
         "exact_child_timestamp_and_destination_validated",
-        "x10_child_freeze_attempt_marker_failure_receipt_and_child_destination_absent",
+        "x11_child_freeze_attempt_marker_failure_receipt_and_child_destination_absent",
         "external_waveform_one_shot_claim_and_successor_output_root_absent",
     ]
     assert authorization["visibility_consumes_authorization_before_durability_completion"]
     assert authorization["first_official_source_content_reverification_requires_durable_marker"]
     assert authorization["prepublication_requirements"] == [
         "full_nested_child_contract_bytes_decode_and_semantic_validation_completed",
-        "exact_x8_inventory_and_x9_failure_lineage_reverified",
-        "x10_failure_receipt_and_child_destination_absent",
+        "exact_x8_inventory_and_x9_x10_failure_lineage_reverified",
+        "x11_failure_receipt_and_child_destination_absent",
     ]
     assert authorization["child_contract_binding"] == {
         "field": "child_freeze_attempt",
         "inventory_builder_attempt_remains_exact_x8_marker": True,
-        "x9_attempt_and_failure_receipt_bound_as_historical_lineage": True,
+        "x9_x10_attempts_and_failure_receipts_bound_as_historical_lineage": True,
         "legacy_demo_policy_identity_is_exact_file_hash_only": True,
-        "x10_failure_receipt_must_be_absent": True,
+        "runtime_bindings_materialized_as_exact_ordered_plain_dict": True,
+        "x11_failure_receipt_must_be_absent": True,
     }
     assert authorization["contains_external_source_bytes_or_identifiers"] is False
     assert authorization["contains_model_outputs_embeddings_or_scores"] is False
@@ -1811,6 +2010,8 @@ def test_x10_child_freeze_amendment_preserves_x8_and_x9_failure() -> None:
     )["paths"]
     assert pipeline.HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_PATH in protected
     assert pipeline.HISTORICAL_X9_CHILD_FREEZE_FAILURE_PATH in protected
+    assert pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH in protected
+    assert pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH in protected
     assert pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH in protected
     assert pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH in protected
 
@@ -1835,6 +2036,20 @@ def test_x10_child_freeze_amendment_preserves_x8_and_x9_failure() -> None:
         pipeline.HISTORICAL_X9_CHILD_FREEZE_FAILURE_FILE_SHA256,
         pipeline.HISTORICAL_X9_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256,
         "x10_child_freeze_attempt_1",
+        pipeline.TENTH_FROZEN_SUCCESSOR_IMPLEMENTATION_REVISION,
+        pipeline.TENTH_FROZEN_SUCCESSOR_PARENT_CONFIG_SHA256,
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH,
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_FILE_SHA256,
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_ARTIFACT_SHA256,
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH,
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_FILE_SHA256,
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_ARTIFACT_SHA256,
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_PROJECT_SOURCE_TREE_SHA256,
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_PYTHON_ENVIRONMENT_SHA256,
+        pipeline.HISTORICAL_X10_GIT_RUNTIME_TREE_SHA256,
+        pipeline.HISTORICAL_X10_CHILD_FROZEN_AT_UTC,
+        "sha256:4b5b54a695fda09241ebb9c6d2503b10fe05b0a38cbd279ab702f2d8b52105c2",
+        "x11_child_freeze_attempt_1",
         pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
         pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
         "child_freeze_attempt",
@@ -2674,6 +2889,8 @@ def test_private_history_query_covers_every_forbidden_path_and_fails_closed(
         pipeline.SUCCESSOR_INVENTORY_BUILDER_FAILURE_PATH,
         pipeline.HISTORICAL_X9_CHILD_FREEZE_ATTEMPT_PATH,
         pipeline.HISTORICAL_X9_CHILD_FREEZE_FAILURE_PATH,
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_ATTEMPT_PATH,
+        pipeline.HISTORICAL_X10_CHILD_FREEZE_FAILURE_PATH,
         pipeline.SUCCESSOR_CHILD_FREEZE_ATTEMPT_PATH,
         pipeline.SUCCESSOR_CHILD_FREEZE_FAILURE_PATH,
         ":(glob)artifacts/trust_sentinel/.ood_external_v2.staging-*/**",
