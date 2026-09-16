@@ -36,7 +36,8 @@ node --experimental-strip-types --test results-experience/tests/evidence-parity.
 ```
 
 It compares all 96 displayed macro mean/SD values and 43 SPH cohort/positive
-counts with the sealed public CSV/JSON artifacts, and verifies both public
+counts with the sealed public CSV/JSON artifacts, checks PTB-XL ECG/patient
+totals against the model card and member table, and verifies both public
 checksum inventories. It needs Node.js 22.13+ but no package installation,
 site build, private artifacts, or patient data. The explicit type-stripping
 flag supports the minimum Node version. Read-only push/PR CI runs this check

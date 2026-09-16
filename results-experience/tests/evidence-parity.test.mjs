@@ -27,15 +27,16 @@ const readJson = async (path) =>
 
 // This sealed table contains unquoted numeric/machine-name fields. Fail rather
 // than silently misparse if a future editorial change introduces CSV quoting.
-const csv = await readFile(
-  new URL("results/tables/architecture_metrics.csv", publication), "utf8",
-);
-assert.ok(!csv.includes('"'), "architecture table requires an unquoted CSV schema");
-const [header, ...lines] = csv.trim().split(/\r?\n/).map((line) => line.split(","));
-const architectureRows = lines.map((fields) => {
-  assert.equal(fields.length, header.length, "architecture CSV column count");
-  return Object.fromEntries(header.map((key, i) => [key, fields[i]]));
-});
+async function readNumericCsv(path) {
+  const csv = await readFile(new URL(path, publication), "utf8");
+  assert.ok(!csv.includes('"'), `${path}: expected unquoted CSV schema`);
+  const [header, ...lines] = csv.trim().split(/\r?\n/).map((line) => line.split(","));
+  return lines.map((fields) => {
+    assert.equal(fields.length, header.length, `${path}: CSV column count`);
+    return Object.fromEntries(header.map((key, i) => [key, fields[i]]));
+  });
+}
+const architectureRows = await readNumericCsv("results/tables/architecture_metrics.csv");
 
 async function expectedMetrics(cohort, model) {
   const statistics = cohort === "ptbxl_fold10" ? null :
@@ -99,6 +100,20 @@ test("SPH cohort totals and all positive counts match the frozen cohort summary"
   for (const [display, source] of [["primary", "primary_mapped"], ["broad", "broad_exact10"]]) {
     assert.equal(AUDITED_TRANSPORT_COHORT[display].ecgs, cohorts[source].records, `${display}/ecgs`);
     assert.equal(AUDITED_TRANSPORT_COHORT[display].patients, cohorts[source].patients, `${display}/patients`);
+  }
+});
+
+test("PTB-XL displayed cohort totals match the model card and member table", async () => {
+  const card = await readFile(new URL("../../docs/MODEL_CARD_PTBXL_SUPERCLASS_R3.md", import.meta.url), "utf8");
+  const row = /^\| Final cohort \| ([\d,]+) ECGs from ([\d,]+) patients \|$/m.exec(card);
+  assert.ok(row, "model card must contain the final-cohort evidence row");
+  const records = Number(row[1].replaceAll(",", ""));
+  const patients = Number(row[2].replaceAll(",", ""));
+  assert.deepEqual(COHORTS.ptbxl_fold10.count, { records, patients, allZeroRows: null });
+  const members = await readNumericCsv("results/tables/member_metrics.csv");
+  assert.equal(members.length, 6, "six sealed model members required");
+  for (const member of members) {
+    assert.equal(Number(member.n_samples), records, `${member.member_id}: sealed cohort size`);
   }
 });
 
