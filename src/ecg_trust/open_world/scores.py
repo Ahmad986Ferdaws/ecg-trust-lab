@@ -158,7 +158,8 @@ def _expect_scorer(
             f"scorer keys differ: missing={sorted(expected - actual)}, "
             f"extra={sorted(actual - expected)}"
         )
-    if payload["schema_version"] != _SCHEMA_VERSION:
+    version = payload["schema_version"]
+    if type(version) is not int or version != _SCHEMA_VERSION:
         raise OODScoreValidationError("unsupported scorer schema_version")
     if payload["artifact_type"] != artifact_type:
         raise OODScoreValidationError("unexpected scorer artifact_type")

@@ -594,7 +594,8 @@ def _bool_rows(values: BoolArray) -> tuple[tuple[bool, ...], ...]:
 
 
 def _expect_identity(payload: Mapping[str, object], *, artifact_type: str) -> None:
-    if payload["schema_version"] != _SCHEMA_VERSION:
+    version = payload["schema_version"]
+    if type(version) is not int or version != _SCHEMA_VERSION:
         raise ConformalValidationError("unsupported schema_version")
     if payload["artifact_type"] != artifact_type:
         raise ConformalValidationError("unexpected artifact_type")
