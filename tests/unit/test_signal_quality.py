@@ -365,3 +365,39 @@ def test_config_is_frozen_validated_and_versioned() -> None:
         config=config,
     )
     assert report.config_version == config.version
+
+
+@pytest.mark.parametrize("field", ["lead_names", "units"])
+@pytest.mark.parametrize(
+    "invalid", [None, 12, "abcdefghijkl", {"I": "mV"}, ([],) * 12, (1,) * 12],
+    ids=["none", "integer", "string", "mapping", "nested", "nonstring"],
+)
+def test_malformed_metadata_returns_invalid_evidence(field: str, invalid: object) -> None:
+    metadata = replace(SignalMetadata.canonical(), **{field: invalid})
+    report = assess_signal_quality(np.zeros((12, 1000)), metadata)
+    assert report.status is QualityStatus.INVALID
+    assert ReasonCode.INVALID_METADATA in report.reason_codes
+    assert not report.classification_allowed
+    assert report.leads == ()
+
+
+@pytest.mark.parametrize(
+    ("field", "reason"),
+    [("sample_rate_hz", ReasonCode.SAMPLE_RATE_MISMATCH),
+     ("duration_seconds", ReasonCode.DURATION_MISMATCH)],
+)
+def test_oversized_numeric_metadata_returns_invalid_evidence(
+    field: str, reason: ReasonCode
+) -> None:
+    metadata = replace(SignalMetadata.canonical(), **{field: 10**1000})
+    report = assess_signal_quality(np.zeros((12, 1000)), metadata)
+    assert report.status is QualityStatus.INVALID
+    assert reason in report.reason_codes
+    assert not report.classification_allowed
+
+
+def test_signal_conversion_overflow_returns_invalid_evidence() -> None:
+    report = assess_signal_quality([[10**1000]], SignalMetadata.canonical())
+    assert report.status is QualityStatus.INVALID
+    assert report.reason_codes == (ReasonCode.NON_NUMERIC_SIGNAL,)
+    assert not report.classification_allowed
