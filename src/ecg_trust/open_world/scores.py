@@ -59,9 +59,18 @@ def symmetric_binary_energy(logits: ArrayLike, *, temperature: float = 1.0) -> F
 
     matrix = _float_matrix(logits, context="logits")
     scale = _positive_float(temperature, "temperature")
-    centered = matrix / (2.0 * scale)
-    per_label_energy = -scale * np.logaddexp(-centered, centered)
-    return per_label_energy.mean(axis=1)
+    magnitude = np.abs(matrix)
+    # Equivalent to centered logsumexp without forming 2*T or unbounded z/T.
+    # Overflow in the nonpositive exponent has the exact limiting correction zero.
+    with np.errstate(over="ignore", under="ignore"):
+        correction = scale * np.log1p(np.exp(-magnitude / scale))
+    per_label_energy = -(magnitude / 2.0 + correction)
+    # Scale before averaging to avoid both sum overflow and subnormal division loss.
+    row_scale = -per_label_energy.min(axis=1, keepdims=True)
+    normalized = np.divide(
+        per_label_energy, row_scale, out=np.zeros_like(per_label_energy), where=row_scale != 0.0
+    )
+    return row_scale[:, 0] * normalized.mean(axis=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,7 +165,12 @@ def _expect_scorer(
 
 def _float_matrix(values: ArrayLike, *, context: str) -> FloatArray:
     try:
-        matrix = np.asarray(values, dtype=np.float64)
+        raw = np.asarray(values)
+        if np.iscomplexobj(raw):
+            raise OODScoreValidationError(f"{context} must contain real values")
+        matrix = np.asarray(raw, dtype=np.float64)
+    except OODScoreValidationError:
+        raise
     except (TypeError, ValueError) as error:
         raise OODScoreValidationError(f"{context} must be numeric") from error
     if matrix.ndim != 2:

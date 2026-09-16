@@ -200,3 +200,27 @@ def test_serialized_detector_rejects_semantically_invalid_artifacts() -> None:
     bad_rank["quantile_rank"] = 1
     with pytest.raises(MahalanobisValidationError, match="quantile_rank"):
         ShrinkageMahalanobisDetector.from_dict(bad_rank)
+
+
+@pytest.mark.parametrize("temperature", [1e-320, 1e-200, 1.0, 1e308])
+def test_energy_remains_finite_for_extreme_valid_scales(temperature: float) -> None:
+    logits = np.asarray([[1e308, -1e308, 1e308, -1e308]])
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        result = symmetric_binary_energy(logits, temperature=temperature)
+    assert np.isfinite(result).all()
+    if temperature < 1e307:
+        assert result[0] == pytest.approx(-5e307)
+    else:
+        assert result[0] == pytest.approx(-temperature * np.logaddexp(-0.5, 0.5))
+
+
+def test_energy_tiny_temperature_has_confident_limit_and_zero_limit() -> None:
+    result = symmetric_binary_energy([[1.0, -1.0], [0.0, 0.0]], temperature=1e-320)
+    assert result[0] == pytest.approx(-0.5)
+    assert result[1] == -1e-320 * np.log(2.0)
+
+
+@pytest.mark.parametrize("function", [normalized_bernoulli_entropy, symmetric_binary_energy])
+def test_scores_reject_complex_arrays_without_discarding_imaginary_parts(function: object) -> None:
+    with pytest.raises(OODScoreValidationError, match="real"):
+        function(np.asarray([[0.5 + 2j]]))
