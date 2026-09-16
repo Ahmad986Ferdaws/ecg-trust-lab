@@ -63,6 +63,39 @@ class LabelwiseBinaryConformal:
     quantile_rank: int
     quantile_level: float
 
+    def __post_init__(self) -> None:
+        """Enforce the artifact contract for every construction path."""
+
+        names = _validate_label_names(_string_sequence(self.label_names, "label_names"))
+        alpha = _open_unit_float(self.alpha, "alpha")
+        n_samples = _positive_integer(self.n_calibration_samples, "n_calibration_samples")
+        rank = _positive_integer(self.quantile_rank, "quantile_rank")
+        expected_rank = math.ceil((n_samples + 1) * (1.0 - alpha))
+        if rank != expected_rank:
+            raise ConformalValidationError("quantile_rank does not match alpha and sample count")
+        if rank > n_samples + 1:
+            raise ConformalValidationError("quantile_rank exceeds the finite-sample bound")
+
+        expected_level = min(rank / n_samples, 1.0)
+        level = _closed_unit_float(self.quantile_level, "quantile_level")
+        if not math.isclose(level, expected_level, rel_tol=0.0, abs_tol=1e-12):
+            raise ConformalValidationError("quantile_level does not match quantile_rank")
+        thresholds = _float_tuple(
+            self.thresholds,
+            "thresholds",
+            expected_length=len(names),
+            lower=0.0,
+            upper=1.0,
+        )
+        if rank > n_samples and any(value != 1.0 for value in thresholds):
+            raise ConformalValidationError(
+                "rank n+1 requires conservative threshold one for every label"
+            )
+        object.__setattr__(self, "label_names", names)
+        object.__setattr__(self, "alpha", alpha)
+        object.__setattr__(self, "thresholds", thresholds)
+        object.__setattr__(self, "quantile_level", level)
+
     @classmethod
     def fit(
         cls,
@@ -164,38 +197,13 @@ class LabelwiseBinaryConformal:
         if payload["coverage_scope"] != "labelwise_marginal_under_exchangeability":
             raise ConformalValidationError("unsupported conformal coverage_scope")
 
-        names = _validate_label_names(_string_sequence(payload["label_names"], "label_names"))
-        alpha = _open_unit_float(payload["alpha"], "alpha")
-        n_samples = _positive_integer(payload["n_calibration_samples"], "n_calibration_samples")
-        rank = _positive_integer(payload["quantile_rank"], "quantile_rank")
-        expected_rank = math.ceil((n_samples + 1) * (1.0 - alpha))
-        if rank != expected_rank:
-            raise ConformalValidationError("quantile_rank does not match alpha and sample count")
-        if rank > n_samples + 1:
-            raise ConformalValidationError("quantile_rank exceeds the finite-sample bound")
-
-        expected_level = min(rank / n_samples, 1.0)
-        level = _closed_unit_float(payload["quantile_level"], "quantile_level")
-        if not math.isclose(level, expected_level, rel_tol=0.0, abs_tol=1e-12):
-            raise ConformalValidationError("quantile_level does not match quantile_rank")
-        thresholds = _float_tuple(
-            payload["thresholds"],
-            "thresholds",
-            expected_length=len(names),
-            lower=0.0,
-            upper=1.0,
-        )
-        if rank > n_samples and any(value != 1.0 for value in thresholds):
-            raise ConformalValidationError(
-                "rank n+1 requires conservative threshold one for every label"
-            )
         return cls(
-            label_names=names,
-            alpha=alpha,
-            thresholds=thresholds,
-            n_calibration_samples=n_samples,
-            quantile_rank=rank,
-            quantile_level=level,
+            label_names=cast(tuple[str, ...], payload["label_names"]),
+            alpha=cast(float, payload["alpha"]),
+            thresholds=cast(tuple[float, ...], payload["thresholds"]),
+            n_calibration_samples=cast(int, payload["n_calibration_samples"]),
+            quantile_rank=cast(int, payload["quantile_rank"]),
+            quantile_level=cast(float, payload["quantile_level"]),
         )
 
 
@@ -206,6 +214,20 @@ class BinaryPredictionSets:
     label_names: tuple[str, ...]
     include_not_supported: tuple[tuple[bool, ...], ...]
     include_supported: tuple[tuple[bool, ...], ...]
+
+    def __post_init__(self) -> None:
+        names = _validate_label_names(_string_sequence(self.label_names, "label_names"))
+        negative = _nested_bool_sequence(self.include_not_supported, "include_not_supported")
+        positive = _nested_bool_sequence(self.include_supported, "include_supported")
+        if not negative or len(negative) != len(positive):
+            raise ConformalValidationError(
+                "prediction-set membership masks must align and be non-empty"
+            )
+        if any(len(row) != len(names) for row in (*negative, *positive)):
+            raise ConformalValidationError("prediction-set membership rows must match label count")
+        object.__setattr__(self, "label_names", names)
+        object.__setattr__(self, "include_not_supported", negative)
+        object.__setattr__(self, "include_supported", positive)
 
     @classmethod
     def from_masks(
