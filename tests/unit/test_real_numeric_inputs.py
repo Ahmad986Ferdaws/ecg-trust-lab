@@ -68,7 +68,7 @@ def test_conformal_conversion_overflow_uses_domain_error() -> None:
 
 
 def test_object_arrays_cannot_hide_numpy_complex_scalars() -> None:
-    scores = np.full((4, 5), np.complex128(0.5 + 3j), dtype=object)
+    scores = np.array([np.complex128(0.5 + 3j)] * 20, dtype=object).reshape(4, 5)
     with pytest.raises(EvaluationValidationError):
         stable_sigmoid(scores)
     with pytest.raises(EvaluationValidationError):
