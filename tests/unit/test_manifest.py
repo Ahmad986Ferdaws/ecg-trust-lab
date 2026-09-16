@@ -178,3 +178,23 @@ def test_sha256_inventory_parsing_and_verification(tmp_path: Path) -> None:
 def test_sha256_inventory_rejects_traversal() -> None:
     with pytest.raises(ManifestError, match="unsafe relative path"):
         parse_sha256sums(f"{'0' * 64}  ../outside\n")
+
+
+@pytest.mark.parametrize("path", [
+    "C:records100/00001", "C:", "records100/file:stream", ".", "records100/./00001",
+    "records100//00001", "records100/00001/", "records100/\x00bad",
+])
+def test_relative_paths_reject_nonportable_or_noncanonical_operands(path: str) -> None:
+    from ecg_trust.data.manifest import validate_relative_path
+
+    with pytest.raises(ManifestError):
+        validate_relative_path(path)
+
+
+def test_relative_paths_preserve_windows_separators_and_official_inventory_prefix() -> None:
+    from ecg_trust.data.manifest import validate_relative_path
+
+    assert validate_relative_path(r"records100\00000\00001_lr") == "records100/00000/00001_lr"
+    assert parse_sha256sums("a" * 64 + "  ./records100/00001_lr.dat") == {
+        "records100/00001_lr.dat": "a" * 64,
+    }

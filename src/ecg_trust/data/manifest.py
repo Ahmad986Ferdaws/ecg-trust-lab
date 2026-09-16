@@ -158,7 +158,14 @@ def validate_relative_path(value: object) -> str:
     windows_path = PureWindowsPath(normalized)
     if posix_path.is_absolute() or windows_path.is_absolute():
         raise ManifestError(f"absolute path is forbidden: {value!r}")
-    if any(part in {"", ".", ".."} for part in posix_path.parts):
+    # Inspect lexical components before pathlib collapses dots and empty segments.
+    # A Windows drive-relative path is not absolute; colons also select NTFS streams.
+    if (
+        windows_path.drive
+        or ":" in normalized
+        or any(ord(character) < 32 for character in normalized)
+        or any(part in {"", ".", ".."} for part in normalized.split("/"))
+    ):
         raise ManifestError(f"unsafe relative path: {value!r}")
     return posix_path.as_posix()
 
