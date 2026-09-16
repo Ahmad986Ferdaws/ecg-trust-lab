@@ -505,3 +505,40 @@ def test_psi_matches_direct_formula_on_ordinary_counts() -> None:
     expected = float(np.sum((cur - ref) * np.log(cur / ref)))
     actual = population_stability_index(reference, current, smoothing_count=1e-6)
     assert actual == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    "invalid", [np.complex128(0.5 + 3j), True, 10**1000],
+    ids=["complex-scalar", "boolean-scalar", "overflow"],
+)
+def test_histogram_rejects_lossy_object_scores(invalid: object) -> None:
+    with pytest.raises(TelemetryValidationError):
+        ScoreHistogram.from_scores(np.array([invalid], dtype=object))
+
+
+@pytest.mark.parametrize("scores", [[True, 0.5], [False, 0], (np.bool_(True), 0.2)])
+def test_histogram_rejects_boolean_before_sequence_dtype_inference(scores: object) -> None:
+    with pytest.raises(TelemetryValidationError):
+        ScoreHistogram.from_scores(scores)
+
+
+@pytest.mark.parametrize("scores", [[0, 0.5, 1], (0, 0.5, 1), np.array([0, 0.5, 1])])
+def test_histogram_preserves_numeric_sequence_and_array_counts(scores: object) -> None:
+    histogram = ScoreHistogram.from_scores(scores)
+    assert histogram.sample_count == 3
+    assert histogram.counts == ScoreHistogram.from_scores(np.array([0, 0.5, 1])).counts
+
+
+@pytest.mark.parametrize("invalid", ["0.2", None, 10**1000], ids=["text", "none", "overflow"])
+@pytest.mark.parametrize("field", ["rate_investigate_delta", "psi_smoothing_count"])
+def test_monitoring_numeric_config_errors_are_domain_errors(field: str, invalid: object) -> None:
+    with pytest.raises(TelemetryValidationError):
+        TrustMonitoringConfig(**{field: invalid})
+
+
+@pytest.mark.parametrize("invalid", ["0.5", None, 10**1000], ids=["text", "none", "overflow"])
+def test_histogram_edge_errors_are_domain_errors(invalid: object) -> None:
+    with pytest.raises(TelemetryValidationError):
+        ScoreHistogram(bin_edges=(0.0, invalid, 1.0), counts=(1, 1))
+    with pytest.raises(TelemetryValidationError):
+        TrustMonitoringConfig(score_bin_edges=(0.0, invalid, 1.0))

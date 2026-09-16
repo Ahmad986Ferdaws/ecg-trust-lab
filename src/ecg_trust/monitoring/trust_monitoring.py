@@ -104,13 +104,25 @@ class MetricFamily(StrEnum):
     SCORE_DISTRIBUTION = "score_distribution"
 
 
+def _require_float(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TelemetryValidationError(f"{name} must be numeric")
+    try:
+        result = float(value)
+    except OverflowError as error:
+        raise TelemetryValidationError(f"{name} must be finite") from error
+    if not math.isfinite(result):
+        raise TelemetryValidationError(f"{name} must be finite")
+    return result
+
+
 def _validate_increasing_thresholds(
     name: str,
     values: tuple[float, float, float, float],
     *,
     upper_bound: float | None,
 ) -> None:
-    if any(isinstance(value, bool) or not math.isfinite(value) or value <= 0.0 for value in values):
+    if any(_require_float(value, name) <= 0.0 for value in values):
         raise TelemetryValidationError(f"{name} must be finite and positive")
     if not all(left < right for left, right in zip(values, values[1:], strict=False)):
         raise TelemetryValidationError(f"{name} must be strictly increasing")
@@ -159,8 +171,8 @@ class TrustMonitoringConfig:
             raise TelemetryValidationError("config version contains unsupported characters")
         if len(self.score_bin_edges) < 3:
             raise TelemetryValidationError("score_bin_edges must define at least two bins")
-        if any(isinstance(edge, bool) or not math.isfinite(edge) for edge in self.score_bin_edges):
-            raise TelemetryValidationError("score_bin_edges must be finite")
+        for edge in self.score_bin_edges:
+            _require_float(edge, "score_bin_edges")
         if any(
             right <= left
             for left, right in zip(
@@ -194,11 +206,7 @@ class TrustMonitoringConfig:
             (self.psi_investigate, self.psi_restrict, self.psi_pause, self.psi_rollback),
             upper_bound=None,
         )
-        if (
-            isinstance(self.psi_smoothing_count, bool)
-            or not math.isfinite(self.psi_smoothing_count)
-            or self.psi_smoothing_count <= 0.0
-        ):
+        if _require_float(self.psi_smoothing_count, "psi_smoothing_count") <= 0.0:
             raise TelemetryValidationError("psi_smoothing_count must be finite and positive")
 
 
@@ -251,8 +259,8 @@ class ScoreHistogram:
             raise TelemetryValidationError("histogram must contain at least two bins")
         if len(self.counts) != len(self.bin_edges) - 1:
             raise TelemetryValidationError("histogram count length must equal edge count minus one")
-        if any(isinstance(edge, bool) or not math.isfinite(edge) for edge in self.bin_edges):
-            raise TelemetryValidationError("histogram edges must be finite")
+        for edge in self.bin_edges:
+            _require_float(edge, "histogram edges")
         if any(
             right <= left for left, right in zip(self.bin_edges, self.bin_edges[1:], strict=False)
         ):
@@ -276,18 +284,25 @@ class ScoreHistogram:
         """Aggregate ephemeral scores immediately into the frozen bins."""
 
         try:
-            raw = np.asarray(scores)
-        except (TypeError, ValueError) as error:
+            # Preserve scalar types in Python sequences until validation; dtype
+            # inference would otherwise turn mixed booleans/numbers into numbers.
+            raw = np.asarray(scores) if isinstance(scores, np.ndarray) else np.asarray(
+                scores, dtype=object
+            )
+        except (TypeError, ValueError, OverflowError) as error:
             raise TelemetryValidationError(
                 "scores must be a numeric one-dimensional array"
             ) from error
         if raw.ndim != 1:
             raise TelemetryValidationError("scores must be one-dimensional")
-        if np.iscomplexobj(raw) or np.issubdtype(raw.dtype, np.bool_):
+        if np.iscomplexobj(raw) or np.issubdtype(raw.dtype, np.bool_) or (
+            raw.dtype.kind == "O"
+            and any(np.iscomplexobj(value) or isinstance(value, (bool, np.bool_)) for value in raw)
+        ):
             raise TelemetryValidationError("scores must be real numeric values")
         try:
             numeric = np.asarray(raw, dtype=np.float64)
-        except (TypeError, ValueError) as error:
+        except (TypeError, ValueError, OverflowError) as error:
             raise TelemetryValidationError("scores must be numeric") from error
         if not np.isfinite(numeric).all():
             raise TelemetryValidationError("scores must be finite")
@@ -706,11 +721,7 @@ def population_stability_index(
         raise TelemetryValidationError("PSI requires identical frozen bin edges")
     if reference.sample_count <= 0 or current.sample_count <= 0:
         raise TelemetryValidationError("PSI requires non-empty histograms")
-    if (
-        isinstance(smoothing_count, bool)
-        or not math.isfinite(smoothing_count)
-        or smoothing_count <= 0.0
-    ):
+    if _require_float(smoothing_count, "PSI smoothing_count") <= 0.0:
         raise TelemetryValidationError("PSI smoothing_count must be finite and positive")
 
     def log_proportions(histogram: ScoreHistogram) -> NDArray[np.float64]:
@@ -955,12 +966,3 @@ def _require_int(value: object, name: str, *, minimum: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise TelemetryValidationError(f"{name} must be an integer >= {minimum}")
     return value
-
-
-def _require_float(value: object, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TelemetryValidationError(f"{name} must be numeric")
-    result = float(value)
-    if not math.isfinite(result):
-        raise TelemetryValidationError(f"{name} must be finite")
-    return result
