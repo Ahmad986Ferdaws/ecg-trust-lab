@@ -449,3 +449,12 @@ def test_attribution_rejects_complex_baseline_before_conversion() -> None:
             _tiny_resnet(), torch.zeros(1, 12, 1000), 0,
             baseline=torch.full((1, 12, 1000), 1 + 2j), n_steps=2,
         )
+
+
+@pytest.mark.parametrize("sign", [torch.tensor(True), torch.tensor(1 + 2j)])
+def test_faithfulness_rejects_boolean_and_complex_tensor_signs(sign: Tensor) -> None:
+    with pytest.raises(ValueError, match="target signs"):
+        temporal_faithfulness_curve(
+            LeadMeanModel(), torch.ones(1, 12, 1000), torch.ones(1, 1, 1000), 0,
+            fractions=(0.0, 1.0), target_signs=sign,
+        )
