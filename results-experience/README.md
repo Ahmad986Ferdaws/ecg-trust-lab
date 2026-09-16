@@ -24,9 +24,25 @@ pnpm typecheck
 pnpm test
 ```
 
-`pnpm test` performs a production build and verifies the server-rendered
+`pnpm test` first checks public evidence parity, then performs a production build and verifies the server-rendered
 evidence, research boundary, frozen metric source, 12-lead scene contract, and
 the absence of the previous neon/glass visual patterns.
+
+Run `pnpm test:evidence` for the fast, dependency-free data check. From the
+repository root, the equivalent command is:
+
+```bash
+node --experimental-strip-types --test results-experience/tests/evidence-parity.test.mjs
+```
+
+It compares all 96 displayed macro mean/SD values and 43 SPH cohort/positive
+counts with the sealed public CSV/JSON artifacts, and verifies both public
+checksum inventories. It needs Node.js 22.13+ but no package installation,
+site build, private artifacts, or patient data. The explicit type-stripping
+flag supports the minimum Node version. Read-only push/PR CI runs this check
+on Node 22.13 and 24. A mismatch should be investigated against the sealed
+evidence; do not update scientific results or their inventories to make a
+presentation test pass. This check does not certify the prose or clinical claims.
 
 ## Architecture
 

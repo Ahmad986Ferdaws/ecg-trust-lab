@@ -11,7 +11,8 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "pnpm run build && node --test tests/rendered-html.test.mjs",
+    "test": "pnpm run test:evidence && pnpm run build && node --test tests/rendered-html.test.mjs",
+    "test:evidence": "node --experimental-strip-types --test tests/evidence-parity.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler",
     "typecheck": "tsc --noEmit"
   },
