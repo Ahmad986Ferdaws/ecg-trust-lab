@@ -54,6 +54,15 @@ def _require_non_empty_string(value: object, field: str) -> str:
     return value
 
 
+def _snapshot_sequence[Item](values: Sequence[Item]) -> tuple[Item, ...]:
+    if isinstance(values, (str, bytes)):
+        raise NormalizationValidationError("normalization fields must be sequences of values")
+    try:
+        return tuple(values)
+    except TypeError as error:
+        raise NormalizationValidationError("normalization fields must be sequences") from error
+
+
 def _require_int(value: object, field: str, *, minimum: int = 1) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise NormalizationValidationError(f"{field} must be an integer >= {minimum}")
@@ -119,6 +128,8 @@ class NormalizationProvenance:
     target_columns: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "training_folds", _snapshot_sequence(self.training_folds))
+        object.__setattr__(self, "target_columns", _snapshot_sequence(self.target_columns))
         _require_non_empty_string(self.dataset_version, "dataset_version")
         digest = _require_non_empty_string(self.manifest_sha256, "manifest_sha256")
         if len(digest) != 64 or any(character not in _HEX_DIGITS for character in digest):
@@ -212,6 +223,11 @@ class NormalizationStats:
     provenance: NormalizationProvenance
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "mean", _snapshot_sequence(self.mean))
+        object.__setattr__(self, "std", _snapshot_sequence(self.std))
+        object.__setattr__(self, "leads", _snapshot_sequence(self.leads))
+        if not isinstance(self.provenance, NormalizationProvenance):
+            raise NormalizationValidationError("provenance must be NormalizationProvenance")
         if self.leads != LEADS:
             raise NormalizationValidationError(
                 f"normalization leads must use canonical order {LEADS!r}"
