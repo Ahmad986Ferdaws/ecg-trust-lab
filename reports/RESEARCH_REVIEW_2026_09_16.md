@@ -118,9 +118,12 @@ objects. That distinction motivates constructor validation here.
 - **Decision:** use `-|z|/2 - T*log1p(exp(-|z|/T))` and scale the mean; reject
   complex inputs before casting. The first attempted divide-before-sum mean
   lost one subnormal rounding unit in a zero-logit test, so it was replaced
-  with a row-scaled mean. Seven new regression cases now pass.
+  with a row-scaled mean. Automated review then found that separately rounded
+  terms at the smallest positive float could reverse score ordering. A new
+  regression reproduced that failure; dimensionless summation before rescaling
+  fixes it. Ten new regression/control cases now pass.
 - **Delivery:** [PR #11](https://github.com/Ahmad986Ferdaws/ecg-trust-lab/pull/11),
-  commit `f058339`.
+  commits `f058339` and `8778890`.
 
 A comparison using NumPy generator seed `20260916`, 1,000-by-5 logits sampled
 from `normal(0, 10)`, and temperatures `[0.01, 0.1, 1, 10, 100]` gave maximum
@@ -180,9 +183,10 @@ source. Neither the CUDA dependency source nor the scientific lock was changed.
 
 - On unchanged #8 code, the five-module suite with the new tests reported
   **46 failures and 117 passes**. The failures were the new regressions.
-- With all five fixes, the same suite reported **163 passes**.
-- The complete combined suite reported **1,721 passes, 110 prerequisite skips,
-  two upstream deprecation warnings**, in 62.47 seconds. This is 49 added tests
+- The initial five-fix suite reported **163 passes**; after the three additional
+  subnormal review regressions, it reported **166 passes**.
+- The complete combined suite reported **1,724 passes, 110 prerequisite skips,
+  two upstream deprecation warnings**, in 58.93 seconds. This is 52 added tests
   relative to #8's 1,672 passing tests.
 - Ruff passed, strict Windows-target mypy passed all 111 source files, and
   `git diff --check` passed.
