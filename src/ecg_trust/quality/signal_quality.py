@@ -380,7 +380,7 @@ def assess_signal_quality(
 
     try:
         raw_signal = np.asarray(signal_mv)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         issue = _global_issue(ReasonCode.NON_NUMERIC_SIGNAL, QualityStatus.INVALID)
         return _invalid_report(config, (issue,))
     if np.iscomplexobj(raw_signal) or np.issubdtype(raw_signal.dtype, np.bool_):
@@ -388,7 +388,7 @@ def assess_signal_quality(
         return _invalid_report(config, (issue,))
     try:
         signal = np.asarray(raw_signal, dtype=np.float64)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         issue = _global_issue(ReasonCode.NON_NUMERIC_SIGNAL, QualityStatus.INVALID)
         return _invalid_report(config, (issue,))
 
@@ -466,7 +466,15 @@ def _validate_contract(
         issues.append(_global_issue(ReasonCode.INVALID_METADATA, QualityStatus.INVALID))
         return tuple(issues)
 
-    lead_names = metadata.lead_names
+    if any(
+        not isinstance(values, (tuple, list))
+        or any(not isinstance(value, str) for value in values)
+        for values in (metadata.lead_names, metadata.units)
+    ):
+        issues.append(_global_issue(ReasonCode.INVALID_METADATA, QualityStatus.INVALID))
+        return tuple(issues)
+
+    lead_names = tuple(metadata.lead_names)
     if len(lead_names) != len(config.expected_leads):
         issues.append(_global_issue(ReasonCode.LEAD_COUNT_MISMATCH, QualityStatus.INVALID))
     if len(set(lead_names)) != len(lead_names):
@@ -979,7 +987,10 @@ def _lead_metric_issue(
 def _matches_finite_number(observed: object, expected: float, tolerance: float) -> bool:
     if isinstance(observed, bool) or not isinstance(observed, (int, float)):
         return False
-    numeric = float(observed)
+    try:
+        numeric = float(observed)
+    except OverflowError:
+        return False
     return math.isfinite(numeric) and math.isclose(numeric, expected, abs_tol=tolerance)
 
 
