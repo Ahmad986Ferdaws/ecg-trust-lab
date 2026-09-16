@@ -200,15 +200,36 @@ commits above to #8 and run:
 
 ```sh
 PYTHONPATH=src OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 MPLBACKEND=Agg \
-  python -m pytest -q --basetemp=.pytest-tmp-review
-ruff check src tests scripts
-mypy --platform win32
+  uv run --no-sync python -m pytest -q --basetemp=.pytest-tmp-review
+uv run --no-sync ruff check src tests scripts
+uv run --no-sync mypy --platform win32
 git diff --check
 ```
 
-To reproduce the initial failures, apply only the five test-file changes to
-`33f74f6`, then run the five named unit-test modules. The regression cases use
-synthetic values and do not need datasets or checkpoints.
+To reproduce the initial 46-failure, 117-pass run in an isolated checkout of
+`33f74f6`, apply only these initial test-file changes, leaving production source
+unchanged. Do not include the later `8778890` subnormal regression extension:
+
+| Test file | Source commit |
+| --- | --- |
+| `tests/unit/test_sentinel_service.py` | `70ac4d8` |
+| `tests/unit/test_conformal.py` | `fd9f4ee` |
+| `tests/unit/test_open_world.py` | `f058339` |
+| `tests/unit/test_manifest.py` | `c79b56f` |
+| `tests/unit/test_trust_monitoring.py` | `4decb7f` |
+
+Run the focused check through the same prepared CPU environment:
+
+```sh
+uv run --no-sync python -m pytest -q --basetemp=.pytest-tmp-review \
+  tests/unit/test_sentinel_service.py \
+  tests/unit/test_conformal.py \
+  tests/unit/test_open_world.py \
+  tests/unit/test_manifest.py \
+  tests/unit/test_trust_monitoring.py
+```
+
+The regression cases use synthetic values and do not need datasets or checkpoints.
 
 No patient data, trained weights, fold-10 outcomes, or private run artifacts
 were loaded. The scientific configs, dependency files, publication tables,
