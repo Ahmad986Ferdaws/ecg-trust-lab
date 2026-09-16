@@ -246,10 +246,13 @@ def _private_row(
     )
 
 
-@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_original_v2_parent_is_metadata_visible_but_never_executable(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Isolate only the Windows Git installation gate; keep the real parent
+    # loading and permanent protocol refusal active on every CI platform.
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda root: Path(root))
     parent = pipeline.load_parent_config(PARENT_PATH)
     assert parent.status == "frozen_parent_preregistration_pre_download"
     with pytest.raises(
@@ -265,10 +268,13 @@ def test_original_v2_parent_is_metadata_visible_but_never_executable(
     assert not (tmp_path / "must-not-be-read.json").exists()
 
 
-@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_original_v2_freeze_refuses_before_output_or_source_access(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Isolate only the Windows Git installation gate; keep the real parent
+    # loading and permanent protocol refusal active on every CI platform.
+    monkeypatch.setattr(pipeline, "_strict_project_root", lambda root: Path(root))
     output = tmp_path / "child.json"
     with pytest.raises(
         pipeline.OODExternalV2ExecutionError,
