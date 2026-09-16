@@ -44,6 +44,39 @@ class ShrinkageMahalanobisDetector:
     n_threshold_samples: int
     quantile_rank: int
 
+    def __post_init__(self) -> None:
+        """Validate and snapshot state regardless of construction path."""
+
+        dimension = _positive_integer(self.embedding_dim, "embedding_dim")
+        mean = _float_tuple(self.mean, "mean", expected_length=dimension)
+        precision = _square_float_tuple(self.precision, dimension=dimension)
+        precision_array = np.asarray(precision, dtype=np.float64)
+        if not np.allclose(precision_array, precision_array.T, rtol=0.0, atol=1e-10):
+            raise MahalanobisValidationError("precision matrix must be symmetric")
+        eigenvalues = np.linalg.eigvalsh(precision_array)
+        if not np.all(np.isfinite(eigenvalues)) or np.any(eigenvalues <= 0.0):
+            raise MahalanobisValidationError("precision matrix must be positive definite")
+
+        coverage = _open_unit_float(self.inlier_coverage, "inlier_coverage")
+        n_threshold = _positive_integer(self.n_threshold_samples, "n_threshold_samples")
+        rank = _positive_integer(self.quantile_rank, "quantile_rank")
+        expected_rank = math.ceil((n_threshold + 1) * coverage)
+        if rank != expected_rank or rank > n_threshold:
+            raise MahalanobisValidationError(
+                "quantile_rank does not match the finite-sample threshold rule"
+            )
+        n_fit = _positive_integer(self.n_fit_samples, "n_fit_samples")
+        if n_fit < 2:
+            raise MahalanobisValidationError("n_fit_samples must be at least two")
+
+        object.__setattr__(self, "mean", mean)
+        object.__setattr__(self, "precision", precision)
+        object.__setattr__(self, "threshold", _nonnegative_float(self.threshold, "threshold"))
+        object.__setattr__(self, "shrinkage", _closed_unit_float(self.shrinkage, "shrinkage"))
+        object.__setattr__(self, "ridge", _positive_float(self.ridge, "ridge"))
+        object.__setattr__(self, "inlier_coverage", coverage)
+
+
     @classmethod
     def fit(
         cls,
@@ -178,7 +211,8 @@ class ShrinkageMahalanobisDetector:
                 f"detector keys differ: missing={sorted(expected - actual)}, "
                 f"extra={sorted(actual - expected)}"
             )
-        if payload["schema_version"] != _SCHEMA_VERSION:
+        version = payload["schema_version"]
+        if type(version) is not int or version != _SCHEMA_VERSION:
             raise MahalanobisValidationError("unsupported detector schema_version")
         if payload["artifact_type"] != _ARTIFACT_TYPE:
             raise MahalanobisValidationError("unexpected detector artifact_type")
@@ -189,39 +223,17 @@ class ShrinkageMahalanobisDetector:
         if payload["threshold_rule"] != "ceil((n+1)*inlier_coverage)_order_statistic":
             raise MahalanobisValidationError("unsupported threshold_rule")
 
-        dimension = _positive_integer(payload["embedding_dim"], "embedding_dim")
-        mean = _float_tuple(payload["mean"], "mean", expected_length=dimension)
-        precision = _square_float_tuple(payload["precision"], dimension=dimension)
-        precision_array = np.asarray(precision, dtype=np.float64)
-        if not np.allclose(precision_array, precision_array.T, rtol=0.0, atol=1e-10):
-            raise MahalanobisValidationError("precision matrix must be symmetric")
-        eigenvalues = np.linalg.eigvalsh(precision_array)
-        if np.any(eigenvalues <= 0.0):
-            raise MahalanobisValidationError("precision matrix must be positive definite")
-
-        coverage = _open_unit_float(payload["inlier_coverage"], "inlier_coverage")
-        n_threshold = _positive_integer(payload["n_threshold_samples"], "n_threshold_samples")
-        rank = _positive_integer(payload["quantile_rank"], "quantile_rank")
-        expected_rank = math.ceil((n_threshold + 1) * coverage)
-        if rank != expected_rank or rank > n_threshold:
-            raise MahalanobisValidationError(
-                "quantile_rank does not match the finite-sample threshold rule"
-            )
-        n_fit = _positive_integer(payload["n_fit_samples"], "n_fit_samples")
-        if n_fit < 2:
-            raise MahalanobisValidationError("n_fit_samples must be at least two")
-
         return cls(
-            mean=mean,
-            precision=precision,
-            threshold=_nonnegative_float(payload["threshold"], "threshold"),
-            embedding_dim=dimension,
-            shrinkage=_closed_unit_float(payload["shrinkage"], "shrinkage"),
-            ridge=_positive_float(payload["ridge"], "ridge"),
-            inlier_coverage=coverage,
-            n_fit_samples=n_fit,
-            n_threshold_samples=n_threshold,
-            quantile_rank=rank,
+            mean=cast(tuple[float, ...], payload["mean"]),
+            precision=cast(tuple[tuple[float, ...], ...], payload["precision"]),
+            threshold=cast(float, payload["threshold"]),
+            embedding_dim=cast(int, payload["embedding_dim"]),
+            shrinkage=cast(float, payload["shrinkage"]),
+            ridge=cast(float, payload["ridge"]),
+            inlier_coverage=cast(float, payload["inlier_coverage"]),
+            n_fit_samples=cast(int, payload["n_fit_samples"]),
+            n_threshold_samples=cast(int, payload["n_threshold_samples"]),
+            quantile_rank=cast(int, payload["quantile_rank"]),
         )
 
 
@@ -245,8 +257,15 @@ def _embedding_matrix(
     expected_dim: int | None = None,
 ) -> FloatArray:
     try:
-        matrix = np.asarray(values, dtype=np.float64)
-    except (TypeError, ValueError) as error:
+        raw = np.asarray(values)
+        if np.iscomplexobj(raw) or (
+            raw.dtype.kind == "O" and any(np.iscomplexobj(value) for value in raw.flat)
+        ):
+            raise MahalanobisValidationError(f"{context} must contain real values")
+        matrix = np.asarray(raw, dtype=np.float64)
+    except MahalanobisValidationError:
+        raise
+    except (TypeError, ValueError, OverflowError) as error:
         raise MahalanobisValidationError(f"{context} must be numeric") from error
     if matrix.ndim != 2:
         raise MahalanobisValidationError(f"{context} must be a two-dimensional matrix")
@@ -292,7 +311,10 @@ def _nonnegative_float(value: object, name: str) -> float:
 def _finite_float(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise MahalanobisValidationError(f"{name} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as error:
+        raise MahalanobisValidationError(f"{name} must be finite") from error
     if not math.isfinite(number):
         raise MahalanobisValidationError(f"{name} must be finite")
     return number
