@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import cast
 
 import pytest
@@ -640,6 +640,38 @@ def test_abstention_outcome_snapshots_reason_codes() -> None:
     )
     reasons.clear()
     assert outcome.reason_codes == (ReasonCode.CONFIDENCE_GATE_ABSTAINED,)
+
+
+@pytest.mark.parametrize(
+    "field,limit", [("reason_codes", 16), ("labels", 71), ("probabilities", 71)]
+)
+def test_oversized_outcome_sequences_are_rejected_before_copying(field: str, limit: int) -> None:
+    class UncopyableList(list[object]):
+        def __iter__(self) -> Iterator[object]:
+            raise AssertionError("oversized evidence must not be copied")
+
+    values = {
+        "reason_codes": (ReasonCode.ALL_TRUST_GATES_PASSED,),
+        "labels": ("NORM",),
+        "probabilities": (0.5,),
+    }
+    values[field] = UncopyableList([None] * (limit + 1))
+    with pytest.raises(ValueError):
+        AnalysisOutcome(decision=TrustDecision.PREDICTION_ALLOWED, **values)
+
+
+@pytest.mark.parametrize("field", ["labels", "probabilities"])
+def test_abstention_rejects_prediction_sequences_before_copying(field: str) -> None:
+    class UncopyableList(list[object]):
+        def __iter__(self) -> Iterator[object]:
+            raise AssertionError("forbidden prediction evidence must not be copied")
+
+    with pytest.raises(ValueError, match="cannot contain prediction results"):
+        AnalysisOutcome(
+            decision=TrustDecision.ABSTAIN,
+            reason_codes=(ReasonCode.CONFIDENCE_GATE_ABSTAINED,),
+            **{field: UncopyableList([0.5])},
+        )
 
 
 def test_idempotency_store_is_bounded() -> None:
