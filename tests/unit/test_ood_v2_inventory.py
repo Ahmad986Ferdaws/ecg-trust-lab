@@ -1223,8 +1223,10 @@ def test_inventory_loader_rejects_oversize_input_before_parsing(
 
 def test_seven_zip_runner_enforces_output_and_wall_clock_bounds(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    executable = Path(sys.executable)
+    executable = Path(sys.executable).resolve()
+    monkeypatch.setattr(inventory_module.tempfile, "tempdir", str(tmp_path))
     assert inventory_module._run_seven_zip(
         executable, ("-c", "print('bounded')")
     ).splitlines() == ["bounded"]

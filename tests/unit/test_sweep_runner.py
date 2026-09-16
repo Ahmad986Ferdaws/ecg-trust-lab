@@ -53,9 +53,24 @@ def _pair(tmp_path: Path) -> EqualBudgetSweepPair:
         sqlite_path=tmp_path / "optuna.sqlite3",
         output_root=tmp_path / "sweep",
     )
-    return EqualBudgetSweepPair.create(
-        [replace(pair.resnet, storage=storage), replace(pair.transformer, storage=storage)]
-    )
+    # The executor below is synthetic; provenance must not depend on patient files.
+    manifest = tmp_path / "synthetic-manifest.parquet"
+    normalization = tmp_path / "synthetic-normalization.json"
+    manifest.write_bytes(b"synthetic manifest for provenance hashing\n")
+    normalization.write_text('{"fixture": "synthetic normalization"}\n', encoding="utf-8")
+    configs = []
+    for config in (pair.resnet, pair.transformer):
+        data = replace(
+            config.base_experiment.data,
+            manifest_path=manifest,
+            normalization_path=normalization,
+        )
+        configs.append(
+            replace(
+                config, storage=storage, base_experiment=replace(config.base_experiment, data=data)
+            )
+        )
+    return EqualBudgetSweepPair.create(configs)
 
 
 def _canonical_hash(value: Mapping[str, object]) -> str:
