@@ -46,6 +46,8 @@ def _target_indices(targets: TargetSpec, batch_size: int, device: torch.device) 
     if isinstance(targets, int):
         indices = torch.full((batch_size,), targets, dtype=torch.long, device=device)
     elif isinstance(targets, Tensor):
+        if targets.dtype == torch.bool or targets.is_complex():
+            raise ValueError("target indices must be real non-boolean integers")
         raw = targets.detach().to(device=device)
         if raw.ndim == 0:
             raw = raw.expand(batch_size)
@@ -69,6 +71,8 @@ def _target_signs(signs: SignSpec | None, batch_size: int, device: torch.device)
     if isinstance(signs, int):
         result = torch.full((batch_size,), signs, dtype=torch.float32, device=device)
     elif isinstance(signs, Tensor):
+        if signs.dtype == torch.bool or signs.is_complex():
+            raise ValueError("target signs must be real non-boolean values")
         result = signs.detach().to(device=device, dtype=torch.float32)
         if result.ndim == 0:
             result = result.expand(batch_size)
@@ -119,6 +123,8 @@ def _baseline_like(inputs: Tensor, baseline: Tensor | None) -> Tensor:
         return torch.zeros_like(inputs)
     if baseline.shape != inputs.shape:
         raise ValueError(f"baseline must have shape {tuple(inputs.shape)}")
+    if baseline.is_complex():
+        raise ValueError("baseline must contain real values")
     baseline = baseline.to(device=inputs.device, dtype=inputs.dtype)
     if not torch.isfinite(baseline).all():
         raise ValueError("baseline must contain only finite values")
@@ -127,12 +133,14 @@ def _baseline_like(inputs: Tensor, baseline: Tensor | None) -> Tensor:
 
 @contextmanager
 def _evaluating(model: nn.Module) -> Iterator[None]:
-    was_training = model.training
+    training_modes = tuple((module, module.training) for module in model.modules())
     model.eval()
     try:
         yield
     finally:
-        model.train(was_training)
+        # Recursive train() would overwrite deliberately frozen child modes.
+        for module, was_training in training_modes:
+            module.training = was_training
 
 
 def normalize_attributions(attributions: Tensor, *, epsilon: float = 1e-12) -> Tensor:
