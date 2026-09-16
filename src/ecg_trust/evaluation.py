@@ -859,7 +859,12 @@ def _validate_calibration_fold_ids(
 
 
 def _validate_threshold(value: float, *, name: str) -> float:
-    threshold = float(value)
+    if isinstance(value, (bool, np.bool_)) or np.iscomplexobj(value):
+        raise EvaluationValidationError(f"{name} must be a real non-boolean number")
+    try:
+        threshold = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise EvaluationValidationError(f"{name} must be numeric") from error
     if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
         raise EvaluationValidationError(f"{name} must be finite and in [0, 1]")
     return threshold
@@ -979,7 +984,7 @@ def _resolve_thresholds(
 
 
 def _validate_coverage_targets(values: Iterable[float]) -> tuple[float, ...]:
-    coverages = tuple(float(value) for value in values)
+    coverages = tuple(_validate_threshold(value, name="coverage target") for value in values)
     if not coverages:
         raise EvaluationValidationError("at least one coverage target is required")
     if any(not math.isfinite(value) or not 0.0 <= value <= 1.0 for value in coverages):
@@ -994,7 +999,7 @@ def _resolve_uncertainty(
     probabilities: FloatArray,
 ) -> tuple[FloatArray, str]:
     if uncertainty is not None:
-        values = np.asarray(uncertainty, dtype=np.float64)
+        values = _real_float_array(uncertainty, name="uncertainty")
         if values.ndim != 1 or values.shape[0] != probabilities.shape[0]:
             raise EvaluationValidationError(
                 "uncertainty must be one-dimensional with one value per sample"
