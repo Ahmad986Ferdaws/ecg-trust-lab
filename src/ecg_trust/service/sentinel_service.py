@@ -119,6 +119,8 @@ class VerifiedRelease:
     locked: bool = True
 
     def __post_init__(self) -> None:
+        if not isinstance(self.verified, bool) or not isinstance(self.locked, bool):
+            raise ValueError("verified and locked must be booleans")
         if not _is_opaque_id(self.release_id):
             raise ValueError("release_id must be an opaque identifier")
         if SHA256_PATTERN.fullmatch(self.artifact_sha256) is None:
@@ -474,8 +476,8 @@ def _release_and_engine_are_coherently_ready(
         release = provider.get_active_release()
         return (
             isinstance(release, VerifiedRelease)
-            and release.verified
-            and release.locked
+            and release.verified is True
+            and release.locked is True
             and engine.is_ready_for_release(release) is True
         )
     except Exception:
@@ -510,7 +512,7 @@ def _resolve_release(
         raise DependencyUnavailableError from None
     if not isinstance(release, VerifiedRelease) or release.release_id != release_id:
         raise DependencyUnavailableError
-    if not release.verified or not release.locked:
+    if release.verified is not True or release.locked is not True:
         raise _ReleaseNotReadyError
     return release
 

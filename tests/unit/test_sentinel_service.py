@@ -616,3 +616,30 @@ def test_idempotency_store_is_bounded() -> None:
     assert replay_after_eviction.status_code == 200
     assert replay_after_eviction.headers["idempotency-replayed"] == "false"
     assert engine.infer_calls == 3
+
+
+@pytest.mark.parametrize("field", ["verified", "locked"])
+@pytest.mark.parametrize("value", ["false", "true", 1, 0, None])
+def test_release_flags_require_real_booleans(field: str, value: object) -> None:
+    with pytest.raises(ValueError, match="boolean"):
+        VerifiedRelease(RELEASE_ID, ARTIFACT_SHA256, **{field: value})
+
+
+@pytest.mark.parametrize("endpoint", ["cases:validate", "inferences"])
+@pytest.mark.parametrize("field", ["verified", "locked"])
+def test_malformed_release_provider_fails_closed(endpoint: str, field: str) -> None:
+    class MalformedProvider(FakeReleaseProvider):
+        def get_release(self, release_id: str) -> VerifiedRelease:
+            return VerifiedRelease(release_id, ARTIFACT_SHA256, **{field: "false"})
+
+    engine = FakeAnalysisEngine()
+    with TestClient(_app(provider=MalformedProvider(), engine=engine)) as client:
+        response = client.post(
+            f"/api/v1/{endpoint}",
+            json={"case_id": "allowed", "release_id": RELEASE_ID},
+            headers={"Idempotency-Key": "malformed-release"},
+        )
+        assert client.get("/api/v1/readyz").status_code == 503
+    assert response.status_code == 503
+    assert "labels" not in _body(response)
+    assert engine.infer_calls == engine.validate_calls == 0
