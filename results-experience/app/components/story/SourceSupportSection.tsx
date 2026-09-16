@@ -49,7 +49,7 @@ export function SourceSupportSection() {
 
           <div className={styles.gateDecision}>
             <span>Frozen decision</span>
-            <strong>Not eligible</strong>
+            <strong>{result.researchBundleEligible ? "Eligible" : "Not eligible"}</strong>
             <p>
               The preregistered rule required the one-sided 95% false-rejection
               upper bound to stay at or below 5.00%.

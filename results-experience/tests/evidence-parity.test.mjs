@@ -122,7 +122,7 @@ for (const directory of ["results", "external_transport_sph_r2"]) {
     const base = new URL(`${directory}/`, publication);
     const inventory = await readFile(new URL("SHA256SUMS.txt", base), "utf8");
     for (const line of inventory.trim().split(/\r?\n/)) {
-      const match = /^([a-f0-9]{64})  ([A-Za-z0-9_./-]+)$/.exec(line);
+      const match = /^([a-f0-9]{64}) {2}([A-Za-z0-9_./-]+)$/.exec(line);
       assert.ok(match, "invalid public checksum inventory entry");
       const [, expected, path] = match;
       assert.ok(!path.startsWith("/") && !path.split("/").includes(".."), "unsafe inventory path");

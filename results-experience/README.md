@@ -47,7 +47,9 @@ site build, private artifacts, or patient data. The explicit type-stripping
 flag supports the minimum Node version. Read-only push/PR CI runs this check
 on Node 22.13 and 24. A mismatch should be investigated against the sealed
 evidence; do not update scientific results or their inventories to make a
-presentation test pass. This check does not certify the prose or clinical claims.
+presentation test pass. This check does not certify the prose or clinical claims. The full rendered-HTML
+suite also asserts that the visible frozen decision remains “Not eligible”;
+the component derives that label from the checked eligibility field.
 
 ## Architecture
 
