@@ -542,7 +542,9 @@ def _target_matrix(
 def _float_matrix(values: ArrayLike, context: str) -> FloatArray:
     try:
         raw = np.asarray(values)
-        if np.iscomplexobj(raw):
+        if np.iscomplexobj(raw) or (
+            raw.dtype.kind == "O" and any(np.iscomplexobj(value) for value in raw.flat)
+        ):
             raise ConformalValidationError(f"{context} must contain real values")
         matrix = np.asarray(raw, dtype=np.float64)
     except ConformalValidationError:

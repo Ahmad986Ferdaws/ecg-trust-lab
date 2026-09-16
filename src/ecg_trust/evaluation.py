@@ -731,7 +731,9 @@ def _validate_targets(y_true: ArrayLike, *, n_labels: int) -> IntArray:
 def _real_float_array(values: ArrayLike, *, name: str) -> FloatArray:
     try:
         raw = np.asarray(values)
-        if np.iscomplexobj(raw):
+        if np.iscomplexobj(raw) or (
+            raw.dtype.kind == "O" and any(np.iscomplexobj(value) for value in raw.flat)
+        ):
             raise EvaluationValidationError(f"{name} must contain real values")
         return np.asarray(raw, dtype=np.float64)
     except EvaluationValidationError:

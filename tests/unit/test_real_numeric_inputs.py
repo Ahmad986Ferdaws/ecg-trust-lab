@@ -65,3 +65,17 @@ def test_conformal_rejects_complex_fit_and_prediction_inputs(imaginary: float) -
 def test_conformal_conversion_overflow_uses_domain_error() -> None:
     with pytest.raises(ConformalValidationError):
         LabelwiseBinaryConformal.fit([[10**1000]], [[1]], label_names=("label",), alpha=0.5)
+
+
+def test_object_arrays_cannot_hide_numpy_complex_scalars() -> None:
+    scores = np.full((4, 5), np.complex128(0.5 + 3j), dtype=object)
+    with pytest.raises(EvaluationValidationError):
+        stable_sigmoid(scores)
+    with pytest.raises(EvaluationValidationError):
+        validate_multilabel_arrays(np.zeros((4, 5)), scores)
+    with pytest.raises(EvaluationValidationError):
+        validate_logits(scores)
+    with pytest.raises(EvaluationValidationError):
+        fixed_bin_ece(np.zeros(4), scores[:, 0])
+    with pytest.raises(ConformalValidationError):
+        LabelwiseBinaryConformal.fit(scores[:, :1], [[1]] * 4, label_names=("label",), alpha=0.5)
