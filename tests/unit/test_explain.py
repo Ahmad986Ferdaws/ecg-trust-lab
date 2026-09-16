@@ -409,3 +409,52 @@ def test_attribution_methods_validate_five_logit_output() -> None:
             stride_samples=1000,
             perturbations_per_eval=1,
         )
+
+
+@pytest.mark.parametrize("fail_forward", [False, True])
+def test_attribution_preserves_mixed_modes_buffers_and_existing_gradients(
+    monkeypatch: pytest.MonkeyPatch, fail_forward: bool
+) -> None:
+    model = _tiny_resnet().train()
+    next(module for module in model.modules() if isinstance(module, nn.BatchNorm1d)).eval()
+    modes = [module.training for module in model.modules()]
+    state = {key: value.clone() for key, value in model.state_dict().items()}
+    for parameter in model.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    if fail_forward:
+        def fail(inputs: Tensor) -> Tensor:
+            raise RuntimeError("synthetic forward failure")
+        monkeypatch.setattr(model, "forward", fail)
+        with pytest.raises(RuntimeError, match="synthetic"):
+            integrated_gradients(model, torch.zeros(1, 12, 1000), 0, n_steps=2)
+    else:
+        integrated_gradients(model, torch.zeros(1, 12, 1000), 0, n_steps=2)
+    assert [module.training for module in model.modules()] == modes
+    for key, value in model.state_dict().items():
+        assert torch.equal(value, state[key])
+    for parameter in model.parameters():
+        assert parameter.grad is not None
+        assert torch.equal(parameter.grad, torch.ones_like(parameter))
+
+
+@pytest.mark.parametrize("target", [torch.tensor(True), torch.tensor(1 + 2j)])
+def test_attribution_rejects_boolean_and_complex_tensor_targets(target: Tensor) -> None:
+    with pytest.raises(ValueError, match="target"):
+        integrated_gradients(_tiny_resnet(), torch.zeros(1, 12, 1000), target, n_steps=2)
+
+
+def test_attribution_rejects_complex_baseline_before_conversion() -> None:
+    with pytest.raises(ValueError, match="baseline"):
+        integrated_gradients(
+            _tiny_resnet(), torch.zeros(1, 12, 1000), 0,
+            baseline=torch.full((1, 12, 1000), 1 + 2j), n_steps=2,
+        )
+
+
+@pytest.mark.parametrize("sign", [torch.tensor(True), torch.tensor(1 + 2j)])
+def test_faithfulness_rejects_boolean_and_complex_tensor_signs(sign: Tensor) -> None:
+    with pytest.raises(ValueError, match="target signs"):
+        temporal_faithfulness_curve(
+            LeadMeanModel(), torch.ones(1, 12, 1000), torch.ones(1, 1, 1000), 0,
+            fractions=(0.0, 1.0), target_signs=sign,
+        )
