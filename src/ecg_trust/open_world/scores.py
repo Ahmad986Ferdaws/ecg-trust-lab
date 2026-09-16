@@ -172,12 +172,14 @@ def _expect_scorer(
 def _float_matrix(values: ArrayLike, *, context: str) -> FloatArray:
     try:
         raw = np.asarray(values)
-        if np.iscomplexobj(raw):
+        if np.iscomplexobj(raw) or (
+            raw.dtype.kind == "O" and any(np.iscomplexobj(value) for value in raw.flat)
+        ):
             raise OODScoreValidationError(f"{context} must contain real values")
         matrix = np.asarray(raw, dtype=np.float64)
     except OODScoreValidationError:
         raise
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, OverflowError) as error:
         raise OODScoreValidationError(f"{context} must be numeric") from error
     if matrix.ndim != 2:
         raise OODScoreValidationError(f"{context} must be a two-dimensional matrix")
@@ -191,7 +193,10 @@ def _float_matrix(values: ArrayLike, *, context: str) -> FloatArray:
 def _positive_float(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise OODScoreValidationError(f"{name} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as error:
+        raise OODScoreValidationError(f"{name} must be finite and positive") from error
     if not math.isfinite(number) or number <= 0.0:
         raise OODScoreValidationError(f"{name} must be finite and positive")
     return number
