@@ -1,0 +1,7 @@
+# Locked packages include prebuilt native binaries; install scripts are unnecessary.
+allowBuilds:
+  esbuild: false
+  sharp: false
+  workerd: false
+# Scripts must report stale dependencies rather than silently reinstalling them.
+verifyDepsBeforeRun: error

@@ -75,3 +75,18 @@ decisions. SPH was evaluated with frozen models and no target-domain training,
 selection, preprocessing adaptation, recalibration, thresholds, or confidence
 gate tuning. The hero waveform is explicitly schematic; the reported numbers
 come from the audited evaluation artifacts.
+
+## Continuous integration
+
+The [results-experience workflow](../.github/workflows/results-experience-quality.yml)
+installs the existing lockfile with pnpm 11.19.0 on Node 24, then runs lint,
+TypeScript, data parity, a production build, and rendered-HTML checks. It runs on
+changes to the UI, public evidence, documentation, or its own workflow, with
+read-only repository permissions and a 15-minute limit.
+
+`pnpm-workspace.yaml` explicitly disables install scripts for the three locked
+packages that ship prebuilt native binaries and makes stale dependency state an
+error before scripts run. Run `pnpm install --frozen-lockfile` after dependency
+configuration changes. This follows pnpm's
+[explicit build-script policy](https://github.com/pnpm/pnpm.io/blob/main/blog/releases/11.0.md).
+The CI check also confirms that dependency declarations were not rewritten.

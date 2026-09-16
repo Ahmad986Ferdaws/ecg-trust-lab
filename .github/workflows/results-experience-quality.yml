@@ -1,0 +1,51 @@
+name: Results experience quality
+
+on:
+  push:
+    paths:
+      - 'results-experience/**'
+      - 'publication/**'
+      - 'docs/**'
+      - '.github/workflows/results-experience-quality.yml'
+  pull_request:
+    paths:
+      - 'results-experience/**'
+      - 'publication/**'
+      - 'docs/**'
+      - '.github/workflows/results-experience-quality.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: results-experience-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: results-experience
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install pinned package manager and locked dependencies
+        run: |
+          npm install --global pnpm@11.19.0
+          pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Evidence, production build, and rendered HTML
+        run: pnpm test
+      - name: Confirm dependency declarations are unchanged
+        if: ${{ !cancelled() }}
+        run: git diff --exit-code -- package.json pnpm-lock.yaml pnpm-workspace.yaml
