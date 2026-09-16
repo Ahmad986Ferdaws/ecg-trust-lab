@@ -284,7 +284,11 @@ class ScoreHistogram:
         """Aggregate ephemeral scores immediately into the frozen bins."""
 
         try:
-            raw = np.asarray(scores)
+            # Preserve scalar types in Python sequences until validation; dtype
+            # inference would otherwise turn mixed booleans/numbers into numbers.
+            raw = np.asarray(scores) if isinstance(scores, np.ndarray) else np.asarray(
+                scores, dtype=object
+            )
         except (TypeError, ValueError, OverflowError) as error:
             raise TelemetryValidationError(
                 "scores must be a numeric one-dimensional array"
