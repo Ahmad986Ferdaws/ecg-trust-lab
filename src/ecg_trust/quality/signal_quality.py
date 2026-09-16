@@ -474,7 +474,7 @@ def _validate_contract(
         issues.append(_global_issue(ReasonCode.INVALID_METADATA, QualityStatus.INVALID))
         return tuple(issues)
 
-    lead_names = metadata.lead_names
+    lead_names = tuple(metadata.lead_names)
     if len(lead_names) != len(config.expected_leads):
         issues.append(_global_issue(ReasonCode.LEAD_COUNT_MISMATCH, QualityStatus.INVALID))
     if len(set(lead_names)) != len(lead_names):

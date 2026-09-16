@@ -401,3 +401,27 @@ def test_signal_conversion_overflow_returns_invalid_evidence() -> None:
     assert report.status is QualityStatus.INVALID
     assert report.reason_codes == (ReasonCode.NON_NUMERIC_SIGNAL,)
     assert not report.classification_allowed
+
+
+def test_canonical_metadata_lists_preserve_lead_order_and_allow_classification() -> None:
+    canonical = SignalMetadata.canonical()
+    metadata = replace(
+        canonical,
+        lead_names=list(canonical.lead_names),
+        units=list(canonical.units),
+    )
+    report = assess_signal_quality(_clean_signal(), metadata)
+    assert report.status is QualityStatus.PASS
+    assert report.classification_allowed
+    assert report.reason_codes == ()
+    assert metadata.lead_names == list(canonical.lead_names)
+
+
+def test_reordered_lead_name_list_remains_invalid() -> None:
+    metadata = replace(
+        SignalMetadata.canonical(),
+        lead_names=list(reversed(SignalMetadata.canonical().lead_names)),
+    )
+    report = assess_signal_quality(_clean_signal(), metadata)
+    assert report.status is QualityStatus.INVALID
+    assert ReasonCode.LEAD_ORDER_MISMATCH in report.reason_codes
