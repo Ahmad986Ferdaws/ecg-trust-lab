@@ -58,6 +58,13 @@ test("server-renders the complete Signal Ledger evidence experience", async () =
   assert.match(html, /The experiment completed\. The gate did not pass\./);
   assert.match(html, /94\.62%/);
   assert.match(html, /Source-support target missed/);
+  const supportSection = /<section\b[^>]*id="source-support"[\s\S]*?<\/section>/.exec(html);
+  assert.ok(supportSection, "source-support evidence must be rendered");
+  assert.match(
+    supportSection[0],
+    /<span>Frozen decision<\/span>\s*<strong>Not eligible<\/strong>/,
+    "rendered eligibility must preserve the public report's unfavorable conclusion",
+  );
   assert.match(html, /NOT EVALUATED/);
   assert.match(html, /No tuning · no retry/);
   assert.match(html, /id="failure-lab"/);
