@@ -224,3 +224,11 @@ def test_energy_tiny_temperature_has_confident_limit_and_zero_limit() -> None:
 def test_scores_reject_complex_arrays_without_discarding_imaginary_parts(function: object) -> None:
     with pytest.raises(OODScoreValidationError, match="real"):
         function(np.asarray([[0.5 + 2j]]))
+
+
+@pytest.mark.parametrize("temperature", [np.nextafter(0.0, 1.0), 1e-323, 1e-320])
+def test_energy_preserves_ordering_at_subnormal_temperatures(temperature: float) -> None:
+    result = symmetric_binary_energy([[0.0], [temperature]], temperature=temperature)
+    expected = -temperature * np.logaddexp(-0.5, 0.5)
+    assert result[1] == expected
+    assert result[1] <= result[0] < 0.0

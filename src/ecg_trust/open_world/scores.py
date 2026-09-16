@@ -62,9 +62,14 @@ def symmetric_binary_energy(logits: ArrayLike, *, temperature: float = 1.0) -> F
     magnitude = np.abs(matrix)
     # Equivalent to centered logsumexp without forming 2*T or unbounded z/T.
     # Overflow in the nonpositive exponent has the exact limiting correction zero.
+    energy_scale = np.maximum(magnitude, scale)
     with np.errstate(over="ignore", under="ignore"):
-        correction = scale * np.log1p(np.exp(-magnitude / scale))
-    per_label_energy = -(magnitude / 2.0 + correction)
+        normalized_energy = (magnitude / energy_scale) / 2.0 + (
+            scale / energy_scale
+        ) * np.log1p(np.exp(-magnitude / scale))
+        # Sum dimensionless terms before rescaling so subnormal contributions
+        # cannot independently round to zero and reverse the score ordering.
+        per_label_energy = -energy_scale * normalized_energy
     # Scale before averaging to avoid both sum overflow and subnormal division loss.
     row_scale = -per_label_energy.min(axis=1, keepdims=True)
     normalized = np.divide(
