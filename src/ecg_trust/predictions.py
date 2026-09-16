@@ -855,7 +855,7 @@ def _validate_targets(
         binary = bool(np.all((raw == 0) | (raw == 1)))
     except TypeError as exc:
         raise PredictionArtifactError("targets must be numeric binary values") from exc
-    if not finite or not binary:
+    if np.iscomplexobj(raw) or not finite or not binary:
         raise PredictionArtifactError("targets must contain only finite binary values 0 and 1")
     return raw.astype(np.int8, copy=True)
 
@@ -869,8 +869,15 @@ def _validate_float_matrix(
     probabilities: bool,
 ) -> FloatArray:
     try:
-        matrix = np.asarray(value, dtype=np.float64)
-    except (TypeError, ValueError) as exc:
+        raw = np.asarray(value)
+        if np.iscomplexobj(raw) or (
+            raw.dtype.kind == "O" and any(np.iscomplexobj(item) for item in raw.flat)
+        ):
+            raise PredictionArtifactError(f"{name} must contain real values")
+        matrix = np.asarray(raw, dtype=np.float64)
+    except PredictionArtifactError:
+        raise
+    except (TypeError, ValueError, OverflowError) as exc:
         raise PredictionArtifactError(f"{name} must be a numeric matrix") from exc
     if matrix.shape != (n_samples, n_labels):
         raise PredictionArtifactError(
@@ -997,9 +1004,9 @@ def _stable_sigmoid(logits: FloatArray) -> FloatArray:
 def _readonly_copy[ArrayDType: np.generic](
     array: NDArray[ArrayDType],
 ) -> NDArray[ArrayDType]:
-    result = np.asarray(array).copy()
-    result.flags.writeable = False
-    return result
+    # Immutable backing storage also prevents callers from re-enabling writes
+    # through an array view's base. All artifact dtypes are non-object values.
+    return np.frombuffer(array.tobytes(), dtype=array.dtype).reshape(array.shape)
 
 
 def _expect_mapping(value: object, context: str) -> Mapping[str, object]:

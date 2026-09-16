@@ -309,3 +309,42 @@ def test_invalid_save_suffix_and_expected_provenance_mismatch(tmp_path: Path) ->
             protocol=protocol,
             expected_manifest_hash=_hash("different-manifest"),
         )
+
+
+@pytest.mark.parametrize("string_ids", [False, True])
+def test_prediction_arrays_cannot_be_made_writable_after_create_or_load(
+    tmp_path: Path, string_ids: bool
+) -> None:
+    arrays = _arrays()
+    if string_ids:
+        arrays["ecg_id"] = np.asarray(["e3", "e1", "e4", "e2"])
+        arrays["patient_id"] = np.asarray(["p3", "p1", "p4", "p2"])
+    artifact = _create_from_arrays(arrays)
+    protocol = ExperimentProtocol.canonical()
+    saved = save_prediction_artifact(artifact, tmp_path / "immutable.npz", protocol=protocol)
+    loaded = load_prediction_artifact(saved.npz_path, protocol=protocol)
+    for candidate in (artifact, loaded):
+        for name in arrays:
+            array = getattr(candidate, name)
+            np.testing.assert_array_equal(array, getattr(artifact, name))
+            while isinstance(array, np.ndarray):
+                with pytest.raises(ValueError):
+                    array.setflags(write=True)
+                array = array.base
+
+
+@pytest.mark.parametrize("field", ["raw_logits", "calibrated_probabilities", "targets"])
+@pytest.mark.parametrize("object_dtype", [False, True])
+def test_prediction_artifacts_reject_complex_arrays(field: str, object_dtype: bool) -> None:
+    arrays = _arrays()
+    value = np.complex128(0 if field == "targets" else 0.5 + 3j)
+    arrays[field] = np.array([value] * 20, dtype=object if object_dtype else complex).reshape(4, 5)
+    with pytest.raises(PredictionArtifactError):
+        _create_from_arrays(arrays)
+
+
+def test_prediction_score_overflow_is_a_domain_error() -> None:
+    arrays = _arrays()
+    arrays["raw_logits"] = np.full((4, 5), 10**1000, dtype=object)
+    with pytest.raises(PredictionArtifactError):
+        _create_from_arrays(arrays)
