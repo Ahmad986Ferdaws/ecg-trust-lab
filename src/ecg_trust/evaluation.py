@@ -412,7 +412,7 @@ def fixed_bin_ece(
 
     bins = _validate_ece_bins(n_bins)
     targets = np.asarray(y_true)
-    scores = np.asarray(probabilities, dtype=np.float64)
+    scores = _real_float_array(probabilities, name="probabilities")
     if targets.ndim != 1 or scores.ndim != 1 or targets.shape != scores.shape:
         raise EvaluationValidationError(
             "fixed_bin_ece expects equal-length one-dimensional arrays"
@@ -694,7 +694,7 @@ def compute_selective_predictions(
 def stable_sigmoid(logits: ArrayLike) -> FloatArray:
     """Numerically stable elementwise logistic sigmoid."""
 
-    values = np.asarray(logits, dtype=np.float64)
+    values = _real_float_array(logits, name="logits")
     if not np.all(np.isfinite(values)):
         raise EvaluationValidationError("logits must contain only finite values")
     output = np.empty_like(values, dtype=np.float64)
@@ -728,6 +728,20 @@ def _validate_targets(y_true: ArrayLike, *, n_labels: int) -> IntArray:
     return targets.astype(np.int64, copy=False)
 
 
+def _real_float_array(values: ArrayLike, *, name: str) -> FloatArray:
+    try:
+        raw = np.asarray(values)
+        if np.iscomplexobj(raw) or (
+            raw.dtype.kind == "O" and any(np.iscomplexobj(value) for value in raw.flat)
+        ):
+            raise EvaluationValidationError(f"{name} must contain real values")
+        return np.asarray(raw, dtype=np.float64)
+    except EvaluationValidationError:
+        raise
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise EvaluationValidationError(f"{name} must be numeric") from exc
+
+
 def _validate_score_matrix(
     values: ArrayLike,
     *,
@@ -735,10 +749,7 @@ def _validate_score_matrix(
     n_labels: int,
     n_samples: int | None,
 ) -> FloatArray:
-    try:
-        scores = np.asarray(values, dtype=np.float64)
-    except (TypeError, ValueError) as exc:
-        raise EvaluationValidationError(f"{name} must be a numeric matrix") from exc
+    scores = _real_float_array(values, name=name)
     if scores.ndim != 2 or scores.shape[1] != n_labels:
         raise EvaluationValidationError(
             f"{name} must have shape [n_samples, {n_labels}], received {scores.shape}"
@@ -755,6 +766,8 @@ def _validate_score_matrix(
 
 
 def _is_binary_array(values: NDArray[np.generic]) -> bool:
+    if np.iscomplexobj(values):
+        return False
     try:
         finite = np.all(np.isfinite(values))
         binary = np.all((values == 0) | (values == 1))
