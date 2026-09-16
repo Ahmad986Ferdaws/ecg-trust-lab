@@ -176,7 +176,7 @@ def canonical_json(value: object) -> str:
             ensure_ascii=True,
             allow_nan=False,
         )
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, RecursionError) as error:
         raise AuditValidationError("value is not canonical JSON data") from error
 
 
@@ -786,7 +786,7 @@ class AuditLedger:
                         raise LedgerCorruptionError(f"ledger entry {line_number} is blank")
                     try:
                         parsed = cast(object, json.loads(canonical_bytes.decode("utf-8")))
-                    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                    except (UnicodeDecodeError, ValueError, RecursionError) as error:
                         raise LedgerCorruptionError(
                             f"ledger entry {line_number} is not valid UTF-8 JSON"
                         ) from error
@@ -834,17 +834,24 @@ class AuditLedger:
         if not self._checkpoint_path.exists():
             return None
         try:
-            raw = self._checkpoint_path.read_bytes()
+            with self._checkpoint_path.open("rb") as stream:
+                raw = stream.read(self._config.max_event_bytes + 2)
         except OSError as error:
             raise AuditStorageError("audit checkpoint could not be read") from error
+        if len(raw) > self._config.max_event_bytes + 1:
+            raise LedgerCorruptionError("audit checkpoint exceeds the byte limit")
         if not raw.endswith(b"\n") or raw.count(b"\n") != 1:
             raise LedgerCorruptionError("audit checkpoint is truncated or contains extra data")
         try:
             parsed = cast(object, json.loads(raw[:-1].decode("utf-8")))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        except (UnicodeDecodeError, ValueError, RecursionError) as error:
             raise LedgerCorruptionError("audit checkpoint is not valid UTF-8 JSON") from error
         mapping = _required_mapping(parsed, context="audit checkpoint")
-        if canonical_json(mapping).encode("utf-8") != raw[:-1]:
+        try:
+            canonical = canonical_json(mapping).encode("utf-8")
+        except AuditValidationError as error:
+            raise LedgerCorruptionError("audit checkpoint is not canonical JSON") from error
+        if canonical != raw[:-1]:
             raise LedgerCorruptionError("audit checkpoint is not canonical JSON")
         return _checkpoint_from_mapping(mapping)
 

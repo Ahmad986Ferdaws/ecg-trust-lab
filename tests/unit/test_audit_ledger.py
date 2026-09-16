@@ -430,6 +430,32 @@ def test_missing_or_corrupted_checkpoint_fails_closed(tmp_path: Path) -> None:
         corrupted.verify()
 
 
+@pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity"])
+def test_nonfinite_checkpoint_values_are_ledger_corruption(tmp_path: Path, number: str) -> None:
+    ledger = _ledger_with_entries(tmp_path / "nonfinite.jsonl", count=1)
+    ledger.checkpoint_path.write_text('{"entry_count":' + number + '}\n', encoding="utf-8")
+    with pytest.raises(LedgerCorruptionError, match="checkpoint"):
+        ledger.verify()
+
+
+def test_checkpoint_reads_enforce_the_configured_byte_limit(tmp_path: Path) -> None:
+    ledger = AuditLedger(
+        tmp_path / "oversized.jsonl", config=AuditLedgerConfig(max_event_bytes=1024)
+    )
+    ledger.checkpoint_path.write_bytes(b"x" * 1026)
+    with pytest.raises(LedgerCorruptionError, match="checkpoint.*byte limit"):
+        ledger.verify()
+
+
+@pytest.mark.parametrize("checkpoint", [True, False])
+def test_deeply_nested_storage_is_reported_as_corruption(tmp_path: Path, checkpoint: bool) -> None:
+    ledger = AuditLedger(tmp_path / "nested.jsonl")
+    path = ledger.checkpoint_path if checkpoint else ledger.path
+    path.write_bytes(b"[" * 2000 + b"0" + b"]" * 2000 + b"\n")
+    with pytest.raises(LedgerCorruptionError):
+        ledger.verify()
+
+
 def test_append_refuses_to_extend_corrupted_ledger(tmp_path: Path) -> None:
     ledger = _ledger_with_entries(tmp_path / "refuse.jsonl", count=2)
     ledger.path.write_bytes(ledger.path.read_bytes() + b'{"partial":')
