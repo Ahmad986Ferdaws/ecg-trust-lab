@@ -8,6 +8,7 @@ from typing import cast
 from torch import Tensor, nn
 
 from ecg_trust.constants import LEADS, SUPERCLASSES
+from ecg_trust.models._validation import finite_number, positive_integer
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,16 @@ class ResNet1DConfig:
     zero_init_residual: bool = True
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "stage_channels", tuple(self.stage_channels))
+        object.__setattr__(self, "blocks_per_stage", tuple(self.blocks_per_stage))
+        for value in self.stage_channels:
+            positive_integer(value, "stage width")
+        for value in self.blocks_per_stage:
+            positive_integer(value, "stage block count")
+        for name in ("stem_kernel_size", "block_kernel_size", "stem_stride", "stage_stride"):
+            positive_integer(getattr(self, name), name)
+        if not isinstance(self.zero_init_residual, bool):
+            raise ValueError("zero_init_residual must be boolean")
         if not self.stage_channels:
             raise ValueError("stage_channels cannot be empty")
         if len(self.stage_channels) != len(self.blocks_per_stage):
@@ -48,7 +59,7 @@ class ResNet1DConfig:
             ("block_dropout", self.block_dropout),
             ("classifier_dropout", self.classifier_dropout),
         ):
-            if not 0.0 <= probability < 1.0:
+            if not 0.0 <= finite_number(probability, name) < 1.0:
                 raise ValueError(f"{name} must be in [0, 1)")
 
 

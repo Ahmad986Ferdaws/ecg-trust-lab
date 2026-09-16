@@ -8,6 +8,7 @@ import torch
 from torch import Tensor, nn
 
 from ecg_trust.constants import LEADS, SUPERCLASSES
+from ecg_trust.models._validation import finite_number
 
 
 class TrainingPrevalencePredictor(nn.Module):
@@ -26,6 +27,8 @@ class TrainingPrevalencePredictor(nn.Module):
         super().__init__()
         if prevalence.ndim != 1 or prevalence.shape[0] != len(SUPERCLASSES):
             raise ValueError(f"prevalence must have shape [{len(SUPERCLASSES)}]")
+        if prevalence.is_complex():
+            raise ValueError("prevalence must contain real values")
         prevalence = prevalence.detach().to(dtype=torch.float32, device="cpu")
         if not torch.isfinite(prevalence).all():
             raise ValueError("prevalence must be finite")
@@ -41,8 +44,10 @@ class TrainingPrevalencePredictor(nn.Module):
             raise ValueError(f"targets must have shape [records, {len(SUPERCLASSES)}]")
         if targets.shape[0] == 0:
             raise ValueError("targets cannot be empty")
-        if smoothing <= 0:
+        if finite_number(smoothing, "smoothing") <= 0:
             raise ValueError("smoothing must be positive")
+        if targets.is_complex():
+            raise ValueError("targets must contain real values")
         numeric_targets = targets.detach().to(dtype=torch.float64, device="cpu")
         if not torch.isfinite(numeric_targets).all():
             raise ValueError("targets must be finite")

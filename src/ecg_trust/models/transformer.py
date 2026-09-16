@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import cast
 
@@ -10,6 +11,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from ecg_trust.constants import LEADS, SUPERCLASSES
+from ecg_trust.models._validation import finite_number, positive_integer
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +34,15 @@ class ECGTransformerConfig:
     lead_stem_kernel_size: int | None = 7
 
     def __post_init__(self) -> None:
+        for name in ("signal_length", "patch_size", "patch_stride", "embedding_dim", "depth",
+                     "num_heads"):
+            positive_integer(getattr(self, name), name)
+        if self.lead_stem_kernel_size is not None:
+            positive_integer(self.lead_stem_kernel_size, "lead_stem_kernel_size")
+        ratio = finite_number(self.mlp_ratio, "mlp_ratio")
+        hidden_width = self.embedding_dim * ratio
+        if not math.isfinite(hidden_width) or round(hidden_width) < 1:
+            raise ValueError("mlp_ratio must produce a finite positive hidden dimension")
         if self.signal_length <= 0:
             raise ValueError("signal_length must be positive")
         if self.patch_size <= 0 or self.patch_size > self.signal_length:
@@ -50,7 +61,7 @@ class ECGTransformerConfig:
             ("dropout", self.dropout),
             ("attention_dropout", self.attention_dropout),
         ):
-            if not 0.0 <= probability < 1.0:
+            if not 0.0 <= finite_number(probability, name) < 1.0:
                 raise ValueError(f"{name} must be in [0, 1)")
         if self.lead_stem_kernel_size is not None and (
             self.lead_stem_kernel_size <= 0 or self.lead_stem_kernel_size % 2 == 0
