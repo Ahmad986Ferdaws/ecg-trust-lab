@@ -438,3 +438,28 @@ def test_comparison_rejects_bin_config_and_window_order_mismatches(
 
 def math_is_finite(value: float) -> bool:
     return bool(np.isfinite(value))
+
+
+@pytest.mark.parametrize("smoothing", [1e-320, 1e-6, 1e308])
+def test_psi_handles_all_finite_positive_smoothing_scales(smoothing: float) -> None:
+    reference = ScoreHistogram((0.0, 0.5, 1.0), (100, 0))
+    current = ScoreHistogram((0.0, 0.5, 1.0), (0, 100))
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        result = population_stability_index(reference, current, smoothing_count=smoothing)
+        reverse = population_stability_index(current, reference, smoothing_count=smoothing)
+        unchanged = population_stability_index(reference, reference, smoothing_count=smoothing)
+    assert np.isfinite(result) and result >= 0.0
+    assert result == pytest.approx(reverse)
+    assert unchanged == 0.0
+    if smoothing < 1e-300:
+        assert result == pytest.approx(2.0 * (np.log(100.0) - np.log(smoothing)))
+
+
+def test_psi_matches_direct_formula_on_ordinary_counts() -> None:
+    reference = ScoreHistogram((0.0, 0.5, 1.0), (90, 10))
+    current = ScoreHistogram((0.0, 0.5, 1.0), (50, 50))
+    ref = (np.asarray(reference.counts) + 1e-6) / (100 + 2e-6)
+    cur = (np.asarray(current.counts) + 1e-6) / (100 + 2e-6)
+    expected = float(np.sum((cur - ref) * np.log(cur / ref)))
+    actual = population_stability_index(reference, current, smoothing_count=1e-6)
+    assert actual == pytest.approx(expected)

@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import Self, cast
 
 import numpy as np
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 
 from ecg_trust.contracts import TrustDecision as DecisionState
 
@@ -708,14 +708,21 @@ def population_stability_index(
     ):
         raise TelemetryValidationError("PSI smoothing_count must be finite and positive")
 
-    reference_counts = np.asarray(reference.counts, dtype=np.float64) + smoothing_count
-    current_counts = np.asarray(current.counts, dtype=np.float64) + smoothing_count
-    reference_proportions = reference_counts / np.sum(reference_counts)
-    current_proportions = current_counts / np.sum(current_counts)
-    psi = np.sum(
-        (current_proportions - reference_proportions)
-        * np.log(current_proportions / reference_proportions)
-    )
+    def log_proportions(histogram: ScoreHistogram) -> NDArray[np.float64]:
+        counts = np.asarray(histogram.counts, dtype=np.float64)
+        log_counts = np.full_like(counts, -np.inf)
+        np.log(counts, out=log_counts, where=counts > 0.0)
+        smoothed = np.logaddexp(log_counts, math.log(smoothing_count))
+        return cast(NDArray[np.float64], smoothed - np.logaddexp.reduce(smoothed))
+
+    reference_logs = log_proportions(reference)
+    current_logs = log_proportions(current)
+    # Subtract logarithms rather than taking a ratio that can overflow. Keep
+    # smoothing and normalization in log space even for subnormal pseudocounts.
+    with np.errstate(under="ignore"):
+        psi = np.sum(
+            (np.exp(current_logs) - np.exp(reference_logs)) * (current_logs - reference_logs)
+        )
     result = float(psi)
     if not math.isfinite(result) or result < 0.0:
         raise TelemetryValidationError("PSI computation produced an invalid result")
