@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import cast
 
 import pytest
@@ -587,6 +587,90 @@ def test_analysis_outcome_rejects_result_leakage_and_missing_allowed_results() -
         AnalysisOutcome(
             decision=TrustDecision.PREDICTION_ALLOWED,
             reason_codes=(ReasonCode.ALL_TRUST_GATES_PASSED,),
+        )
+
+
+def test_analysis_outcome_snapshots_caller_owned_sequences() -> None:
+    reasons = [ReasonCode.ALL_TRUST_GATES_PASSED]
+    labels = ["NORM", "MI"]
+    probabilities = [0.91, 0.08]
+    outcome = AnalysisOutcome(
+        decision=TrustDecision.PREDICTION_ALLOWED,
+        reason_codes=cast(tuple[ReasonCode, ...], reasons),
+        labels=cast(tuple[str, ...], labels),
+        probabilities=cast(tuple[float, ...], probabilities),
+    )
+    reasons.clear()
+    labels[0] = "PRIVATE_LABEL"
+    probabilities[0] = 2.0
+    assert outcome.reason_codes == (ReasonCode.ALL_TRUST_GATES_PASSED,)
+    assert outcome.labels == ("NORM", "MI")
+    assert outcome.probabilities == (0.91, 0.08)
+
+
+def test_mutating_backend_input_cannot_change_validated_http_prediction() -> None:
+    probabilities = [0.91, 0.08]
+
+    class MutableEngine(FakeAnalysisEngine):
+        def infer(self, case: ResolvedCase, release: VerifiedRelease) -> AnalysisOutcome:
+            outcome = AnalysisOutcome(
+                decision=TrustDecision.PREDICTION_ALLOWED,
+                reason_codes=(ReasonCode.ALL_TRUST_GATES_PASSED,),
+                labels=("NORM", "MI"),
+                probabilities=cast(tuple[float, ...], probabilities),
+            )
+            probabilities[0] = 2.0
+            return outcome
+
+    with TestClient(_app(engine=MutableEngine())) as client:
+        response = client.post(
+            "/api/v1/inferences",
+            json={"case_id": "allowed", "release_id": RELEASE_ID},
+            headers={"Idempotency-Key": "immutable-result"},
+        )
+    assert response.status_code == 200
+    assert _body(response)["probabilities"] == [0.91, 0.08]
+
+
+def test_abstention_outcome_snapshots_reason_codes() -> None:
+    reasons = [ReasonCode.CONFIDENCE_GATE_ABSTAINED]
+    outcome = AnalysisOutcome(
+        decision=TrustDecision.ABSTAIN,
+        reason_codes=cast(tuple[ReasonCode, ...], reasons),
+    )
+    reasons.clear()
+    assert outcome.reason_codes == (ReasonCode.CONFIDENCE_GATE_ABSTAINED,)
+
+
+@pytest.mark.parametrize(
+    "field,limit", [("reason_codes", 16), ("labels", 71), ("probabilities", 71)]
+)
+def test_oversized_outcome_sequences_are_rejected_before_copying(field: str, limit: int) -> None:
+    class UncopyableList(list[object]):
+        def __iter__(self) -> Iterator[object]:
+            raise AssertionError("oversized evidence must not be copied")
+
+    values = {
+        "reason_codes": (ReasonCode.ALL_TRUST_GATES_PASSED,),
+        "labels": ("NORM",),
+        "probabilities": (0.5,),
+    }
+    values[field] = UncopyableList([None] * (limit + 1))
+    with pytest.raises(ValueError):
+        AnalysisOutcome(decision=TrustDecision.PREDICTION_ALLOWED, **values)
+
+
+@pytest.mark.parametrize("field", ["labels", "probabilities"])
+def test_abstention_rejects_prediction_sequences_before_copying(field: str) -> None:
+    class UncopyableList(list[object]):
+        def __iter__(self) -> Iterator[object]:
+            raise AssertionError("forbidden prediction evidence must not be copied")
+
+    with pytest.raises(ValueError, match="cannot contain prediction results"):
+        AnalysisOutcome(
+            decision=TrustDecision.ABSTAIN,
+            reason_codes=(ReasonCode.CONFIDENCE_GATE_ABSTAINED,),
+            **{field: UncopyableList([0.5])},
         )
 
 

@@ -139,6 +139,21 @@ class AnalysisOutcome:
     def __post_init__(self) -> None:
         if not isinstance(self.decision, TrustDecision):
             raise ValueError("decision must use the closed trust-decision vocabulary")
+        if self.decision is not TrustDecision.PREDICTION_ALLOWED and (
+            self.labels is not None or self.probabilities is not None
+        ):
+            raise ValueError("non-allowed outcomes cannot contain prediction results")
+        # A frozen dataclass does not freeze caller-owned lists. Snapshot first
+        # within the existing size/disclosure limits, then validate the snapshot.
+        for name, limit in (("reason_codes", 16), ("labels", 71), ("probabilities", 71)):
+            value = getattr(self, name)
+            if value is None and name != "reason_codes":
+                continue
+            if not isinstance(value, (tuple, list)):
+                raise ValueError(f"{name} must be a tuple or list")
+            if len(value) > limit:
+                raise ValueError(f"{name} exceeds its {limit}-item bound")
+            object.__setattr__(self, name, tuple(value))
         if not self.reason_codes or len(self.reason_codes) > 16:
             raise ValueError("one to sixteen reason codes are required")
         if any(not isinstance(reason, ReasonCode) for reason in self.reason_codes):
@@ -147,8 +162,6 @@ class AnalysisOutcome:
             raise ValueError("reason codes must be unique")
 
         if self.decision is not TrustDecision.PREDICTION_ALLOWED:
-            if self.labels is not None or self.probabilities is not None:
-                raise ValueError("non-allowed outcomes cannot contain prediction results")
             return
 
         if not self.labels or not self.probabilities:
