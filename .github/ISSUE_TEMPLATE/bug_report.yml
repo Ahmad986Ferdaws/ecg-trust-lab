@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible engineering defect.
+title: "bug: "
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and observed behavior
+      description: Include the affected revision and component.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction and evidence
+      description: Prefer synthetic inputs. Include commands, errors, and environment; exclude private data and secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What observable behavior would show this is fixed? Note compatibility or scientific boundaries.
+    validations:
+      required: true

@@ -1,0 +1,25 @@
+name: Improvement proposal
+description: Propose a specific improvement supported by evidence.
+title: "improvement: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and evidence
+      description: Identify the affected component and current gap; link related issues to avoid duplicates.
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Proposed scope and alternatives
+      description: State the hypothesis, smallest useful change, and any scientific boundaries.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Acceptance criteria and validation
+      description: Describe how to verify the benefit and what would refute the proposal.
+    validations:
+      required: true
