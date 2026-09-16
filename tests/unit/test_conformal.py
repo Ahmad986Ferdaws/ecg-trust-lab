@@ -213,3 +213,52 @@ def test_serialized_calibrator_rejects_invalid_quantile_and_thresholds() -> None
     bad_thresholds["thresholds"] = [0.3]
     with pytest.raises(ConformalValidationError, match="2 values"):
         LabelwiseBinaryConformal.from_dict(bad_thresholds)
+
+
+@pytest.mark.parametrize("value", ["false", "true", 0, 1, None])
+def test_direct_prediction_sets_reject_truthy_non_boolean_membership(value: object) -> None:
+    with pytest.raises(ConformalValidationError, match="booleans"):
+        BinaryPredictionSets(("MI",), ((False,),), ((value,),))
+
+
+@pytest.mark.parametrize("negative,positive", [
+    ((), ()), (((False,),), ((True, False),)), (((False,),), ((True,), (False,))),
+])
+def test_direct_prediction_sets_reject_misaligned_masks(negative: object, positive: object) -> None:
+    with pytest.raises(ConformalValidationError):
+        BinaryPredictionSets(("MI",), negative, positive)
+
+
+def test_direct_prediction_sets_copy_mutable_inputs() -> None:
+    names = ["MI"]
+    negative = [[False]]
+    positive = [[True]]
+    sets = BinaryPredictionSets(names, negative, positive)
+    names[0] = "NORM"
+    positive[0][0] = False
+    assert sets.label_names == ("MI",)
+    assert sets.decisions == ((BinaryDecision.SUPPORTED,),)
+
+
+@pytest.mark.parametrize("thresholds", [(float("nan"), 0.8), (-0.1, 0.8), (0.3,), (True, 0.8)])
+def test_direct_calibrator_rejects_invalid_thresholds(thresholds: object) -> None:
+    from dataclasses import replace
+
+    with pytest.raises(ConformalValidationError):
+        replace(_calibrator(), thresholds=thresholds)
+
+
+def test_direct_calibrator_checks_rank_and_freezes_thresholds() -> None:
+    from dataclasses import replace
+
+    with pytest.raises(ConformalValidationError, match="quantile_rank"):
+        replace(_calibrator(), quantile_rank=1)
+    thresholds = [0.3, 0.8]
+    calibrator = replace(_calibrator(), thresholds=thresholds)
+    thresholds[0] = 1.0
+    assert calibrator.thresholds == (0.3, 0.8)
+
+
+def test_direct_calibrator_enforces_conservative_small_sample_threshold() -> None:
+    with pytest.raises(ConformalValidationError, match="conservative"):
+        LabelwiseBinaryConformal(("MI",), 0.1, (0.2,), 2, 3, 1.0)
