@@ -224,6 +224,56 @@ def test_readiness_fails_closed_when_release_and_engine_digests_differ() -> None
     assert _body(response)["reason_codes"] == [ReasonCode.BACKEND_UNAVAILABLE]
 
 
+@pytest.mark.parametrize("endpoint", ["cases:validate", "inferences"])
+@pytest.mark.parametrize("failure", ["wrong_release", "not_ready", "raises", "truthy"])
+def test_analysis_checks_requested_release_readiness_before_calling_engine(
+    endpoint: str, failure: str
+) -> None:
+    class UnreadyEngine(FakeAnalysisEngine):
+        def is_ready_for_release(self, release: VerifiedRelease) -> bool:
+            if failure == "truthy":
+                return cast(bool, "false")
+            return super().is_ready_for_release(release)
+
+    engine = UnreadyEngine(
+        expected_artifact_sha256="b" * 64 if failure == "wrong_release" else ARTIFACT_SHA256,
+        ready=failure != "not_ready",
+        readiness_raises=failure == "raises",
+    )
+    with TestClient(_app(engine=engine)) as client:
+        response = client.post(
+            f"/api/v1/{endpoint}",
+            json={"case_id": "allowed", "release_id": RELEASE_ID},
+            headers={"Idempotency-Key": "unready-engine-request"},
+        )
+
+    assert response.status_code == 503
+    assert _body(response)["decision"] == TrustDecision.ABSTAIN
+    assert _body(response)["reason_codes"] == [ReasonCode.BACKEND_UNAVAILABLE]
+    assert "labels" not in _body(response)
+    assert "probabilities" not in _body(response)
+    assert "private" not in response.text
+    assert "do-not-leak" not in response.text
+    assert engine.infer_calls == engine.validate_calls == 0
+
+
+def test_release_readiness_failure_can_recover_with_same_idempotency_key() -> None:
+    engine = FakeAnalysisEngine(ready=False)
+    request = {"case_id": "allowed", "release_id": RELEASE_ID}
+    headers = {"Idempotency-Key": "readiness-recovery-request"}
+    with TestClient(_app(engine=engine)) as client:
+        unavailable = client.post("/api/v1/inferences", json=request, headers=headers)
+        engine.ready = True
+        recovered = client.post("/api/v1/inferences", json=request, headers=headers)
+        replay = client.post("/api/v1/inferences", json=request, headers=headers)
+
+    assert unavailable.status_code == 503
+    assert recovered.status_code == replay.status_code == 200
+    assert recovered.headers["idempotency-replayed"] == "false"
+    assert replay.headers["idempotency-replayed"] == "true"
+    assert engine.infer_calls == 1
+
+
 @pytest.mark.parametrize(
     "dependency",
     [

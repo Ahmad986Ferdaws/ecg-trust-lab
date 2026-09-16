@@ -48,6 +48,10 @@ class TrustPolicyConfig:
     def __post_init__(self) -> None:
         if not self.version.strip():
             raise TrustPolicyValidationError("policy version must be non-empty")
+        if not isinstance(self.require_legacy_entropy_gate, bool) or not isinstance(
+            self.require_all_label_sets_singleton, bool
+        ):
+            raise TrustPolicyValidationError("policy gate settings must be boolean")
         if not self.require_all_label_sets_singleton:
             raise TrustPolicyValidationError(
                 "v1 must fail closed when any label prediction set is uncertain"
@@ -70,6 +74,18 @@ class TrustPolicyInputs:
     conformal_decisions: tuple[BinaryDecision, ...] | None = None
 
     def __post_init__(self) -> None:
+        for name in ("release_integrity_verified", "input_contract_valid"):
+            if not isinstance(getattr(self, name), bool):
+                raise TrustPolicyValidationError(f"{name} must be boolean")
+        for name in ("distribution_supported", "legacy_entropy_gate_accepted"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, bool):
+                raise TrustPolicyValidationError(f"{name} must be boolean or None")
+        if self.quality_report is not None:
+            if not isinstance(self.quality_report, SignalQualityReport):
+                raise TrustPolicyValidationError("quality_report must be a SignalQualityReport")
+            if not isinstance(self.quality_report.status, QualityStatus):
+                raise TrustPolicyValidationError("quality status must use QualityStatus")
         if len(set(self.distribution_reason_codes)) != len(self.distribution_reason_codes):
             raise TrustPolicyValidationError("distribution reason codes must be unique")
         if any(not value.strip() for value in self.distribution_reason_codes):
@@ -80,6 +96,10 @@ class TrustPolicyInputs:
             raise TrustPolicyValidationError(
                 f"conformal_decisions must contain {len(SUPERCLASSES)} labels"
             )
+        if self.conformal_decisions is not None and any(
+            not isinstance(decision, BinaryDecision) for decision in self.conformal_decisions
+        ):
+            raise TrustPolicyValidationError("conformal_decisions must use BinaryDecision")
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import cast
 
 import pytest
 
@@ -189,3 +190,50 @@ def test_input_validation_rejects_wrong_label_count_and_duplicate_reasons() -> N
 def test_v1_configuration_cannot_allow_partial_conformal_results() -> None:
     with pytest.raises(TrustPolicyValidationError, match="must fail closed"):
         TrustPolicyConfig(require_all_label_sets_singleton=False)
+
+
+@pytest.mark.parametrize("decision", ["uncertain", "supported", "unknown", None, True])
+def test_policy_rejects_untyped_conformal_decisions(decision: object) -> None:
+    with pytest.raises(TrustPolicyValidationError, match="BinaryDecision"):
+        replace(
+            _valid_inputs(),
+            conformal_decisions=(cast(BinaryDecision, decision),) * len(SUPERCLASSES),
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "release_integrity_verified",
+        "input_contract_valid",
+        "distribution_supported",
+        "legacy_entropy_gate_accepted",
+    ],
+)
+@pytest.mark.parametrize("value", ["false", 1, 0])
+def test_policy_rejects_non_boolean_gate_evidence(field: str, value: object) -> None:
+    with pytest.raises(TrustPolicyValidationError, match="boolean"):
+        replace(_valid_inputs(), **{field: value})
+
+
+@pytest.mark.parametrize("status", ["pass", "invalid", "unknown", None])
+def test_policy_rejects_untyped_quality_status(status: object) -> None:
+    with pytest.raises(TrustPolicyValidationError, match="QualityStatus"):
+        replace(
+            _valid_inputs(),
+            quality_report=replace(_quality(), status=cast(QualityStatus, status)),
+        )
+
+
+@pytest.mark.parametrize(
+    "field", ["require_legacy_entropy_gate", "require_all_label_sets_singleton"]
+)
+@pytest.mark.parametrize("value", ["false", 0, 1, None])
+def test_policy_rejects_non_boolean_gate_settings(field: str, value: object) -> None:
+    with pytest.raises(TrustPolicyValidationError, match="boolean"):
+        replace(TrustPolicyConfig(), **{field: value})
+
+
+def test_policy_rejects_untyped_quality_report() -> None:
+    with pytest.raises(TrustPolicyValidationError, match="SignalQualityReport"):
+        replace(_valid_inputs(), quality_report=cast(SignalQualityReport, {"status": "pass"}))

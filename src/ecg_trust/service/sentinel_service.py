@@ -525,6 +525,8 @@ def _analyze(
     if engine is None:
         raise DependencyUnavailableError
     try:
+        if engine.is_ready_for_release(release) is not True:
+            raise DependencyUnavailableError
         outcome = engine.infer(case, release) if inference else engine.validate_case(case, release)
     except Exception:
         raise DependencyUnavailableError from None
