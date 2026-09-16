@@ -1,0 +1,49 @@
+name: CPU quality
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpu-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CUDA_VISIBLE_DEVICES: ""
+      MPLBACKEND: Agg
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.12.15"
+          python-version: "3.12"
+      - name: Install CPU development environment
+        run: |
+          uv venv --python 3.12
+          uv pip install --no-sources --torch-backend cpu -e . --group dev
+          uv pip check
+      - name: Verify CPU backend
+        run: |
+          uv run --no-sync python -c "import torch; assert torch.version.cuda is None; assert not torch.cuda.is_available(); print(torch.__version__)"
+      - name: Tests
+        run: uv run --no-sync pytest -q --basetemp=.pytest-tmp-cpu
+      - name: Ruff
+        if: ${{ !cancelled() }}
+        run: uv run --no-sync ruff check src tests scripts
+      - name: Strict mypy (Windows scientific runtime target)
+        if: ${{ !cancelled() }}
+        run: uv run --no-sync mypy --platform win32
+      - name: Confirm frozen dependency files are unchanged
+        if: ${{ !cancelled() }}
+        run: git diff --exit-code -- pyproject.toml uv.lock

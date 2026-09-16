@@ -98,6 +98,45 @@ a confirmation plan.
 
 ## 3. Quality gate
 
+### CPU pull-request checks
+
+The `CPU quality` GitHub Actions workflow runs pytest, Ruff, and strict mypy
+on pushes and pull requests using Python 3.12. Portable checks use synthetic
+fixtures. Tests requiring private frozen artifacts skip when those artifacts
+are absent, and Windows-only runtime checks skip on Linux. Skip reasons appear
+in the pytest summary. CI does not download patient datasets, run `ecg-verify`,
+or upload artifacts.
+To reproduce this engineering check in a fresh CPU environment:
+
+```sh
+uv venv --python 3.12
+uv pip install --no-sources --torch-backend cpu -e . --group dev
+uv pip check
+uv run --no-sync pytest -q --basetemp=.pytest-tmp-cpu
+uv run --no-sync ruff check src tests scripts
+uv run --no-sync mypy --platform win32
+```
+
+This resolves the dependency ranges in `pyproject.toml` using CPU PyTorch.
+`--no-sources` bypasses the explicit CUDA source, and `--no-sync` prevents
+subsequent commands from restoring that source. The scientific `uv.lock` and
+CUDA configuration stay unchanged. CPU CI is an engineering regression gate,
+not a reproduction of the locked training environment or its scientific
+results. Use the locked CUDA environment below for scientific work.
+
+The type checker explicitly targets Windows because the frozen OOD process
+and filesystem code uses Windows-only `ctypes` APIs. This retains strict
+checking of those APIs on the Linux runner without modifying the frozen
+implementation or suppressing type errors. Windows-only runtime tests retain
+their existing platform skips; Linux CI does not certify Windows handle or
+process behavior.
+
+Use a new or disposable `--basetemp` directory: pytest clears it at startup.
+Keeping it under the checkout avoids indirect system temporary paths (such as
+macOS `/var` symlinks) that the artifact-integrity fixtures intentionally reject.
+
+### Scientific environment gate
+
 Run the complete code-quality gate before data work and again before freezing
 each confirmatory configuration:
 

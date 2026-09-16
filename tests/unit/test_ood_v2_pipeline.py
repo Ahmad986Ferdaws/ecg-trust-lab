@@ -246,6 +246,7 @@ def _private_row(
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_original_v2_parent_is_metadata_visible_but_never_executable(
     tmp_path: Path,
 ) -> None:
@@ -264,6 +265,7 @@ def test_original_v2_parent_is_metadata_visible_but_never_executable(
     assert not (tmp_path / "must-not-be-read.json").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_original_v2_freeze_refuses_before_output_or_source_access(
     tmp_path: Path,
 ) -> None:
@@ -291,6 +293,12 @@ def test_original_v2_freeze_refuses_before_output_or_source_access(
 
 
 def _isolated_successor_preflight_project(tmp_path: Path) -> Path:
+    private_inventory = (
+        PROJECT_ROOT / "artifacts/trust_sentinel/ood_external_v2_preflight/private/"
+        "external-waveform-inventory.json"
+    )
+    if not private_inventory.is_file():
+        pytest.skip("private frozen external inventory is not available in this checkout")
     for relative in (
         "configs/trust_sentinel_ood_external_v2.yaml",
         "configs/trust_sentinel_ood_external_v2_1.yaml",
@@ -809,6 +817,8 @@ def test_private_normalization_copy_is_hash_bound(tmp_path: Path) -> None:
         / "preprocessing"
         / "ptbxl_v1.0.3_train_folds_1-7_normalization.json"
     )
+    if not source.is_file():
+        pytest.skip("private frozen normalization is not available in this checkout")
     copied = tmp_path / "frozen-normalization.json"
     shutil.copyfile(source, copied)
     expected = sha256_file(copied)
@@ -828,6 +838,10 @@ def test_private_normalization_copy_is_hash_bound(tmp_path: Path) -> None:
 
 
 def test_normalization_is_bit_exact_torch_float32_path() -> None:
+    if not (
+        PROJECT_ROOT / "artifacts/preprocessing/ptbxl_v1.0.3_train_folds_1-7_normalization.json"
+    ).is_file():
+        pytest.skip("private frozen normalization is not available in this checkout")
     normalization = NormalizationStats.load(
         PROJECT_ROOT
         / "artifacts"
@@ -2011,6 +2025,7 @@ def test_git_credential_manager_version_probe_is_exact_and_noninteractive(
     assert cleanup_roots == [tmp_path] * 5
 
 
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_private_live_remote_removes_gcm_sentinel_after_each_returned_job(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2147,7 +2162,7 @@ def test_private_live_remote_uses_exact_argv_env_and_devnull(
         f"--git-dir={tmp_path / '.git'}",
         f"--work-tree={tmp_path}",
         "-c",
-        "core.hooksPath=NUL",
+        "core.hooksPath=NUL" if os.name == "nt" else "core.hooksPath=/dev/null",
         "-c",
         "protocol.file.allow=never",
         "-c",
@@ -3982,6 +3997,7 @@ def _runtime_scratch_environment(root: Path) -> dict[str, str]:
     }
 
 
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_runtime_environment_hash_material_canonicalizes_fresh_owned_roots(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -4009,6 +4025,7 @@ def test_runtime_environment_hash_material_canonicalizes_fresh_owned_roots(
 
 
 @pytest.mark.parametrize("sentinel_present", [False, True])
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_gcm_sentinel_cleanup_accepts_only_absent_or_exact_empty_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -4086,6 +4103,7 @@ def test_gcm_sentinel_cleanup_rejects_every_broader_temp_state(
     assert tuple(temporary.iterdir()) != ()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_gcm_sentinel_cleanup_blocks_final_identity_swap(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -4183,6 +4201,7 @@ def test_bound_directory_handle_rejects_raced_junction(
 
 
 @pytest.mark.parametrize("drift_call", [2, 3])
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_bound_directory_handle_rejects_witness_or_final_identity_drift(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -4295,11 +4314,16 @@ def test_module_origin_audit_accepts_only_exact_frozen_aliases(
         "importlib.util",
         "importlib.machinery",
     ):
-        module = cast(ModuleType, sys.modules[registry_name])
+        # The audited runtime is Windows, even when this fixture runs on POSIX.
+        module = (
+            importlib.import_module("ntpath")
+            if registry_name == "os.path"
+            else cast(ModuleType, sys.modules[registry_name])
+        )
         canonical_name = cast(str, module.__spec__.name)
         observed[canonical_name] = module
         observed[registry_name] = module
-    monkeypatch.setattr(sys, "modules", observed)
+    monkeypatch.setattr(pipeline, "sys", SimpleNamespace(**{**vars(sys), "modules": observed}))
 
     pipeline._verify_all_file_backed_module_origins(  # noqa: SLF001
         project_root=project,
@@ -4349,7 +4373,7 @@ def test_module_origin_audit_accepts_bound_dynamic_empty_namespace_only(
         "six": six_module,
         "six.moves": moves_module,
     }
-    monkeypatch.setattr(sys, "modules", observed)
+    monkeypatch.setattr(pipeline, "sys", SimpleNamespace(**{**vars(sys), "modules": observed}))
 
     pipeline._verify_all_file_backed_module_origins(  # noqa: SLF001
         project_root=project,
@@ -4409,7 +4433,7 @@ def test_module_origin_audit_binds_relative_placeholders_to_file_backed_owner(
             submodule_search_locations=None,
         )
         observed[name] = module
-    monkeypatch.setattr(sys, "modules", observed)
+    monkeypatch.setattr(pipeline, "sys", SimpleNamespace(**{**vars(sys), "modules": observed}))
 
     pipeline._verify_all_file_backed_module_origins(  # noqa: SLF001
         project_root=project,
@@ -6185,6 +6209,11 @@ def _valid_nested_child_contract_body() -> dict[str, object]:
 
 
 def test_real_decision_files_use_exact_demo_file_hash_and_source_self_hash() -> None:
+    if not all(
+        (PROJECT_ROOT / path).is_file()
+        for path in (pipeline.EXPECTED_DEMO_POLICY_PATH, pipeline.EXPECTED_SOURCE_CALIBRATION_PATH)
+    ):
+        pytest.skip("private frozen decision artifacts are not available in this checkout")
     bindings = pipeline._verify_child_freeze_decision_bindings(PROJECT_ROOT)  # noqa: SLF001
 
     assert bindings["demo_policy"] == pipeline.BoundFile(

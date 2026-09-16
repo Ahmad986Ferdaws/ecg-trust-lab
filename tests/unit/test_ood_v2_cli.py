@@ -116,6 +116,7 @@ def _successful_freeze_report(*, cleanup_state: str = "NOT_REACHED") -> dict[str
     "module",
     [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
 )
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_runtime_launcher_sanitizes_code_injection_environment(
     module: _LauncherModule,
     tmp_path: Path,
@@ -170,6 +171,7 @@ def test_runtime_launcher_sanitizes_code_injection_environment(
     "module",
     [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
 )
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_runtime_launcher_constructs_exact_isolated_child_and_cleans_cache(
     module: _LauncherModule,
     tmp_path: Path,
@@ -976,6 +978,7 @@ def test_all_runtime_launchers_share_handle_bound_nonrecursive_gcm_cleanup() -> 
     "module",
     [inventory_cli, evaluate_cli, verify_cli],
 )
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_runtime_launcher_refuses_nonempty_scratch_after_child(
     module: _LauncherModule,
     tmp_path: Path,
@@ -1026,6 +1029,7 @@ def test_runtime_launcher_refuses_nonempty_scratch_after_child(
     "module",
     [inventory_cli, evaluate_cli, verify_cli],
 )
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_runtime_launcher_never_retries_failed_post_child_cleanup(
     module: _LauncherModule,
     tmp_path: Path,
@@ -1104,6 +1108,7 @@ def test_runtime_launcher_rejects_user_supplied_child_marker(
         "verify_trust_sentinel_ood_external_v2.py",
     ],
 )
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_real_launcher_help_reexecutes_isolated_and_leaves_no_runtime_root(
     script_name: str,
 ) -> None:
@@ -1169,6 +1174,7 @@ def test_real_launcher_rejects_ambient_python_startup(script_name: str) -> None:
     "module",
     [inventory_cli, freeze_cli, evaluate_cli, verify_cli],
 )
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_real_launcher_rejects_forged_runtime_outside_bound_artifacts(
     module: _LauncherModule,
     tmp_path: Path,

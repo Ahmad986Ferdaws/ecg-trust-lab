@@ -2205,6 +2205,7 @@ def test_isolated_entrypoint_forged_or_consumed_handoff_has_path_free_public_err
     assert token not in completed.stderr
 
 
+@pytest.mark.skipif(os.name != "nt", reason="frozen Windows runtime contract")
 def test_runtime_environment_binding_is_path_neutral_across_fresh_roots(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2328,6 +2329,7 @@ def test_seven_zip_runner_excludes_sibling_plugins_and_unbound_dll_search_paths(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    monkeypatch.setattr(inventory_module.tempfile, "tempdir", os.fspath(tmp_path))
     source_root = tmp_path / "installed-seven-zip"
     source_root.mkdir()
     executable = source_root / "7z.exe"
@@ -3042,7 +3044,7 @@ def test_bound_git_execution_uses_real_executable_and_repository_controls(
         f"--git-dir={tmp_path / '.git'}",
         f"--work-tree={tmp_path}",
         "-c",
-        "core.hooksPath=NUL",
+        "core.hooksPath=NUL" if os.name == "nt" else "core.hooksPath=/dev/null",
         "-c",
         "protocol.file.allow=never",
         "-c",
