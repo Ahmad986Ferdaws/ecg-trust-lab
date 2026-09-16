@@ -590,6 +590,58 @@ def test_analysis_outcome_rejects_result_leakage_and_missing_allowed_results() -
         )
 
 
+def test_analysis_outcome_snapshots_caller_owned_sequences() -> None:
+    reasons = [ReasonCode.ALL_TRUST_GATES_PASSED]
+    labels = ["NORM", "MI"]
+    probabilities = [0.91, 0.08]
+    outcome = AnalysisOutcome(
+        decision=TrustDecision.PREDICTION_ALLOWED,
+        reason_codes=cast(tuple[ReasonCode, ...], reasons),
+        labels=cast(tuple[str, ...], labels),
+        probabilities=cast(tuple[float, ...], probabilities),
+    )
+    reasons.clear()
+    labels[0] = "PRIVATE_LABEL"
+    probabilities[0] = 2.0
+    assert outcome.reason_codes == (ReasonCode.ALL_TRUST_GATES_PASSED,)
+    assert outcome.labels == ("NORM", "MI")
+    assert outcome.probabilities == (0.91, 0.08)
+
+
+def test_mutating_backend_input_cannot_change_validated_http_prediction() -> None:
+    probabilities = [0.91, 0.08]
+
+    class MutableEngine(FakeAnalysisEngine):
+        def infer(self, case: ResolvedCase, release: VerifiedRelease) -> AnalysisOutcome:
+            outcome = AnalysisOutcome(
+                decision=TrustDecision.PREDICTION_ALLOWED,
+                reason_codes=(ReasonCode.ALL_TRUST_GATES_PASSED,),
+                labels=("NORM", "MI"),
+                probabilities=cast(tuple[float, ...], probabilities),
+            )
+            probabilities[0] = 2.0
+            return outcome
+
+    with TestClient(_app(engine=MutableEngine())) as client:
+        response = client.post(
+            "/api/v1/inferences",
+            json={"case_id": "allowed", "release_id": RELEASE_ID},
+            headers={"Idempotency-Key": "immutable-result"},
+        )
+    assert response.status_code == 200
+    assert _body(response)["probabilities"] == [0.91, 0.08]
+
+
+def test_abstention_outcome_snapshots_reason_codes() -> None:
+    reasons = [ReasonCode.CONFIDENCE_GATE_ABSTAINED]
+    outcome = AnalysisOutcome(
+        decision=TrustDecision.ABSTAIN,
+        reason_codes=cast(tuple[ReasonCode, ...], reasons),
+    )
+    reasons.clear()
+    assert outcome.reason_codes == (ReasonCode.CONFIDENCE_GATE_ABSTAINED,)
+
+
 def test_idempotency_store_is_bounded() -> None:
     engine = FakeAnalysisEngine()
     app = _app(

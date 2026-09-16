@@ -137,6 +137,15 @@ class AnalysisOutcome:
     probabilities: tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
+        # A frozen dataclass does not freeze caller-owned lists. Snapshot first
+        # so the evidence validated below is exactly what the HTTP layer sees.
+        for name in ("reason_codes", "labels", "probabilities"):
+            value = getattr(self, name)
+            if value is None and name != "reason_codes":
+                continue
+            if not isinstance(value, (tuple, list)):
+                raise ValueError(f"{name} must be a tuple or list")
+            object.__setattr__(self, name, tuple(value))
         if not isinstance(self.decision, TrustDecision):
             raise ValueError("decision must use the closed trust-decision vocabulary")
         if not self.reason_codes or len(self.reason_codes) > 16:
