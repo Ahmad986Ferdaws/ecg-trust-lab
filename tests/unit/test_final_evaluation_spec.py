@@ -631,6 +631,7 @@ def test_runtime_accepts_indexed_cuda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requested_device = "cuda:0"
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
     monkeypatch.setattr(
         spec_module,
         "_capture_git_envelope",
@@ -691,6 +692,7 @@ def test_runtime_accepts_indexed_cuda(
     software = cast(dict[str, object], runtime["software"])
     assert software["nvidia_driver"] == "596.49"
     policy = cast(dict[str, object], runtime["policy"])
+    assert policy["cuda_visible_devices"] == "0"
     assert policy["deterministic_algorithms_enabled"] is True
     assert policy["cuda_matmul_allow_tf32"] is False
     assert policy["cudnn_allow_tf32"] is False

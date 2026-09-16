@@ -59,6 +59,8 @@ correction for CPU checks:
 
 - The synthetic CUDA UUID test did not supply a synthetic CUDA runtime version,
   so CPU PyTorch failed an earlier guard instead of exercising the UUID guard.
+  The synthetic acceptance test also now supplies its own device visibility
+  instead of inheriting the CI host's empty `CUDA_VISIBLE_DEVICES` setting.
 - The module-origin fixtures replaced global `sys.modules`, preventing pytest
   from reporting failures safely. They now replace only the audited module's
   view of `sys`, and model the frozen Windows `ntpath` alias explicitly.
