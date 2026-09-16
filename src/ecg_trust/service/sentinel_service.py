@@ -238,8 +238,12 @@ class SentinelServiceConfig:
     def __post_init__(self) -> None:
         if SERVICE_VERSION_PATTERN.fullmatch(self.service_version) is None:
             raise ValueError("service_version must be a bounded machine identifier")
-        if not 1 <= self.max_idempotency_entries <= 100_000:
-            raise ValueError("max_idempotency_entries must be between 1 and 100000")
+        if (
+            isinstance(self.max_idempotency_entries, bool)
+            or not isinstance(self.max_idempotency_entries, int)
+            or not 1 <= self.max_idempotency_entries <= 100_000
+        ):
+            raise ValueError("max_idempotency_entries must be an integer between 1 and 100000")
 
 
 class _StrictModel(BaseModel):
@@ -358,15 +362,19 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         call_next: RequestResponseEndpoint,
     ) -> Response:
         response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
-        return response
+        return _with_security_headers(response)
+
+
+def _with_security_headers(response: Response) -> Response:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    return response
 
 
 def _dump(model: BaseModel) -> dict[str, object]:
@@ -659,14 +667,18 @@ def create_sentinel_app(
         )
 
     @app.exception_handler(Exception)
-    async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    async def unexpected_error_handler(request: Request, exc: Exception) -> Response:
         del request, exc
-        return _json_response(
-            _error_result(
-                effective_config,
-                status_code=503,
-                code="service_unavailable",
-                message="The service is temporarily unavailable.",
+        # ServerErrorMiddleware is outside user middleware, so its handler must
+        # attach the same boundary headers itself.
+        return _with_security_headers(
+            _json_response(
+                _error_result(
+                    effective_config,
+                    status_code=503,
+                    code="service_unavailable",
+                    message="The service is temporarily unavailable.",
+                )
             )
         )
 

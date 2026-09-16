@@ -200,6 +200,33 @@ def test_health_is_live_without_backends_and_sets_security_boundary() -> None:
     _assert_security_headers(response)
 
 
+def test_unexpected_errors_keep_security_headers_and_sanitized_body() -> None:
+    app = create_sentinel_app()
+
+    @app.get("/synthetic-crash")
+    def crash() -> None:
+        raise RuntimeError("synthetic private backend detail")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/synthetic-crash")
+    assert response.status_code == 503
+    assert "private backend" not in response.text
+    assert _body(response)["error"]["code"] == "service_unavailable"
+    _assert_security_headers(response)
+    assert response.headers["cross-origin-resource-policy"] == "same-origin"
+
+
+@pytest.mark.parametrize("value", [True, False, 1.5, "3", None, 0, 100_001])
+def test_cache_capacity_requires_a_bounded_integer(value: object) -> None:
+    with pytest.raises(ValueError):
+        SentinelServiceConfig(max_idempotency_entries=cast(int, value))
+
+
+@pytest.mark.parametrize("value", [1, 1024, 100_000])
+def test_cache_capacity_accepts_integer_boundaries(value: int) -> None:
+    assert SentinelServiceConfig(max_idempotency_entries=value).max_idempotency_entries == value
+
+
 def test_readiness_requires_every_injected_dependency() -> None:
     with TestClient(create_sentinel_app()) as client:
         unavailable = client.get("/api/v1/readyz")
