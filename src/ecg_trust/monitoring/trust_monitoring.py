@@ -150,6 +150,7 @@ class TrustMonitoringConfig:
     psi_smoothing_count: float = 1e-6
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "score_bin_edges", tuple(self.score_bin_edges))
         if not self.version or len(self.version) > 64 or not self.version.isascii():
             raise TelemetryValidationError("config version must be non-empty ASCII")
         if any(
@@ -244,6 +245,8 @@ class ScoreHistogram:
     counts: tuple[int, ...]
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "bin_edges", tuple(self.bin_edges))
+        object.__setattr__(self, "counts", tuple(self.counts))
         if len(self.bin_edges) < 3:
             raise TelemetryValidationError("histogram must contain at least two bins")
         if len(self.counts) != len(self.bin_edges) - 1:
@@ -324,6 +327,8 @@ class AggregateTelemetryWindow:
     score_histogram: ScoreHistogram
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "decision_counts", tuple(self.decision_counts))
+        object.__setattr__(self, "quality_reason_counts", tuple(self.quality_reason_counts))
         if (
             not self.config_version
             or len(self.config_version) > 64

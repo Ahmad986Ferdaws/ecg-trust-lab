@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import FrozenInstanceError, replace
+from typing import cast
 
 import numpy as np
 import pytest
@@ -99,6 +100,47 @@ def _rate(
     return next(
         item for item in comparison.rate_comparisons if item.family is family and item.key == key
     )
+
+
+def test_monitoring_config_snapshots_bin_edges() -> None:
+    edges = [0.0, 0.5, 1.0]
+    config = TrustMonitoringConfig(score_bin_edges=cast(tuple[float, ...], edges))
+    histogram = ScoreHistogram.from_scores([0.25, 0.75], config)
+    edges[1] = 0.9
+    assert config.score_bin_edges == (0.0, 0.5, 1.0)
+    assert histogram.bin_edges == (0.0, 0.5, 1.0)
+    assert ScoreHistogram.from_scores([0.25, 0.75], config) == histogram
+
+
+def test_histogram_snapshots_counts_and_edges() -> None:
+    counts = [10, 20]
+    edges = [0.0, 0.5, 1.0]
+    histogram = ScoreHistogram(
+        bin_edges=cast(tuple[float, ...], edges), counts=cast(tuple[int, ...], counts)
+    )
+    counts[:] = [-1, 0]
+    edges.clear()
+    assert histogram.to_dict() == {"bin_edges": [0.0, 0.5, 1.0], "counts": [10, 20]}
+    assert histogram.sample_count == 30
+
+
+def test_frozen_reference_counters_cannot_be_changed_by_the_caller(
+    config: TrustMonitoringConfig,
+) -> None:
+    original = _window(0, config)
+    decisions = list(original.decision_counts)
+    reasons = list(original.quality_reason_counts)
+    reference = replace(
+        original,
+        decision_counts=cast(tuple[DecisionStateCount, ...], decisions),
+        quality_reason_counts=cast(tuple[QualityReasonCount, ...], reasons),
+    )
+    current = _window(1, config)
+    before = compare_telemetry_windows(reference, current, config=config).to_dict()
+    decisions[0] = DecisionStateCount(DecisionState.INVALID_INPUT, 100)
+    reasons.clear()
+    assert reference == original
+    assert compare_telemetry_windows(reference, current, config=config).to_dict() == before
 
 
 def test_stable_aggregate_window_is_ok_json_safe_and_round_trips(
