@@ -16,6 +16,7 @@ from ecg_trust.source_calibration.models import (
     SourceRole,
 )
 from ecg_trust.source_calibration.pipeline import (
+    EntropyAggregation,
     FittedEntropyGate,
     FittedSourceComponents,
     RoleData,
@@ -44,6 +45,7 @@ __all__ = [
     "FAILURE_RECEIPT_FILENAME",
     "LABEL_ORDER",
     "RESULT_FILENAME",
+    "EntropyAggregation",
     "FailureCode",
     "FailureReceipt",
     "FittedEntropyGate",

@@ -11,22 +11,27 @@ from typing import cast
 import numpy as np
 import pytest
 import yaml  # type: ignore[import-untyped]
+from pydantic import ValidationError
 
 import ecg_trust.source_calibration.pipeline as pipeline_module
+from ecg_trust.open_world import max_normalized_bernoulli_entropy, normalized_bernoulli_entropy
 from ecg_trust.predictions import create_prediction_artifact, save_prediction_artifact
 from ecg_trust.protocol import ExperimentProtocol, FoldRole
 from ecg_trust.source_calibration import (
     FAILURE_RECEIPT_FILENAME,
     RESULT_FILENAME,
+    FittedEntropyGate,
     SourceCalibrationConfig,
     SourceCalibrationConfigError,
     SourceCalibrationIntegrityError,
     SourceCalibrationOutputError,
+    SourceCalibrationResult,
     SourcePredictionArrays,
     SourceRole,
     VerifiedSourceInputs,
     assert_complete_release_ready,
     build_source_calibration_result,
+    evaluate_source_validation,
     fit_entropy_gate,
     fit_source_components,
     load_source_calibration_config,
@@ -40,7 +45,7 @@ from ecg_trust.source_calibration import (
     verify_clean_git_revision,
     verify_source_inputs,
 )
-from ecg_trust.source_calibration.models import canonical_sha256
+from ecg_trust.source_calibration.models import canonical_json_bytes, canonical_sha256
 
 LABELS = ("NORM", "MI", "STTC", "CD", "HYP")
 REVISION = "a" * 40
@@ -392,6 +397,192 @@ def test_entropy_gate_retains_all_cutoff_ties() -> None:
     assert gate.fit_count == 4
     assert gate.selected_count == 3
     assert gate.achieved_coverage == 0.75
+
+
+def _pre_change_mean_gate(probabilities: np.ndarray, target_coverage: float) -> tuple[float, int]:
+    uncertainty = normalized_bernoulli_entropy(probabilities)
+    requested = min(uncertainty.size, max(1, int(np.ceil(target_coverage * uncertainty.size))))
+    cutoff = float(np.sort(uncertainty, kind="stable")[requested - 1])
+    return cutoff, int(np.count_nonzero(uncertainty <= cutoff))
+
+
+def test_worst_label_gate_rejects_a_borderline_label_the_mean_gate_admits() -> None:
+    generator = np.random.default_rng(20260923)
+    # Every fit label is moderately confident: its entropy lies in [H(0.2), H(0.02)] < 1.
+    magnitude = generator.uniform(0.02, 0.2, size=(200, 5))
+    fit = np.where(generator.random((200, 5)) < 0.5, magnitude, 1.0 - magnitude)
+    borderline = np.asarray([[0.5, 0.001, 0.999, 0.001, 0.001]], dtype=np.float64)
+    confident = np.asarray([[0.001, 0.999, 0.001, 0.001, 0.999]], dtype=np.float64)
+
+    mean_gate = fit_entropy_gate(fit, target_coverage=0.8)
+    max_gate = fit_entropy_gate(fit, target_coverage=0.8, aggregation="max")
+
+    assert (mean_gate.fit_count, max_gate.fit_count) == (200, 200)
+    assert mean_gate.selected_count >= 160 and max_gate.selected_count >= 160
+    assert normalized_bernoulli_entropy(borderline)[0] == pytest.approx(0.2091262, abs=1e-6)
+    assert max_normalized_bernoulli_entropy(borderline)[0] == pytest.approx(1.0)
+    # Failing before: the frozen mean gate admits one label at probability one half.
+    assert mean_gate.retains(borderline).tolist() == [True]
+    # Passing after: the worst-label gate judges that label on its own.
+    assert max_gate.maximum_entropy < 1.0
+    assert max_gate.retains(borderline).tolist() == [False]
+    assert mean_gate.retains(confident).tolist() == max_gate.retains(confident).tolist() == [True]
+
+
+def test_entropy_gate_default_is_the_unchanged_mean_gate() -> None:
+    generator = np.random.default_rng(7)
+    probabilities = generator.uniform(0.0, 1.0, size=(97, 5))
+    probabilities[:5] = 0.1
+
+    default = fit_entropy_gate(probabilities, target_coverage=0.8)
+    explicit = fit_entropy_gate(probabilities, target_coverage=0.8, aggregation="mean")
+    cutoff, selected = _pre_change_mean_gate(probabilities, 0.8)
+
+    assert default == explicit
+    assert default.aggregation == "mean"
+    assert default.method == "mean_normalized_binary_entropy"
+    assert (default.maximum_entropy, default.selected_count, default.fit_count) == (
+        cutoff,
+        selected,
+        97,
+    )
+    assert np.array_equal(
+        default.retains(probabilities), normalized_bernoulli_entropy(probabilities) <= cutoff
+    )
+    worst = fit_entropy_gate(probabilities, target_coverage=0.8, aggregation="max")
+    assert worst.method == "max_normalized_binary_entropy"
+    assert np.array_equal(
+        worst.retains(probabilities),
+        max_normalized_bernoulli_entropy(probabilities) <= worst.maximum_entropy,
+    )
+
+
+@pytest.mark.parametrize("aggregation", ["median", "MAX", "", None, 1, True])
+def test_entropy_gate_rejects_unknown_aggregations(aggregation: object) -> None:
+    probabilities = np.full((4, 5), 0.25, dtype=np.float64)
+    with pytest.raises(SourceCalibrationIntegrityError, match="aggregation"):
+        fit_entropy_gate(
+            probabilities,
+            target_coverage=0.8,
+            aggregation=aggregation,  # type: ignore[arg-type]
+        )
+    with pytest.raises(SourceCalibrationIntegrityError, match="aggregation"):
+        FittedEntropyGate(
+            target_coverage=0.8,
+            maximum_entropy=0.5,
+            selected_count=4,
+            fit_count=4,
+            aggregation=aggregation,  # type: ignore[arg-type]
+        )
+
+
+def test_default_source_components_and_summaries_are_unchanged(
+    synthetic_project: SyntheticProject,
+) -> None:
+    config, verified, source = _loaded_source(synthetic_project)
+    partitions = partition_source_predictions(source, config)
+    default = fit_source_components(partitions, config)
+    explicit = fit_source_components(partitions, config, entropy_aggregation="mean")
+
+    assert default.entropy_aggregation == explicit.entropy_aggregation == "mean"
+    assert default.summary == explicit.summary
+    gate = default.summary.entropy_gate
+    assert gate.method == "mean_normalized_binary_entropy"
+    assert set(gate.model_dump(mode="json")) == {
+        "method",
+        "fit_role",
+        "target_coverage",
+        "tie_rule",
+        "maximum_entropy",
+        "selected_count",
+        "fit_count",
+        "achieved_coverage",
+    }
+    decision_probabilities = default.temperature.predict_proba(partitions.decision_fit.raw_logits)
+    cutoff, selected = _pre_change_mean_gate(decision_probabilities, 0.8)
+    assert (gate.maximum_entropy, gate.selected_count) == (cutoff, selected)
+    assert default.entropy_cutoff == cutoff
+
+    validation = evaluate_source_validation(partitions, default, config)
+    validation_probabilities = default.temperature.predict_proba(
+        partitions.source_validation.raw_logits
+    )
+    expected_retained = int(
+        np.count_nonzero(normalized_bernoulli_entropy(validation_probabilities) <= cutoff)
+    )
+    assert validation.entropy_gate.selected_count == expected_retained
+    assert set(validation.entropy_gate.model_dump(mode="json")) == {
+        "frozen_component_sha256",
+        "maximum_entropy",
+        "selected_count",
+        "validation_count",
+        "achieved_coverage",
+        "retained_hamming_loss",
+        "retained_exact_match_accuracy",
+    }
+    result = build_source_calibration_result(
+        config=config,
+        source=source,
+        verified=verified,
+        config_file_sha256=load_source_calibration_config(synthetic_project.config_path)[1],
+        code_revision=REVISION,
+    )
+    assert result.frozen_components == default.summary
+    assert result.source_validation == validation
+
+
+def test_worst_label_components_bind_fit_and_validation_to_one_aggregation(
+    synthetic_project: SyntheticProject,
+) -> None:
+    config, verified, source = _loaded_source(synthetic_project)
+    partitions = partition_source_predictions(source, config)
+    mean = fit_source_components(partitions, config)
+    worst = fit_source_components(partitions, config, entropy_aggregation="max")
+
+    assert worst.entropy_aggregation == "max"
+    assert worst.summary.entropy_gate.method == "max_normalized_binary_entropy"
+    assert worst.entropy_cutoff == worst.summary.entropy_gate.maximum_entropy
+    assert worst.summary.temperature == mean.summary.temperature
+    assert worst.summary.thresholds == mean.summary.thresholds
+    assert worst.summary.conformal == mean.summary.conformal
+    assert worst.summary.component_sha256 != mean.summary.component_sha256
+
+    validation = evaluate_source_validation(partitions, worst, config)
+    probabilities = worst.temperature.predict_proba(partitions.source_validation.raw_logits)
+    expected_retained = int(
+        np.count_nonzero(max_normalized_bernoulli_entropy(probabilities) <= worst.entropy_cutoff)
+    )
+    assert validation.entropy_gate.selected_count == expected_retained
+    assert validation.entropy_gate.frozen_component_sha256 == worst.summary.component_sha256
+
+    with pytest.raises(SourceCalibrationIntegrityError, match="aggregation"):
+        replace(worst, entropy_aggregation="mean")
+    with pytest.raises(SourceCalibrationIntegrityError, match="aggregation"):
+        replace(mean, entropy_aggregation="max")
+    with pytest.raises(SourceCalibrationIntegrityError, match="aggregation"):
+        fit_source_components(
+            partitions,
+            config,
+            entropy_aggregation="median",  # type: ignore[arg-type]
+        )
+
+    # Protocol v1 results keep accepting only the frozen mean gate.
+    result = build_source_calibration_result(
+        config=config,
+        source=source,
+        verified=verified,
+        config_file_sha256=load_source_calibration_config(synthetic_project.config_path)[1],
+        code_revision=REVISION,
+    )
+    payload = result.model_dump(mode="json")
+    payload["frozen_components"] = worst.summary.model_dump(mode="json")
+    payload["source_validation"] = validation.model_dump(mode="json")
+    del payload["artifact_sha256"]
+    payload["artifact_sha256"] = canonical_sha256(payload)
+    with pytest.raises(ValidationError, match="frozen mean entropy gate"):
+        SourceCalibrationResult.model_validate(payload)
+    with pytest.raises(SourceCalibrationIntegrityError, match="schema"):
+        load_source_calibration_result_bytes(canonical_json_bytes(payload) + b"\n")
 
 
 def test_validation_and_conformal_roles_cannot_leak_into_other_fits(

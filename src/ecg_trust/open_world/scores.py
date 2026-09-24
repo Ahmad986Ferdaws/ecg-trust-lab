@@ -3,6 +3,11 @@
 Every score in this module follows one convention: **higher means more
 uncertain / more OOD-like**. These are reproducible baselines, not calibrated
 probabilities of being out of distribution.
+
+The two normalized-entropy scores share one per-label computation and differ
+only in aggregation. The mean score dilutes one uncertain label by the label
+count; the worst-label (maximum) score reports the most uncertain label on its
+own. Neither identifies which label, nor why a label, is uncertain.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ FloatArray = NDArray[np.float64]
 
 _SCHEMA_VERSION = 1
 _ENTROPY_TYPE = "ecg_trust.normalized_bernoulli_entropy"
+_MAX_ENTROPY_TYPE = "ecg_trust.max_normalized_bernoulli_entropy"
 _ENERGY_TYPE = "ecg_trust.symmetric_binary_energy"
 
 
@@ -33,16 +39,22 @@ def normalized_bernoulli_entropy(probabilities: ArrayLike) -> FloatArray:
     treated as more uncertain/OOD-like.
     """
 
-    matrix = _float_matrix(probabilities, context="probabilities")
-    if np.any((matrix < 0.0) | (matrix > 1.0)):
-        raise OODScoreValidationError("probabilities must lie in [0, 1]")
-    entropy = np.zeros_like(matrix)
-    interior = (matrix > 0.0) & (matrix < 1.0)
-    selected = matrix[interior]
-    entropy[interior] = -(
-        selected * np.log(selected) + (1.0 - selected) * np.log1p(-selected)
-    ) / math.log(2.0)
-    return entropy.mean(axis=1)
+    return _per_label_normalized_entropy(probabilities).mean(axis=1)
+
+
+def max_normalized_bernoulli_entropy(probabilities: ArrayLike) -> FloatArray:
+    """Return the worst-label Bernoulli entropy normalized to ``[0, 1]``.
+
+    Each row's score is the largest of its per-label entropies, which are
+    computed exactly as in :func:`normalized_bernoulli_entropy`, so the result
+    is one of those per-label values with no aggregation rounding. One label at
+    probability one half scores one however confident the other labels are;
+    zero is obtained only when every probability is zero or one. In exact
+    arithmetic the mean score never exceeds this score. Higher values are
+    treated as more uncertain/OOD-like.
+    """
+
+    return _per_label_normalized_entropy(probabilities).max(axis=1)
 
 
 def symmetric_binary_energy(logits: ArrayLike, *, temperature: float = 1.0) -> FloatArray:
@@ -109,6 +121,37 @@ class NormalizedBernoulliEntropyScorer:
 
 
 @dataclass(frozen=True, slots=True)
+class MaxNormalizedBernoulliEntropyScorer:
+    """Serializable stateless worst-label normalized-entropy scorer."""
+
+    def score(self, probabilities: ArrayLike) -> FloatArray:
+        return max_normalized_bernoulli_entropy(probabilities)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": _SCHEMA_VERSION,
+            "artifact_type": _MAX_ENTROPY_TYPE,
+            "score_direction": "higher_is_more_out_of_distribution",
+            "aggregation": "max_across_labels",
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> MaxNormalizedBernoulliEntropyScorer:
+        _expect_scorer(
+            payload,
+            artifact_type=_MAX_ENTROPY_TYPE,
+            expected={
+                "schema_version",
+                "artifact_type",
+                "score_direction",
+                "aggregation",
+            },
+            aggregation="max_across_labels",
+        )
+        return cls()
+
+
+@dataclass(frozen=True, slots=True)
 class SymmetricBinaryEnergyScorer:
     """Serializable symmetric binary-energy scorer."""
 
@@ -150,7 +193,11 @@ class SymmetricBinaryEnergyScorer:
 
 
 def _expect_scorer(
-    payload: Mapping[str, object], *, artifact_type: str, expected: set[str]
+    payload: Mapping[str, object],
+    *,
+    artifact_type: str,
+    expected: set[str],
+    aggregation: str = "mean_across_labels",
 ) -> None:
     actual = set(payload)
     if actual != expected:
@@ -165,8 +212,21 @@ def _expect_scorer(
         raise OODScoreValidationError("unexpected scorer artifact_type")
     if payload["score_direction"] != "higher_is_more_out_of_distribution":
         raise OODScoreValidationError("unsupported score_direction")
-    if payload["aggregation"] != "mean_across_labels":
+    if payload["aggregation"] != aggregation:
         raise OODScoreValidationError("unsupported score aggregation")
+
+
+def _per_label_normalized_entropy(probabilities: ArrayLike) -> FloatArray:
+    matrix = _float_matrix(probabilities, context="probabilities")
+    if np.any((matrix < 0.0) | (matrix > 1.0)):
+        raise OODScoreValidationError("probabilities must lie in [0, 1]")
+    entropy = np.zeros_like(matrix)
+    interior = (matrix > 0.0) & (matrix < 1.0)
+    selected = matrix[interior]
+    entropy[interior] = -(
+        selected * np.log(selected) + (1.0 - selected) * np.log1p(-selected)
+    ) / math.log(2.0)
+    return entropy
 
 
 def _float_matrix(values: ArrayLike, *, context: str) -> FloatArray:
