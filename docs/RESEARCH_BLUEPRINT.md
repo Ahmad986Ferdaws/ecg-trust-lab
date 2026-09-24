@@ -297,6 +297,8 @@ Calibrators fitted on fold 9:
 2. regularized classwise sigmoid scaling, `sigmoid(z_k / T_k + b_k)`;
 3. isotonic regression only as an exploratory comparator because HYP and rare probability regions may be data-limited.
 
+Engineering note (added after this snapshot; it does not amend any frozen protocol): option 2 is available as `ecg_trust.evaluation.fit_classwise_sigmoid_scaling`, parameterized as `sigmoid(a_k * z_k + b_k)` with `a_k = 1 / T_k` held in a strictly positive interval, a ridge penalty toward the identity map, and an optional slope-only mode. It fits on fold 9 only and is opt-in: no frozen pipeline, configuration, or artifact uses it. Enabling it for any release requires a new preregistered protocol that fixes its settings before held-out or external data are opened.
+
 ### 9.3 Selective prediction and abstention
 
 Candidate uncertainty scores:
