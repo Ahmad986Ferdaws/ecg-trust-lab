@@ -28,7 +28,11 @@ from ecg_trust.service.sentinel_service import (
     ResolvedCase,
     VerifiedRelease,
 )
-from ecg_trust.trust_policy import TrustPolicyResult, TrustReasonCode
+from ecg_trust.trust_policy import (
+    PUBLIC_CONFIDENCE_ABSTENTION_REASON,
+    TrustPolicyResult,
+    TrustReasonCode,
+)
 
 NOW = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
 RELEASE = VerifiedRelease(
@@ -160,6 +164,59 @@ def test_blocked_core_result_never_maps_label_outputs() -> None:
     assert outcome.reason_codes == (ReasonCode.CONFORMAL_SET_UNCERTAIN,)
     assert outcome.labels is None
     assert outcome.probabilities is None
+
+
+def test_every_public_core_reason_has_a_service_mirror_and_audit_reasons_do_not() -> None:
+    service_values = {reason.value for reason in ReasonCode}
+    audit_only = {TrustReasonCode.LABEL_SET_INCOHERENT.value}
+    public_values = {reason.value for reason in TrustReasonCode} - audit_only | {
+        PUBLIC_CONFIDENCE_ABSTENTION_REASON
+    }
+
+    assert public_values <= service_values
+    assert not audit_only & service_values
+
+
+def _coherence_gated(
+    reason: TrustReasonCode,
+    *,
+    uncertain: tuple[str, ...] = (),
+    incoherent: tuple[str, ...] = (),
+) -> SentinelCaseResult:
+    blocked = _result(TrustDecision.ABSTAIN)
+    return SentinelCaseResult(
+        release_id=blocked.release_id,
+        decision=TrustDecision.ABSTAIN,
+        policy=TrustPolicyResult(
+            policy_version="trust-policy-label-coherence-dev",
+            decision=TrustDecision.ABSTAIN,
+            reason_codes=(reason,),
+            uncertain_labels=uncertain,
+            incoherent_labels=incoherent,
+            label_coherence_required=True,
+        ),
+        quality=blocked.quality,
+        distribution=None,
+        label_prediction_sets=None,
+        calibrated_probabilities=None,
+    )
+
+
+def test_coherence_gated_abstentions_share_one_generic_service_reason() -> None:
+    incoherent = _coherence_gated(TrustReasonCode.LABEL_SET_INCOHERENT, incoherent=("NORM", "MI"))
+    uncertain = _coherence_gated(TrustReasonCode.CONFORMAL_SET_UNCERTAIN, uncertain=("MI",))
+
+    outcomes = []
+    for result in (incoherent, uncertain):
+        adapter = SentinelServiceAnalysisEngine(FakeCore(result), clock=lambda: NOW)
+        outcomes.extend((adapter.validate_case(_case(), RELEASE), adapter.infer(_case(), RELEASE)))
+
+    for outcome in outcomes:
+        assert outcome.decision is TrustDecision.ABSTAIN
+        assert outcome.reason_codes == (ReasonCode.CONFIDENCE_GATE_ABSTAINED,)
+        assert outcome.labels is None
+        assert outcome.probabilities is None
+    assert len(set(outcomes)) == 1
 
 
 def test_release_and_private_handle_mismatch_fail_closed() -> None:

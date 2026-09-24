@@ -34,7 +34,11 @@ from ecg_trust.sentinel_engine import (
     SentinelValidationError,
     TrustSentinelEngine,
 )
-from ecg_trust.trust_policy import DEFAULT_TRUST_POLICY_CONFIG
+from ecg_trust.trust_policy import (
+    DEFAULT_TRUST_POLICY_CONFIG,
+    TrustPolicyConfig,
+    TrustReasonCode,
+)
 
 FloatArray = NDArray[np.float64]
 NOW = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
@@ -151,6 +155,7 @@ def _engine(
     detector: FakeDetector | None = None,
     conformal: LabelwiseBinaryConformal | None = None,
     quality_config: SignalQualityConfig = DEFAULT_SIGNAL_QUALITY_CONFIG,
+    policy_config: TrustPolicyConfig = DEFAULT_TRUST_POLICY_CONFIG,
 ) -> TrustSentinelEngine:
     temporary = tempfile.TemporaryDirectory(prefix="sentinel-engine-test-")
     root = Path(temporary.name)
@@ -195,7 +200,7 @@ def _engine(
         loaders=SentinelRuntimeLoaders(
             model_runner=runner.bind,
             quality_policy=lambda _: quality_config,
-            decision_policy=lambda _: DEFAULT_TRUST_POLICY_CONFIG,
+            decision_policy=lambda _: policy_config,
             distribution_policy=lambda _: LoadedDistributionPolicy(
                 detector=detector,
                 method="shrinkage-mahalanobis-v1",
@@ -386,6 +391,83 @@ def test_conformal_uncertainty_or_missing_artifact_abstains_without_label_leakag
         assert "probabilities" not in public
         assert "prediction_sets" not in public
         assert all(label not in repr(public) for label in SUPERCLASSES)
+
+
+def test_opt_in_label_coherence_withholds_confident_norm_with_infarction() -> None:
+    probabilities = (0.9, 0.9, 0.1, 0.1, 0.1)
+    coherence = TrustPolicyConfig(
+        version="trust-policy-label-coherence-dev",
+        require_label_coherence=True,
+    )
+    default = _analyze(
+        _engine(
+            FakeRunner(probabilities=probabilities),
+            detector=FakeDetector(0.5),
+            conformal=_conformal(),
+        )
+    )
+    gated = _analyze(
+        _engine(
+            FakeRunner(probabilities=probabilities),
+            detector=FakeDetector(0.5),
+            conformal=_conformal(),
+            policy_config=coherence,
+        )
+    )
+    conduction = _analyze(
+        _engine(
+            FakeRunner(probabilities=(0.9, 0.1, 0.1, 0.9, 0.1)),
+            detector=FakeDetector(0.5),
+            conformal=_conformal(),
+            policy_config=coherence,
+        )
+    )
+
+    assert default.decision is TrustDecision.PREDICTION_ALLOWED
+    assert conduction.decision is TrustDecision.PREDICTION_ALLOWED
+    assert gated.decision is TrustDecision.ABSTAIN
+    assert gated.policy.reason_codes == (TrustReasonCode.LABEL_SET_INCOHERENT,)
+    assert gated.policy.incoherent_labels == ("NORM", "MI")
+    assert gated.calibrated_probabilities is None
+    assert gated.label_prediction_sets is None
+    public = gated.to_public_dict()
+    assert public["reason_codes"] == ["CONFIDENCE_GATE_ABSTAINED"]
+    assert "probabilities" not in public
+    assert all(label not in repr(public) for label in SUPERCLASSES)
+
+
+def test_public_incoherent_abstention_is_indistinguishable_from_uncertainty() -> None:
+    # The gate fires only when NORM and at least one of MI, STTC, or HYP are
+    # supported, so a distinct public reason would disclose withheld results.
+    coherence = TrustPolicyConfig(
+        version="trust-policy-label-coherence-dev",
+        require_label_coherence=True,
+    )
+    incoherent = _analyze(
+        _engine(
+            FakeRunner(probabilities=(0.9, 0.9, 0.1, 0.1, 0.1)),
+            detector=FakeDetector(0.5),
+            conformal=_conformal(),
+            policy_config=coherence,
+        )
+    )
+    uncertain = _analyze(
+        _engine(
+            FakeRunner(),
+            detector=FakeDetector(0.5),
+            conformal=_conformal(0.95),
+            policy_config=coherence,
+        )
+    )
+    default_uncertain = _analyze(
+        _engine(FakeRunner(), detector=FakeDetector(0.5), conformal=_conformal(0.95))
+    )
+
+    assert incoherent.policy.reason_codes == (TrustReasonCode.LABEL_SET_INCOHERENT,)
+    assert uncertain.policy.reason_codes == (TrustReasonCode.CONFORMAL_SET_UNCERTAIN,)
+    assert incoherent.to_public_dict() == uncertain.to_public_dict()
+    assert "LABEL_SET_INCOHERENT" not in repr(incoherent.to_public_dict())
+    assert default_uncertain.to_public_dict()["reason_codes"] == ["CONFORMAL_SET_UNCERTAIN"]
 
 
 def test_model_failure_and_release_mismatch_fail_without_private_details() -> None:

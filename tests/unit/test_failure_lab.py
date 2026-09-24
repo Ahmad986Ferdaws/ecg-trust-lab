@@ -141,6 +141,35 @@ def test_stressed_blocking_state_hides_stressed_and_delta_probabilities(
     assert "probabilities" not in public["stressed"]  # type: ignore[operator]
 
 
+def test_coherence_gated_stress_result_publishes_only_the_generic_reason() -> None:
+    incoherent = FakeResult(
+        decision=TrustDecision.ABSTAIN,
+        policy=TrustPolicyResult(
+            policy_version="trust-policy-label-coherence-dev",
+            decision=TrustDecision.ABSTAIN,
+            reason_codes=(TrustReasonCode.LABEL_SET_INCOHERENT,),
+            incoherent_labels=("NORM", "MI"),
+            label_coherence_required=True,
+        ),
+        calibrated_probabilities=None,
+    )
+    analyzer = FakeAnalyzer(
+        [
+            _result(TrustDecision.PREDICTION_ALLOWED, (0.9, 0.1, 0.2, 0.3, 0.4)),
+            cast(SentinelCaseResult, incoherent),
+        ]
+    )
+
+    public = _run(analyzer).to_public_dict()
+
+    assert public["stressed"] == {
+        "decision": "ABSTAIN",
+        "reason_codes": ["CONFIDENCE_GATE_ABSTAINED"],
+        "predictions_exposed": False,
+    }
+    assert "LABEL_SET_INCOHERENT" not in repr(public)
+
+
 def test_blocked_baseline_stops_before_stress_and_second_analysis() -> None:
     analyzer = FakeAnalyzer([_result(TrustDecision.REACQUIRE)])
 

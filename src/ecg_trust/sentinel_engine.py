@@ -199,7 +199,12 @@ class SentinelArtifacts:
 
 @dataclass(frozen=True, slots=True)
 class SentinelCaseResult:
-    """One case disposition with a structural prediction-disclosure invariant."""
+    """One case disposition with a structural prediction-disclosure invariant.
+
+    ``policy`` is the internal audit record.  Its label fields can name labels
+    of a withheld case, so only :meth:`to_public_dict`, which publishes
+    ``policy.public_reason_codes``, may cross a public boundary.
+    """
 
     release_id: str
     decision: TrustDecision
@@ -234,7 +239,7 @@ class SentinelCaseResult:
             "release_id": self.release_id,
             "decision": self.decision.value,
             "predictions_exposed": self.predictions_exposed,
-            "reason_codes": [reason.value for reason in self.policy.reason_codes],
+            "reason_codes": list(self.policy.public_reason_codes),
             "quality": {
                 "passed": self.quality.passed,
                 "decision": self.quality.decision.value,
@@ -508,6 +513,8 @@ class TrustSentinelEngine:
                 legacy_entropy_gate_accepted=model_evidence.legacy_entropy_gate_accepted,
                 # A temporary all-singleton value lets the shared policy evaluate
                 # only gates that precede the real conformal calculation below.
+                # All-negative sets are label-coherent by definition, so the
+                # opt-in coherence gate cannot fire on this placeholder.
                 conformal_decisions=(BinaryDecision.NOT_SUPPORTED,) * len(SUPERCLASSES),
             ),
             config=self._policy_config,

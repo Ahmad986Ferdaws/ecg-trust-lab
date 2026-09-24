@@ -134,7 +134,7 @@ class SentinelServiceAnalysisEngine:
             evaluated_at=evaluated_at,
             release_integrity_verified=True,
         )
-        reasons = tuple(ReasonCode(reason.value) for reason in result.policy.reason_codes)
+        reasons = tuple(ReasonCode(reason) for reason in result.policy.public_reason_codes)
         if result.decision is not TrustDecision.PREDICTION_ALLOWED:
             return AnalysisOutcome(decision=result.decision, reason_codes=reasons)
 

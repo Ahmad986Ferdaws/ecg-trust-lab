@@ -57,7 +57,7 @@ class FailureLabDecision:
     def from_case_result(cls, result: SentinelCaseResult) -> FailureLabDecision:
         return cls(
             decision=result.decision,
-            reason_codes=tuple(reason.value for reason in result.policy.reason_codes),
+            reason_codes=result.policy.public_reason_codes,
             probabilities=result.calibrated_probabilities,
         )
 

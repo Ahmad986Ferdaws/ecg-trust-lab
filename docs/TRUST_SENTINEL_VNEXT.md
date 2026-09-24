@@ -27,13 +27,30 @@ Every analysis ends in exactly one state, evaluated in this order:
 3. `UNSUPPORTED_INPUT`: the signal is valid but outside the evaluated data
    distribution.
 4. `ABSTAIN`: the signal is valid and supported, but the classifier is not
-   sufficiently certain.
+   sufficiently certain or, only under a non-v1 policy with the opt-in
+   coherence gate, its confident per-label decisions form a listed implausible
+   combination.
 5. `PREDICTION_ALLOWED`: every preceding gate passed.
 
 Only `PREDICTION_ALLOWED` may expose class results. Quality, distribution
 support, and prediction uncertainty remain separate evidence streams because
 they represent different hazards. A missing component, artifact mismatch, or
 runtime failure closes the gate rather than falling back to classification.
+
+The policy also has an opt-in cross-label coherence gate
+(`TrustPolicyConfig.require_label_coherence`, off by default). When enabled, a
+singleton label set that asserts `NORM` with `MI`, `STTC`, or `HYP` ends in
+`ABSTAIN`; `NORM` with `CD` stays allowed. "Coherent" means only that no listed
+pair is jointly supported, not that the set is plausible: the all-negative set
+has no included record in the source cohort but is out of scope and released.
+The policy's audit record keeps the specific reason `LABEL_SET_INCOHERENT` and
+the conflicting labels. Because that reason alone would reveal that `NORM` and
+an abnormal superclass were supported, public case, Failure Lab, and service
+responses instead report the generic `CONFIDENCE_GATE_ABSTAINED`. While the
+gate is enabled, an uncertain conformal set is reported with the same code, so
+the two causes cannot be told apart. The gate is not part of `trust-policy-v1`
+and cannot run under that version string. Enabling it for any release requires
+a new preregistered protocol.
 
 ## Architecture
 
