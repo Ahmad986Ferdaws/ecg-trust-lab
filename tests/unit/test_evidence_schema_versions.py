@@ -4,6 +4,7 @@ import pytest
 
 from ecg_trust.conformal import (
     BinaryPredictionSets,
+    ClassConditionalLabelwiseConformal,
     ConformalMetrics,
     ConformalValidationError,
     LabelwiseBinaryConformal,
@@ -19,6 +20,7 @@ Artifact = (
     NormalizedBernoulliEntropyScorer
     | SymmetricBinaryEnergyScorer
     | LabelwiseBinaryConformal
+    | ClassConditionalLabelwiseConformal
     | BinaryPredictionSets
     | ConformalMetrics
 )
@@ -30,10 +32,17 @@ def _artifacts() -> list[Artifact]:
         label_names=("label",), alpha=0.5,
     )
     predictions = calibrator.predict([[0.8], [0.2]])
+    class_conditional = ClassConditionalLabelwiseConformal.fit(
+        [[0.9], [0.8], [0.2], [0.1]], [[1], [1], [0], [0]],
+        label_names=("label",),
+        negative_alphas={"label": 0.5},
+        positive_alphas={"label": 0.5},
+    )
     return [
         NormalizedBernoulliEntropyScorer(),
         SymmetricBinaryEnergyScorer(),
         calibrator,
+        class_conditional,
         predictions,
         evaluate_prediction_sets(predictions, [[1], [0]]),
     ]
