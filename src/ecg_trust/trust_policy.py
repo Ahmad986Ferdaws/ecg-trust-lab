@@ -3,18 +3,24 @@
 The policy is deliberately small and deterministic.  It does not fit any
 threshold, inspect target labels, or run a classifier.  It combines already
 frozen evidence in safety order and controls whether downstream code may expose
-class results.
+class results.  An optional, default-off label-coherence gate (see
+:mod:`ecg_trust.label_coherence`) can also withhold a jointly implausible set of
+singleton decisions; it is not part of ``trust-policy-v1``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final
 
 from ecg_trust.conformal import BinaryDecision
 from ecg_trust.constants import SUPERCLASSES
 from ecg_trust.contracts import TrustDecision
+from ecg_trust.label_coherence import find_incoherent_labels
 from ecg_trust.quality.signal_quality import QualityStatus, SignalQualityReport
+
+_V1_POLICY_VERSION: Final = "trust-policy-v1"
 
 
 class TrustPolicyValidationError(ValueError):
@@ -34,27 +40,41 @@ class TrustReasonCode(StrEnum):
     UNCERTAINTY_COMPONENT_UNAVAILABLE = "UNCERTAINTY_COMPONENT_UNAVAILABLE"
     LEGACY_ENTROPY_GATE_REJECTED = "LEGACY_ENTROPY_GATE_REJECTED"
     CONFORMAL_SET_UNCERTAIN = "CONFORMAL_SET_UNCERTAIN"
+    LABEL_SET_INCOHERENT = "LABEL_SET_INCOHERENT"
     ALL_TRUST_GATES_PASSED = "ALL_TRUST_GATES_PASSED"
 
 
 @dataclass(frozen=True, slots=True)
 class TrustPolicyConfig:
-    """Immutable behavior of the first Sentinel decision release."""
+    """Immutable behavior of the first Sentinel decision release.
 
-    version: str = "trust-policy-v1"
+    ``require_label_coherence`` is an opt-in development gate that is off by
+    default.  It cannot be enabled under the v1 version string, so its results
+    are never attributed to ``trust-policy-v1``; enabling it for any release
+    requires a new preregistered protocol.
+    """
+
+    version: str = _V1_POLICY_VERSION
     require_legacy_entropy_gate: bool = True
     require_all_label_sets_singleton: bool = True
+    require_label_coherence: bool = False
 
     def __post_init__(self) -> None:
         if not self.version.strip():
             raise TrustPolicyValidationError("policy version must be non-empty")
-        if not isinstance(self.require_legacy_entropy_gate, bool) or not isinstance(
-            self.require_all_label_sets_singleton, bool
+        if (
+            not isinstance(self.require_legacy_entropy_gate, bool)
+            or not isinstance(self.require_all_label_sets_singleton, bool)
+            or not isinstance(self.require_label_coherence, bool)
         ):
             raise TrustPolicyValidationError("policy gate settings must be boolean")
         if not self.require_all_label_sets_singleton:
             raise TrustPolicyValidationError(
                 "v1 must fail closed when any label prediction set is uncertain"
+            )
+        if self.require_label_coherence and self.version.strip() == _V1_POLICY_VERSION:
+            raise TrustPolicyValidationError(
+                "the label-coherence gate requires a policy version other than v1"
             )
 
 
@@ -112,6 +132,7 @@ class TrustPolicyResult:
     quality_reason_codes: tuple[str, ...] = ()
     distribution_reason_codes: tuple[str, ...] = ()
     uncertain_labels: tuple[str, ...] = ()
+    incoherent_labels: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.policy_version.strip():
@@ -124,6 +145,18 @@ class TrustPolicyResult:
             raise TrustPolicyValidationError("distribution_reason_codes must be unique")
         if any(label not in SUPERCLASSES for label in self.uncertain_labels):
             raise TrustPolicyValidationError("uncertain_labels must use canonical labels")
+        if any(label not in SUPERCLASSES for label in self.incoherent_labels) or len(
+            set(self.incoherent_labels)
+        ) != len(self.incoherent_labels):
+            raise TrustPolicyValidationError("incoherent_labels must be unique canonical labels")
+        if (TrustReasonCode.LABEL_SET_INCOHERENT in self.reason_codes) != bool(
+            self.incoherent_labels
+        ):
+            raise TrustPolicyValidationError(
+                "incoherent_labels must be reported exactly for an incoherent label set"
+            )
+        if len(self.incoherent_labels) == 1:
+            raise TrustPolicyValidationError("an incoherent label set names at least two labels")
         if self.predictions_exposed != (
             self.reason_codes == (TrustReasonCode.ALL_TRUST_GATES_PASSED,)
         ):
@@ -140,7 +173,7 @@ class TrustPolicyResult:
     def to_dict(self) -> dict[str, object]:
         """Return a finite JSON-safe policy result without model probabilities."""
 
-        return {
+        payload: dict[str, object] = {
             "policy_version": self.policy_version,
             "decision": self.decision.value,
             "predictions_exposed": self.predictions_exposed,
@@ -149,6 +182,12 @@ class TrustPolicyResult:
             "distribution_reason_codes": list(self.distribution_reason_codes),
             "uncertain_labels": list(self.uncertain_labels),
         }
+        # Only the opt-in coherence gate populates this field, so default-policy
+        # payloads keep their existing keys exactly.  The labels reveal supported
+        # decisions of a withheld case; public case responses carry only the reason.
+        if self.incoherent_labels:
+            payload["incoherent_labels"] = list(self.incoherent_labels)
+        return payload
 
 
 def evaluate_trust_policy(
@@ -160,7 +199,8 @@ def evaluate_trust_policy(
 
     Release/input failures precede quality, which precedes distribution support,
     which precedes uncertainty.  Later evidence can never override an earlier
-    blocking state.
+    blocking state.  The opt-in label-coherence gate runs last, only after every
+    conformal set is a singleton.
     """
 
     if not evidence.release_integrity_verified:
@@ -248,6 +288,17 @@ def evaluate_trust_policy(
             uncertain_labels=uncertain,
         )
 
+    if config.require_label_coherence:
+        # Inputs validate each decision's type and count, not the container type.
+        incoherent = find_incoherent_labels(tuple(decisions))
+        if incoherent:
+            return _result(
+                config,
+                TrustDecision.ABSTAIN,
+                TrustReasonCode.LABEL_SET_INCOHERENT,
+                incoherent_labels=incoherent,
+            )
+
     return _result(
         config,
         TrustDecision.PREDICTION_ALLOWED,
@@ -263,6 +314,7 @@ def _result(
     quality_reason_codes: tuple[str, ...] = (),
     distribution_reason_codes: tuple[str, ...] = (),
     uncertain_labels: tuple[str, ...] = (),
+    incoherent_labels: tuple[str, ...] = (),
 ) -> TrustPolicyResult:
     return TrustPolicyResult(
         policy_version=config.version,
@@ -271,6 +323,7 @@ def _result(
         quality_reason_codes=quality_reason_codes,
         distribution_reason_codes=distribution_reason_codes,
         uncertain_labels=uncertain_labels,
+        incoherent_labels=incoherent_labels,
     )
 
 

@@ -162,6 +162,38 @@ def test_blocked_core_result_never_maps_label_outputs() -> None:
     assert outcome.probabilities is None
 
 
+def test_every_core_reason_code_has_a_service_mirror() -> None:
+    service_values = {reason.value for reason in ReasonCode}
+
+    assert {reason.value for reason in TrustReasonCode} <= service_values
+
+
+def test_incoherent_label_set_maps_to_its_reason_without_label_outputs() -> None:
+    blocked = _result(TrustDecision.ABSTAIN)
+    incoherent = SentinelCaseResult(
+        release_id=blocked.release_id,
+        decision=TrustDecision.ABSTAIN,
+        policy=TrustPolicyResult(
+            policy_version="trust-policy-label-coherence-dev",
+            decision=TrustDecision.ABSTAIN,
+            reason_codes=(TrustReasonCode.LABEL_SET_INCOHERENT,),
+            incoherent_labels=("NORM", "MI"),
+        ),
+        quality=blocked.quality,
+        distribution=None,
+        label_prediction_sets=None,
+        calibrated_probabilities=None,
+    )
+    adapter = SentinelServiceAnalysisEngine(FakeCore(incoherent), clock=lambda: NOW)
+
+    outcome = adapter.infer(_case(), RELEASE)
+
+    assert outcome.decision is TrustDecision.ABSTAIN
+    assert outcome.reason_codes == (ReasonCode.LABEL_SET_INCOHERENT,)
+    assert outcome.labels is None
+    assert outcome.probabilities is None
+
+
 def test_release_and_private_handle_mismatch_fail_closed() -> None:
     core = FakeCore(_result(TrustDecision.ABSTAIN))
     adapter = SentinelServiceAnalysisEngine(core, clock=lambda: NOW)

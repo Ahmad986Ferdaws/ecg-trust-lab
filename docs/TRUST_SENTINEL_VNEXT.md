@@ -73,6 +73,13 @@ research scaffolds for foundation representations, counterfactual review,
 longitudinal studies, and human-factors studies. These modules are tested
 research infrastructure, not completed clinical studies or claims of benefit.
 
+The policy also has an opt-in cross-label coherence gate
+(`TrustPolicyConfig.require_label_coherence`, off by default). When enabled, a
+singleton label set that asserts `NORM` with `MI`, `STTC`, or `HYP` ends in
+`ABSTAIN` with reason `LABEL_SET_INCOHERENT`; `NORM` with `CD` stays allowed.
+It is not part of `trust-policy-v1` and cannot run under that version string.
+Enabling it for any release requires a new preregistered protocol.
+
 The source-calibration protocol has now completed as a development-only,
 patient-separated preparation step; its independently audited aggregate status
 is recorded in

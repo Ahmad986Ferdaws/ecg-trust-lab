@@ -508,6 +508,8 @@ class TrustSentinelEngine:
                 legacy_entropy_gate_accepted=model_evidence.legacy_entropy_gate_accepted,
                 # A temporary all-singleton value lets the shared policy evaluate
                 # only gates that precede the real conformal calculation below.
+                # All-negative sets are also label-coherent, so the opt-in
+                # coherence gate cannot fire on this placeholder.
                 conformal_decisions=(BinaryDecision.NOT_SUPPORTED,) * len(SUPERCLASSES),
             ),
             config=self._policy_config,
