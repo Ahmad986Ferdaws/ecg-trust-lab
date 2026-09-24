@@ -82,7 +82,11 @@ nothing about error among singleton decisions. Nothing selects it: the Sentinel
 engine, the case contract, and `configs/trust_sentinel_vnext.yaml` still use
 `labelwise_split_conformal`. Enabling it, or any particular budgets, for a
 release requires a new preregistered protocol and a new case-contract version.
-Its budgets are research parameters, not clinical operating points.
+Until that version exists, its prediction sets must not be converted to case
+contracts: they use the shared `BinaryPredictionSets` type, which carries no
+provenance, so `conformal_prediction_sets_to_contracts` would stamp them with
+the pooled artifact type and coverage scope. Its budgets are research
+parameters, not clinical operating points.
 
 The source-calibration protocol has now completed as a development-only,
 patient-separated preparation step; its independently audited aggregate status

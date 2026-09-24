@@ -17,7 +17,8 @@ from ecg_trust.conformal import (
     evaluate_prediction_sets,
 )
 from ecg_trust.constants import SUPERCLASSES
-from ecg_trust.contracts import TrustDecision
+from ecg_trust.contract_adapters import conformal_prediction_sets_to_contracts
+from ecg_trust.contracts import ARTIFACT_REFERENCE_SCHEMA_VERSION, ArtifactReference, TrustDecision
 from ecg_trust.quality.signal_quality import QualityStatus, SignalQualityReport
 from ecg_trust.trust_policy import TrustPolicyInputs, TrustReasonCode, evaluate_trust_policy
 
@@ -25,7 +26,7 @@ FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int8]
 
 
-def _calibrator() -> ClassConditionalLabelwiseConformal:
+def _calibration_split() -> tuple[FloatArray, IntArray]:
     probabilities = np.asarray(
         [
             [0.9, 0.7],
@@ -41,6 +42,11 @@ def _calibrator() -> ClassConditionalLabelwiseConformal:
         [[1, 1], [1, 0], [1, 0], [0, 0], [0, 0], [0, 0]],
         dtype=np.int8,
     )
+    return probabilities, targets
+
+
+def _calibrator() -> ClassConditionalLabelwiseConformal:
+    probabilities, targets = _calibration_split()
     return ClassConditionalLabelwiseConformal.fit(
         probabilities,
         targets,
@@ -85,6 +91,46 @@ def test_fit_uses_only_same_outcome_cases_with_corrected_ranks() -> None:
     assert calibrator.positive_thresholds == pytest.approx((0.4, 0.3))
     assert calibrator.negative_budget_attainable == (True, True)
     assert calibrator.positive_budget_attainable == (True, True)
+
+
+def test_budgets_bind_to_label_names_not_mapping_order() -> None:
+    probabilities, targets = _calibration_split()
+    reordered = ClassConditionalLabelwiseConformal.fit(
+        probabilities,
+        targets,
+        label_names=("common", "rare"),
+        negative_alphas={"rare": 0.4, "common": 0.5},
+        positive_alphas={"rare": 0.5, "common": 0.25},
+    )
+
+    assert reordered == _calibrator()
+    assert reordered.negative_alphas == (0.5, 0.4)
+    assert reordered.positive_alphas == (0.25, 0.5)
+
+
+def test_prediction_includes_an_outcome_whose_score_ties_its_threshold() -> None:
+    # Saturated or quantized sigmoid outputs repeat, so calibration scores tie and a
+    # new case can score exactly at a threshold. The finite-sample guarantee counts
+    # such a case as covered, so both comparisons must be inclusive.
+    calibrator = ClassConditionalLabelwiseConformal.fit(
+        [[0.2], [0.2], [0.2], [0.4], [0.7], [0.7], [0.7], [0.9]],
+        [[0], [0], [0], [0], [1], [1], [1], [1]],
+        label_names=("MI",),
+        negative_alphas={"MI": 0.5},
+        positive_alphas={"MI": 0.5},
+    )
+
+    assert (calibrator.negative_ranks, calibrator.positive_ranks) == ((3,), (3,))
+    assert calibrator.negative_thresholds == (0.2,)
+    assert calibrator.positive_thresholds == (1.0 - 0.7,)
+    at_threshold = calibrator.predict([[0.2], [0.7]])
+    assert at_threshold.decisions == (
+        (BinaryDecision.NOT_SUPPORTED,),
+        (BinaryDecision.SUPPORTED,),
+    )
+    one_ulp_beyond = calibrator.predict([[np.nextafter(0.2, 1.0)], [np.nextafter(0.7, 0.0)]])
+    assert not one_ulp_beyond.not_supported_mask[0, 0]
+    assert not one_ulp_beyond.supported_mask[1, 0]
 
 
 def test_prediction_uses_separate_outcome_thresholds_and_existing_set_type() -> None:
@@ -248,6 +294,51 @@ def test_decisions_feed_the_existing_trust_policy_unchanged() -> None:
     assert results[1].decision is TrustDecision.ABSTAIN
     assert results[1].reason_codes == (TrustReasonCode.CONFORMAL_SET_UNCERTAIN,)
     assert results[1].uncertain_labels == ("HYP",)
+
+
+def test_case_contract_adapter_cannot_tell_these_sets_from_pooled_ones() -> None:
+    # Characterizes a known hazard. BinaryPredictionSets carry no provenance, and the
+    # v1 case contract admits only the pooled artifact type and scope, so the adapter
+    # stamps those on class-conditional sets. The module docstring and
+    # docs/TRUST_SENTINEL_VNEXT.md forbid this conversion. When a new case-contract
+    # version lets the adapter take the calibrator, replace this with a refusal test.
+    generator = np.random.default_rng(3)
+    targets = generator.binomial(1, 0.5, size=(200, len(SUPERCLASSES))).astype(np.int8)
+    probabilities = np.where(
+        targets == 1,
+        generator.uniform(0.6, 1.0, size=targets.shape),
+        generator.uniform(0.0, 0.4, size=targets.shape),
+    )
+    calibrator = ClassConditionalLabelwiseConformal.fit(
+        probabilities,
+        targets,
+        label_names=SUPERCLASSES,
+        negative_alphas=dict.fromkeys(SUPERCLASSES, 0.1),
+        positive_alphas={**dict.fromkeys(SUPERCLASSES, 0.1), "MI": 0.02},
+    )
+    row = [0.9, 0.6, 0.1, 0.1, 0.1]
+
+    contracts = conformal_prediction_sets_to_contracts(
+        calibrator.predict([row]),
+        np.asarray(row),
+        calibration_artifact=ArtifactReference(
+            schema_version=ARTIFACT_REFERENCE_SCHEMA_VERSION,
+            artifact_id="class-conditional-conformal",
+            file_sha256="sha256:" + "a" * 64,
+            size_bytes=10,
+            media_type="application/json",
+            sensitive=False,
+        ),
+    )
+
+    assert {item.calibration_artifact_type for item in contracts} == {
+        "ecg_trust.labelwise_binary_conformal"
+    }
+    assert {item.coverage_scope for item in contracts} == {
+        "labelwise_marginal_under_exchangeability"
+    }
+    assert calibrator.to_dict()["artifact_type"] != contracts[0].calibration_artifact_type
+    assert calibrator.to_dict()["coverage_scope"] != contracts[0].coverage_scope
 
 
 def test_default_labelwise_artifact_and_prediction_sets_are_unchanged() -> None:

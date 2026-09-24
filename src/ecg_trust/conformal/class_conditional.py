@@ -23,14 +23,19 @@ outcomes may be excluded, which ``BinaryPredictionSets`` reports as uncertain.
 Covariate shift, or any change in the class-conditional input distribution
 ``P(x | y_k = c)``, voids the guarantee; in the multi-label setting a change in
 co-occurring labels can cause the latter. A change only in the prevalence of
-``y_k`` preserves each class-conditional statement but changes pooled coverage
-and the mix of decisions. Miss budgets are research parameters, not clinical
-operating points, and have no defaults.
+``y_k``, with ``P(x | y_k = c)`` fixed, preserves label ``k``'s two
+class-conditional statements but changes its pooled coverage and mix of
+decisions. The same change can void the statements of any other label ``j``
+whose inputs depend on ``y_k``, because it changes ``P(x | y_j = c)``. Miss
+budgets are research parameters, not clinical operating points, and have no
+defaults.
 
 Nothing in the Sentinel engine, case contracts, or frozen configurations
-selects this artifact. The engine accepts only ``LabelwiseBinaryConformal``,
-and ``conformal_prediction_sets_to_contracts`` records that artifact's type
-and coverage scope, so it must not be used to convert these sets.
+selects this artifact. The engine accepts only ``LabelwiseBinaryConformal``.
+``predict`` returns plain ``BinaryPredictionSets``, which carry no provenance,
+and ``conformal_prediction_sets_to_contracts`` stamps whatever sets it receives
+with the pooled artifact type and coverage scope. It cannot detect these sets,
+so it must not be used to convert them.
 """
 
 from __future__ import annotations
