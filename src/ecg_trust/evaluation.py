@@ -1,9 +1,11 @@
 """Leakage-resistant evaluation utilities for PTB-XL multilabel models.
 
 All functions in this module enforce the canonical five-label output order.
-Operations that *fit* a decision rule (temperature scaling or thresholds) also
-require row-level fold provenance and accept fold 9 only.  Fold 10 therefore
-remains an evaluation set rather than an implicit source of fitted parameters.
+Operations that *fit* a decision rule (temperature scaling, classwise sigmoid
+scaling, or thresholds) also require row-level fold provenance and accept fold 9
+only.  Fold 10 therefore remains an evaluation set rather than an implicit source
+of fitted parameters.  Classwise sigmoid scaling is an opt-in library capability
+that no frozen pipeline calls.
 """
 
 from __future__ import annotations
@@ -21,6 +23,14 @@ from ecg_trust.protocol import CALIBRATION_FOLDS, LABEL_ORDER
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 BoolArray = NDArray[np.bool_]
+
+_SIGMOID_SCALING_FITTED_STATUSES = frozenset({"optimized", "identity_optimal"})
+_ARMIJO_FRACTION = 0.25
+_MAX_BACKTRACKING_HALVINGS = 64
+# Smallest classwise ridge penalty. On the mean-NLL scale a weaker penalty is
+# below the 1e-12 improvement margin, and Newton steps on near-constant logit
+# columns lose their precision to rounding.
+_MIN_SIGMOID_SCALING_REGULARIZATION = 1e-12
 
 
 class EvaluationValidationError(ValueError):
@@ -232,6 +242,282 @@ class TemperatureScalingResult:
             "converged": self.converged,
             "optimization_steps": self.optimization_steps,
             "temperature_bounds": list(self.temperature_bounds),
+        }
+
+    def to_json(self, *, indent: int | None = 2) -> str:
+        serialized = json.dumps(self.to_dict(), indent=indent, sort_keys=True)
+        return f"{serialized}\n" if indent is not None else serialized
+
+
+@dataclass(frozen=True, slots=True)
+class PerLabelSigmoidScaling:
+    """One label's regularized sigmoid-scaling outcome on calibration fold 9.
+
+    ``nll_before`` and ``nll_after`` are unregularized mean binary NLL on the
+    calibration rows. Degenerate labels keep the identity map and report
+    ``None`` for both, matching the global temperature policy.
+    """
+
+    label: str
+    slope: float
+    intercept: float
+    positives: int
+    negatives: int
+    nll_before: float | None
+    nll_after: float | None
+    status: str
+    converged: bool
+    optimization_steps: int
+    active_slope_bound: str | None
+
+    def __post_init__(self) -> None:
+        """Enforce one label's calibration-map contract for every construction path."""
+
+        if not isinstance(self.label, str) or self.label not in LABEL_ORDER:
+            raise EvaluationValidationError(
+                f"sigmoid-scaling label must be one of {LABEL_ORDER!r}"
+            )
+        slope = _finite_real_number(self.slope, name="slope")
+        if slope <= 0.0:
+            raise EvaluationValidationError("slope must be positive")
+        intercept = _finite_real_number(self.intercept, name="intercept")
+        positives = _nonnegative_integer(self.positives, name="positives")
+        negatives = _nonnegative_integer(self.negatives, name="negatives")
+        steps = _nonnegative_integer(self.optimization_steps, name="optimization_steps")
+        if positives + negatives == 0:
+            raise EvaluationValidationError("sigmoid scaling requires at least one sample")
+        if not isinstance(self.converged, bool):
+            raise EvaluationValidationError("converged must be a boolean")
+        if self.active_slope_bound not in (None, "lower", "upper"):
+            raise EvaluationValidationError("active_slope_bound must be lower, upper, or None")
+
+        identity = slope == 1.0 and intercept == 0.0
+        reason = _degenerate_reason(positives, negatives)
+        before: float | None = None
+        after: float | None = None
+        if reason is not None:
+            if (
+                self.status != reason
+                or not identity
+                or self.nll_before is not None
+                or self.nll_after is not None
+                or self.converged
+                or steps != 0
+                or self.active_slope_bound is not None
+            ):
+                raise EvaluationValidationError(
+                    f"degenerate label {self.label} must keep the identity map "
+                    f"and report {reason!r}"
+                )
+        else:
+            if self.status not in _SIGMOID_SCALING_FITTED_STATUSES:
+                raise EvaluationValidationError(
+                    f"non-degenerate label {self.label} has invalid status {self.status!r}"
+                )
+            if self.nll_before is None or self.nll_after is None:
+                raise EvaluationValidationError(
+                    f"non-degenerate label {self.label} must report NLL before and after"
+                )
+            before = _finite_real_number(self.nll_before, name="nll_before")
+            after = _finite_real_number(self.nll_after, name="nll_after")
+            if before < 0.0 or after < 0.0:
+                raise EvaluationValidationError("binary NLL cannot be negative")
+            if after > before:
+                raise EvaluationValidationError(
+                    "sigmoid scaling must not increase calibration-fold NLL"
+                )
+            if self.status == "identity_optimal" and (
+                not identity or after != before or self.active_slope_bound is not None
+            ):
+                raise EvaluationValidationError(
+                    "identity_optimal labels must keep the identity map and NLL"
+                )
+        object.__setattr__(self, "slope", slope)
+        object.__setattr__(self, "intercept", intercept)
+        object.__setattr__(self, "nll_before", before)
+        object.__setattr__(self, "nll_after", after)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "label": self.label,
+            "slope": self.slope,
+            "intercept": self.intercept,
+            "positives": self.positives,
+            "negatives": self.negatives,
+            "nll_before": self.nll_before,
+            "nll_after": self.nll_after,
+            "status": self.status,
+            "converged": self.converged,
+            "optimization_steps": self.optimization_steps,
+            "active_slope_bound": self.active_slope_bound,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ClasswiseSigmoidScalingResult:
+    """Per-label positive slopes and intercepts fitted exclusively on fold 9.
+
+    Label ``k`` is mapped to ``sigmoid(slopes[k] * z_k + intercepts[k])``.
+    Every slope is strictly positive, so each label's logit ordering is kept.
+    """
+
+    slopes: tuple[float, ...]
+    intercepts: tuple[float, ...]
+    label_order: tuple[str, ...]
+    n_samples: int
+    source_folds: tuple[int, ...]
+    fitted_labels: tuple[str, ...]
+    excluded_degenerate_labels: tuple[str, ...]
+    nll_before: float | None
+    nll_after: float | None
+    status: str
+    converged: bool
+    regularization: float
+    fit_intercept: bool
+    slope_bounds: tuple[float, float]
+    tolerance: float
+    max_steps: int
+    per_label: tuple[PerLabelSigmoidScaling, ...]
+
+    def __post_init__(self) -> None:
+        """Enforce the fitted artifact contract for every construction path."""
+
+        if _field_tuple(self.label_order, name="label_order") != LABEL_ORDER:
+            raise EvaluationValidationError(f"label_order must be exactly {LABEL_ORDER!r}")
+        labels = LABEL_ORDER
+        source_folds = _field_tuple(self.source_folds, name="source_folds")
+        if source_folds != CALIBRATION_FOLDS or any(
+            isinstance(fold, bool) or not isinstance(fold, int) for fold in source_folds
+        ):
+            raise CalibrationLeakageError(
+                "fitted evaluation artifacts may use calibration fold 9 only; "
+                f"received folds {source_folds!r}"
+            )
+        n_samples = _nonnegative_integer(self.n_samples, name="n_samples")
+        if n_samples == 0:
+            raise EvaluationValidationError("n_samples must be positive")
+        regularization = _validate_sigmoid_scaling_regularization(self.regularization)
+        if not isinstance(self.fit_intercept, bool):
+            raise EvaluationValidationError("fit_intercept must be a boolean")
+        lower_slope, upper_slope = _validate_slope_bounds(self.slope_bounds)
+        tolerance = _positive_real_number(self.tolerance, name="tolerance")
+        max_steps = _validate_max_steps(self.max_steps)
+
+        entries: list[PerLabelSigmoidScaling] = []
+        for item in _field_tuple(self.per_label, name="per_label"):
+            if not isinstance(item, PerLabelSigmoidScaling):
+                raise EvaluationValidationError(
+                    "per_label must contain PerLabelSigmoidScaling items"
+                )
+            entries.append(item)
+        if tuple(item.label for item in entries) != labels:
+            raise EvaluationValidationError("per_label entries must follow label_order")
+        for item in entries:
+            if item.positives + item.negatives != n_samples:
+                raise EvaluationValidationError(
+                    f"label {item.label} counts do not match n_samples"
+                )
+            if item.optimization_steps > max_steps:
+                raise EvaluationValidationError(
+                    f"label {item.label} exceeds max_steps Newton steps"
+                )
+            if not lower_slope <= item.slope <= upper_slope:
+                raise EvaluationValidationError(
+                    f"label {item.label} slope lies outside slope_bounds"
+                )
+            if (item.active_slope_bound == "lower" and item.slope != lower_slope) or (
+                item.active_slope_bound == "upper" and item.slope != upper_slope
+            ):
+                raise EvaluationValidationError(
+                    f"label {item.label} active slope bound does not match its slope"
+                )
+            if not self.fit_intercept and item.intercept != 0.0:
+                raise EvaluationValidationError(
+                    "slope-only sigmoid scaling must keep every intercept at zero"
+                )
+
+        slopes = tuple(item.slope for item in entries)
+        intercepts = tuple(item.intercept for item in entries)
+        if _field_tuple(self.slopes, name="slopes") != slopes or (
+            _field_tuple(self.intercepts, name="intercepts") != intercepts
+        ):
+            raise EvaluationValidationError("slopes and intercepts must match per_label")
+        fitted_labels, excluded_labels, before, after, status, converged = (
+            _summarize_sigmoid_scaling(entries)
+        )
+        if (
+            _field_tuple(self.fitted_labels, name="fitted_labels") != fitted_labels
+            or _field_tuple(self.excluded_degenerate_labels, name="excluded_degenerate_labels")
+            != excluded_labels
+            or not _matches_optional_mean(self.nll_before, before)
+            or not _matches_optional_mean(self.nll_after, after)
+            or self.status != status
+            or self.converged is not converged
+        ):
+            raise EvaluationValidationError(
+                "fitted labels, NLL means, status, and converged must summarize per_label"
+            )
+
+        object.__setattr__(self, "slopes", slopes)
+        object.__setattr__(self, "intercepts", intercepts)
+        object.__setattr__(self, "label_order", labels)
+        object.__setattr__(self, "source_folds", CALIBRATION_FOLDS)
+        object.__setattr__(self, "fitted_labels", fitted_labels)
+        object.__setattr__(self, "excluded_degenerate_labels", excluded_labels)
+        object.__setattr__(self, "nll_before", before)
+        object.__setattr__(self, "nll_after", after)
+        object.__setattr__(self, "regularization", regularization)
+        object.__setattr__(self, "slope_bounds", (lower_slope, upper_slope))
+        object.__setattr__(self, "tolerance", tolerance)
+        object.__setattr__(self, "per_label", tuple(entries))
+
+    def transform_logits(
+        self,
+        logits: ArrayLike,
+        *,
+        label_order: Sequence[str] = LABEL_ORDER,
+    ) -> FloatArray:
+        """Apply each label's positive slope and intercept to validated logits."""
+
+        validated = validate_logits(logits, label_order=label_order)
+        with np.errstate(over="ignore", invalid="ignore"):
+            scaled = (
+                validated * np.asarray(self.slopes, dtype=np.float64)[None, :]
+                + np.asarray(self.intercepts, dtype=np.float64)[None, :]
+            )
+        if not np.all(np.isfinite(scaled)):
+            raise EvaluationValidationError("scaled logits must contain only finite values")
+        return scaled
+
+    def predict_proba(
+        self,
+        logits: ArrayLike,
+        *,
+        label_order: Sequence[str] = LABEL_ORDER,
+    ) -> FloatArray:
+        """Convert classwise-scaled logits to probabilities."""
+
+        return stable_sigmoid(self.transform_logits(logits, label_order=label_order))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "slopes": list(self.slopes),
+            "intercepts": list(self.intercepts),
+            "label_order": list(self.label_order),
+            "n_samples": self.n_samples,
+            "source_folds": list(self.source_folds),
+            "fitted_labels": list(self.fitted_labels),
+            "excluded_degenerate_labels": list(self.excluded_degenerate_labels),
+            "nll_before": self.nll_before,
+            "nll_after": self.nll_after,
+            "status": self.status,
+            "converged": self.converged,
+            "regularization": self.regularization,
+            "fit_intercept": self.fit_intercept,
+            "slope_bounds": list(self.slope_bounds),
+            "tolerance": self.tolerance,
+            "max_steps": self.max_steps,
+            "per_label": [item.to_dict() for item in self.per_label],
         }
 
     def to_json(self, *, indent: int | None = 2) -> str:
@@ -609,6 +895,134 @@ def fit_temperature_scaling(
     )
 
 
+def fit_classwise_sigmoid_scaling(
+    *,
+    logits: ArrayLike,
+    y_true: ArrayLike,
+    calibration_fold_ids: ArrayLike,
+    label_order: Sequence[str] = LABEL_ORDER,
+    regularization: float = 1e-3,
+    fit_intercept: bool = True,
+    slope_bounds: tuple[float, float] = (0.05, 20.0),
+    tolerance: float = 1e-12,
+    max_steps: int = 128,
+) -> ClasswiseSigmoidScalingResult:
+    """Fit regularized per-label sigmoid scaling on non-degenerate calibration labels.
+
+    Each label ``k`` with both classes in fold 9 gets its own map
+    ``sigmoid(a_k * z_k + b_k)``. ``(a_k, b_k)`` minimizes that label's mean
+    binary NLL plus ``regularization * ((a_k - 1)^2 + b_k^2)``. The penalty
+    shrinks toward the identity map and makes the objective strictly convex,
+    so the constrained minimizer is unique. It is on the per-sample mean-NLL
+    scale, so its shrinkage does not vanish as the calibration fold grows.
+    ``regularization`` must be at least ``1e-12``: a weaker penalty is below
+    the solver's numerical resolution. With ``fit_intercept=False``, ``b_k`` is
+    fixed at zero and ``a_k`` is a per-label inverse temperature.
+
+    ``a_k`` is constrained to ``slope_bounds``, whose lower end is strictly
+    positive, so each map is strictly increasing and the label's ROC-AUC is
+    unchanged in exact arithmetic. In floating point, the transformed logits
+    can tie nearly equal scores but never reverse their order; the sigmoid can
+    additionally saturate distinct large logits to the same probability.
+
+    The solver is a deterministic damped Newton method with Armijo
+    backtracking, started at the identity. If the unconstrained minimizer
+    violates a slope bound, the slope is fixed at that bound, which is exact
+    for this convex problem, and the intercept is re-optimized. A label stops
+    when half its squared Newton decrement is at most ``tolerance`` or after
+    ``max_steps`` accepted Newton steps. It also stops, with ``converged``
+    false, when no backtracking step satisfies the Armijo condition or when
+    rounding makes the computed decrement smaller than half the lower bound
+    that a positive-definite Hessian guarantees. A fit is kept only if it
+    lowers the regularized objective by more than ``1e-12``, so an
+    ``optimized`` label never has a higher calibration-fold NLL than before;
+    otherwise the label keeps the identity with status ``identity_optimal``.
+    Labels with one observed class keep the identity and are reported as
+    excluded.
+
+    This is a library capability only. No frozen pipeline calls it, its
+    defaults are engineering defaults rather than preregistered values, and a
+    fold-9 NLL decrease is not evidence of better calibration on held-out or
+    external data.
+    """
+
+    labels = _validate_label_order(label_order)
+    targets = _validate_targets(y_true, n_labels=len(labels))
+    validated_logits = validate_logits(
+        logits, label_order=labels, n_samples=targets.shape[0]
+    )
+    source_folds = _validate_calibration_fold_ids(
+        calibration_fold_ids, n_samples=targets.shape[0]
+    )
+    penalty = _validate_sigmoid_scaling_regularization(regularization)
+    if not isinstance(fit_intercept, bool):
+        raise EvaluationValidationError("fit_intercept must be a boolean")
+    lower_slope, upper_slope = _validate_slope_bounds(slope_bounds)
+    newton_tolerance = _positive_real_number(tolerance, name="tolerance")
+    step_limit = _validate_max_steps(max_steps)
+
+    per_label: list[PerLabelSigmoidScaling] = []
+    for index, label in enumerate(labels):
+        label_targets = targets[:, index].astype(np.float64, copy=False)
+        positives = int(targets[:, index].sum())
+        negatives = int(targets.shape[0] - positives)
+        reason = _degenerate_reason(positives, negatives)
+        if reason is not None:
+            per_label.append(
+                PerLabelSigmoidScaling(
+                    label=label,
+                    slope=1.0,
+                    intercept=0.0,
+                    positives=positives,
+                    negatives=negatives,
+                    nll_before=None,
+                    nll_after=None,
+                    status=reason,
+                    converged=False,
+                    optimization_steps=0,
+                    active_slope_bound=None,
+                )
+            )
+            continue
+        per_label.append(
+            _fit_label_sigmoid_scaling(
+                label=label,
+                logits=validated_logits[:, index],
+                targets=label_targets,
+                positives=positives,
+                negatives=negatives,
+                regularization=penalty,
+                fit_intercept=fit_intercept,
+                slope_bounds=(lower_slope, upper_slope),
+                tolerance=newton_tolerance,
+                max_steps=step_limit,
+            )
+        )
+
+    fitted_labels, excluded_labels, nll_before, nll_after, status, converged = (
+        _summarize_sigmoid_scaling(per_label)
+    )
+    return ClasswiseSigmoidScalingResult(
+        slopes=tuple(item.slope for item in per_label),
+        intercepts=tuple(item.intercept for item in per_label),
+        label_order=labels,
+        n_samples=targets.shape[0],
+        source_folds=source_folds,
+        fitted_labels=fitted_labels,
+        excluded_degenerate_labels=excluded_labels,
+        nll_before=nll_before,
+        nll_after=nll_after,
+        status=status,
+        converged=converged,
+        regularization=penalty,
+        fit_intercept=fit_intercept,
+        slope_bounds=(lower_slope, upper_slope),
+        tolerance=newton_tolerance,
+        max_steps=step_limit,
+        per_label=tuple(per_label),
+    )
+
+
 def compute_selective_predictions(
     y_true: ArrayLike,
     probabilities: ArrayLike,
@@ -959,6 +1373,309 @@ def _golden_section_minimize(
         steps += 1
     optimum = (left + right) / 2.0
     return optimum, float(objective(optimum)), steps, right - left <= tolerance
+
+
+def _fit_label_sigmoid_scaling(
+    *,
+    label: str,
+    logits: FloatArray,
+    targets: FloatArray,
+    positives: int,
+    negatives: int,
+    regularization: float,
+    fit_intercept: bool,
+    slope_bounds: tuple[float, float],
+    tolerance: float,
+    max_steps: int,
+) -> PerLabelSigmoidScaling:
+    lower_slope, upper_slope = slope_bounds
+    label_logits = np.ascontiguousarray(logits, dtype=np.float64)
+    label_targets = np.ascontiguousarray(targets, dtype=np.float64)
+    before = _binary_nll(label_logits, label_targets)
+    if not math.isfinite(before):
+        raise EvaluationValidationError(f"label {label} calibration NLL must be finite")
+
+    slope, intercept, steps, converged = _damped_newton_sigmoid_scaling(
+        label_logits,
+        label_targets,
+        start=(1.0, 0.0),
+        free=(0, 1) if fit_intercept else (0,),
+        regularization=regularization,
+        tolerance=tolerance,
+        max_steps=max_steps,
+    )
+    active_bound: str | None = None
+    if not lower_slope <= slope <= upper_slope:
+        # The objective is convex, so when its unconstrained minimizer violates
+        # the slope interval the constrained minimizer lies on that bound.
+        active_bound = "lower" if slope < lower_slope else "upper"
+        slope = lower_slope if active_bound == "lower" else upper_slope
+        intercept = 0.0
+        if fit_intercept:
+            _, intercept, extra_steps, intercept_converged = _damped_newton_sigmoid_scaling(
+                label_logits,
+                label_targets,
+                start=(slope, 0.0),
+                free=(1,),
+                regularization=regularization,
+                tolerance=tolerance,
+                max_steps=max_steps - steps,
+            )
+            steps += extra_steps
+            converged = converged and intercept_converged
+
+    objective_after = _sigmoid_scaling_objective(
+        label_logits, label_targets, slope, intercept, regularization
+    )
+    # The identity map has zero penalty, so its objective is the raw NLL.
+    if objective_after < before - 1e-12:
+        after = _binary_nll(slope * label_logits + intercept, label_targets)
+        status = "optimized"
+    else:
+        slope, intercept, after, status, active_bound = 1.0, 0.0, before, "identity_optimal", None
+    return PerLabelSigmoidScaling(
+        label=label,
+        slope=slope,
+        intercept=intercept,
+        positives=positives,
+        negatives=negatives,
+        nll_before=before,
+        nll_after=after,
+        status=status,
+        converged=converged,
+        optimization_steps=steps,
+        active_slope_bound=active_bound,
+    )
+
+
+def _summarize_sigmoid_scaling(
+    per_label: Sequence[PerLabelSigmoidScaling],
+) -> tuple[tuple[str, ...], tuple[str, ...], float | None, float | None, str, bool]:
+    """Return fitted/excluded labels, mean NLL before/after, status, and convergence."""
+
+    fitted = [item for item in per_label if item.status in _SIGMOID_SCALING_FITTED_STATUSES]
+    if not fitted:
+        status = "no_non_degenerate_labels"
+    elif any(item.status == "optimized" for item in fitted):
+        status = "optimized"
+    else:
+        status = "identity_optimal"
+    return (
+        tuple(item.label for item in fitted),
+        tuple(
+            item.label
+            for item in per_label
+            if item.status not in _SIGMOID_SCALING_FITTED_STATUSES
+        ),
+        _optional_mean([item.nll_before for item in fitted if item.nll_before is not None]),
+        _optional_mean([item.nll_after for item in fitted if item.nll_after is not None]),
+        status,
+        bool(fitted) and all(item.converged for item in fitted),
+    )
+
+
+def _matches_optional_mean(reported: object, expected: float | None) -> bool:
+    if reported is None or expected is None:
+        return reported is None and expected is None
+    value = _finite_real_number(reported, name="summary NLL")
+    return math.isclose(value, expected, rel_tol=1e-12, abs_tol=1e-15)
+
+
+def _damped_newton_sigmoid_scaling(
+    logits: FloatArray,
+    targets: FloatArray,
+    *,
+    start: tuple[float, float],
+    free: tuple[int, ...],
+    regularization: float,
+    tolerance: float,
+    max_steps: int,
+) -> tuple[float, float, int, bool]:
+    """Minimize the regularized objective over the ``free`` coordinates.
+
+    Returns slope, intercept, accepted steps, and whether half the squared
+    Newton decrement reached ``tolerance``. Accepted steps satisfy the Armijo
+    condition, so the objective never increases from ``start``. A computed
+    decrement below half of ``|g|^2 / trace(H)`` over the free coordinates,
+    the least value a positive-definite Hessian allows, means rounding has
+    corrupted the direction, so the solve stops without claiming convergence.
+    """
+
+    slope, intercept = start
+    value = _sigmoid_scaling_objective(logits, targets, slope, intercept, regularization)
+    steps = 0
+    while True:
+        gradient, hessian = _sigmoid_scaling_derivatives(
+            logits, targets, slope, intercept, regularization
+        )
+        direction = _newton_direction(gradient, hessian, free)
+        decrement = -(gradient[0] * direction[0] + gradient[1] * direction[1])
+        if not math.isfinite(decrement):
+            raise EvaluationValidationError("sigmoid-scaling Newton step must be finite")
+        if decrement < 0.5 * _newton_decrement_lower_bound(gradient, hessian, free):
+            return slope, intercept, steps, False
+        if decrement / 2.0 <= tolerance:
+            return slope, intercept, steps, True
+        if steps >= max_steps:
+            return slope, intercept, steps, False
+        step_size = 1.0
+        for _ in range(_MAX_BACKTRACKING_HALVINGS + 1):
+            candidate_slope = slope + step_size * direction[0]
+            candidate_intercept = intercept + step_size * direction[1]
+            candidate_value = _sigmoid_scaling_objective(
+                logits, targets, candidate_slope, candidate_intercept, regularization
+            )
+            if candidate_value <= value - _ARMIJO_FRACTION * step_size * decrement:
+                break
+            step_size /= 2.0
+        else:
+            return slope, intercept, steps, False
+        slope, intercept, value = candidate_slope, candidate_intercept, candidate_value
+        steps += 1
+
+
+def _sigmoid_scaling_objective(
+    logits: FloatArray,
+    targets: FloatArray,
+    slope: float,
+    intercept: float,
+    regularization: float,
+) -> float:
+    with np.errstate(over="ignore", invalid="ignore"):
+        nll = _binary_nll(slope * logits + intercept, targets)
+    slope_shift = slope - 1.0
+    return nll + regularization * (slope_shift * slope_shift + intercept * intercept)
+
+
+def _sigmoid_scaling_derivatives(
+    logits: FloatArray,
+    targets: FloatArray,
+    slope: float,
+    intercept: float,
+    regularization: float,
+) -> tuple[tuple[float, float], tuple[float, float, float, float]]:
+    """Return the gradient and ``(h_aa, h_ab, h_bb, determinant)``.
+
+    The determinant is assembled from non-negative terms (a weighted logit
+    variance plus ridge terms) so it stays positive without cancellation.
+    """
+
+    scaled = slope * logits + intercept
+    probabilities = stable_sigmoid(scaled)
+    weights = probabilities * stable_sigmoid(-scaled)
+    residuals = probabilities - targets
+    ridge = 2.0 * regularization
+    with np.errstate(over="ignore", invalid="ignore"):
+        weight_mean = float(np.mean(weights))
+        weighted_logit = float(np.mean(weights * logits))
+        weighted_square = float(np.mean(weights * np.square(logits)))
+        centre = weighted_logit / weight_mean if weight_mean > 0.0 else 0.0
+        weighted_spread = float(np.mean(weights * np.square(logits - centre)))
+        gradient = (
+            float(np.mean(residuals * logits)) + ridge * (slope - 1.0),
+            float(np.mean(residuals)) + ridge * intercept,
+        )
+    hessian = (
+        weighted_square + ridge,
+        weighted_logit,
+        weight_mean + ridge,
+        weight_mean * weighted_spread
+        + ridge * (weight_mean + weighted_square)
+        + ridge * ridge,
+    )
+    if not all(math.isfinite(value) for value in (*gradient, *hessian)) or hessian[3] <= 0.0:
+        raise EvaluationValidationError(
+            "sigmoid-scaling derivatives must be finite; logits are too large"
+        )
+    return gradient, hessian
+
+
+def _newton_direction(
+    gradient: tuple[float, float],
+    hessian: tuple[float, float, float, float],
+    free: tuple[int, ...],
+) -> tuple[float, float]:
+    slope_gradient, intercept_gradient = gradient
+    h_aa, h_ab, h_bb, determinant = hessian
+    if free == (0, 1):
+        return (
+            -(h_bb * slope_gradient - h_ab * intercept_gradient) / determinant,
+            -(h_aa * intercept_gradient - h_ab * slope_gradient) / determinant,
+        )
+    if free == (0,):
+        return -slope_gradient / h_aa, 0.0
+    return 0.0, -intercept_gradient / h_bb
+
+
+def _newton_decrement_lower_bound(
+    gradient: tuple[float, float],
+    hessian: tuple[float, float, float, float],
+    free: tuple[int, ...],
+) -> float:
+    """Return ``|g|^2 / trace(H)`` over ``free``, a lower bound on ``g' H^-1 g``."""
+
+    diagonal = (hessian[0], hessian[2])
+    squared_norm = math.fsum(gradient[index] * gradient[index] for index in free)
+    return squared_norm / math.fsum(diagonal[index] for index in free)
+
+
+def _finite_real_number(value: object, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (int, float, np.integer, np.floating)
+    ):
+        raise EvaluationValidationError(f"{name} must be a real non-boolean number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise EvaluationValidationError(f"{name} must be finite")
+    return number
+
+
+def _positive_real_number(value: object, *, name: str) -> float:
+    number = _finite_real_number(value, name=name)
+    if number <= 0.0:
+        raise EvaluationValidationError(f"{name} must be finite and positive")
+    return number
+
+
+def _nonnegative_integer(value: object, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise EvaluationValidationError(f"{name} must be a non-negative integer")
+    return value
+
+
+def _validate_max_steps(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise EvaluationValidationError("max_steps must be a positive integer")
+    return value
+
+
+def _field_tuple(value: object, *, name: str) -> tuple[object, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise EvaluationValidationError(f"{name} must be a sequence")
+    return tuple(value)
+
+
+def _validate_sigmoid_scaling_regularization(value: object) -> float:
+    penalty = _positive_real_number(value, name="regularization")
+    if penalty < _MIN_SIGMOID_SCALING_REGULARIZATION:
+        raise EvaluationValidationError(
+            f"regularization must be at least {_MIN_SIGMOID_SCALING_REGULARIZATION:g}; "
+            "a weaker penalty is below the solver's numerical resolution"
+        )
+    return penalty
+
+
+def _validate_slope_bounds(bounds: object) -> tuple[float, float]:
+    values = _field_tuple(bounds, name="slope_bounds")
+    if len(values) != 2:
+        raise EvaluationValidationError("slope_bounds must contain two values")
+    lower = _finite_real_number(values[0], name="slope_bounds[0]")
+    upper = _finite_real_number(values[1], name="slope_bounds[1]")
+    if lower <= 0.0 or lower >= upper or not lower <= 1.0 <= upper:
+        raise EvaluationValidationError(
+            "slope_bounds must be finite, positive, increasing, and include 1.0"
+        )
+    return lower, upper
 
 
 def _resolve_thresholds(
