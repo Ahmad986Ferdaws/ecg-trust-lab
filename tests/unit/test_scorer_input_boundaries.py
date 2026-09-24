@@ -7,12 +7,16 @@ import pytest
 
 from ecg_trust.open_world import (
     OODScoreValidationError,
+    max_normalized_bernoulli_entropy,
     normalized_bernoulli_entropy,
     symmetric_binary_energy,
 )
 
 
-@pytest.mark.parametrize("score", [normalized_bernoulli_entropy, symmetric_binary_energy])
+@pytest.mark.parametrize(
+    "score",
+    [normalized_bernoulli_entropy, max_normalized_bernoulli_entropy, symmetric_binary_energy],
+)
 @pytest.mark.parametrize(
     "invalid", [np.complex128(0.5 + 3j), 10**1000], ids=["complex", "overflow"]
 )

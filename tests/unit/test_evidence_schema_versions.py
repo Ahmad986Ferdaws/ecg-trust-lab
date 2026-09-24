@@ -11,6 +11,7 @@ from ecg_trust.conformal import (
     evaluate_prediction_sets,
 )
 from ecg_trust.open_world.scores import (
+    MaxNormalizedBernoulliEntropyScorer,
     NormalizedBernoulliEntropyScorer,
     OODScoreValidationError,
     SymmetricBinaryEnergyScorer,
@@ -18,6 +19,7 @@ from ecg_trust.open_world.scores import (
 
 Artifact = (
     NormalizedBernoulliEntropyScorer
+    | MaxNormalizedBernoulliEntropyScorer
     | SymmetricBinaryEnergyScorer
     | LabelwiseBinaryConformal
     | ClassConditionalLabelwiseConformal
@@ -40,6 +42,7 @@ def _artifacts() -> list[Artifact]:
     )
     return [
         NormalizedBernoulliEntropyScorer(),
+        MaxNormalizedBernoulliEntropyScorer(),
         SymmetricBinaryEnergyScorer(),
         calibrator,
         class_conditional,
@@ -55,7 +58,14 @@ def test_schema_version_requires_the_supported_integer(artifact: Artifact, versi
     payload["schema_version"] = version
     error = (
         OODScoreValidationError
-        if isinstance(artifact, (NormalizedBernoulliEntropyScorer, SymmetricBinaryEnergyScorer))
+        if isinstance(
+            artifact,
+            (
+                NormalizedBernoulliEntropyScorer,
+                MaxNormalizedBernoulliEntropyScorer,
+                SymmetricBinaryEnergyScorer,
+            ),
+        )
         else ConformalValidationError
     )
     with pytest.raises(error, match="schema_version"):

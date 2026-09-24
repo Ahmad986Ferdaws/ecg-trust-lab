@@ -2,6 +2,13 @@
 
 The public result contains aggregate evidence only. Row-level identifiers and
 prediction arrays remain transient in memory and are never written by this module.
+
+The entropy gate defaults to the frozen v1 mean of per-label normalized binary
+entropy. A worst-label (``"max"``) aggregation is available as an explicit
+engineering option; fitted components carry their aggregation so validation
+always applies the score the cutoff was fitted on. Protocol v1 results accept
+only the mean gate, and enabling any other aggregation for a release requires a
+new preregistered protocol.
 """
 
 from __future__ import annotations
@@ -37,7 +44,10 @@ from ecg_trust.evaluation import (
     fit_temperature_scaling,
     optimize_thresholds,
 )
-from ecg_trust.open_world.scores import normalized_bernoulli_entropy
+from ecg_trust.open_world.scores import (
+    max_normalized_bernoulli_entropy,
+    normalized_bernoulli_entropy,
+)
 from ecg_trust.predictions import (
     PredictionArtifact,
     PredictionArtifactError,
@@ -52,6 +62,7 @@ from ecg_trust.source_calibration.models import (
     ClaimBoundary,
     ConformalFitSummary,
     ConformalValidationSummary,
+    EntropyGateMethod,
     EntropyGateSummary,
     EntropyValidationSummary,
     FailureCode,
@@ -93,6 +104,7 @@ Int64Array = NDArray[np.int64]
 Int8Array = NDArray[np.int8]
 BoolArray = NDArray[np.bool_]
 LabelName = Literal["NORM", "MI", "STTC", "CD", "HYP"]
+EntropyAggregation = Literal["mean", "max"]
 
 _CONFIG_MAX_BYTES = 1_000_000
 _RESULT_MAX_BYTES = 2_000_000
@@ -205,6 +217,17 @@ class FittedSourceComponents:
     entropy_cutoff: float
     conformal: LabelwiseBinaryConformal
     summary: FrozenComponents
+    entropy_aggregation: EntropyAggregation = "mean"
+
+    def __post_init__(self) -> None:
+        if self.summary.entropy_gate.method != _entropy_gate_method(self.entropy_aggregation):
+            raise SourceCalibrationIntegrityError(
+                "entropy gate aggregation differs from its frozen summary"
+            )
+        if self.entropy_cutoff != self.summary.entropy_gate.maximum_entropy:
+            raise SourceCalibrationIntegrityError(
+                "entropy gate cutoff differs from its frozen summary"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,10 +238,24 @@ class FittedEntropyGate:
     maximum_entropy: float
     selected_count: int
     fit_count: int
+    aggregation: EntropyAggregation = "mean"
+
+    def __post_init__(self) -> None:
+        _entropy_gate_method(self.aggregation)
 
     @property
     def achieved_coverage(self) -> float:
         return self.selected_count / self.fit_count
+
+    @property
+    def method(self) -> EntropyGateMethod:
+        return _entropy_gate_method(self.aggregation)
+
+    def retains(self, probabilities: FloatArray) -> BoolArray:
+        """Apply the frozen cutoff to the score this gate was fitted with."""
+
+        uncertainty = _entropy_gate_uncertainty(probabilities, aggregation=self.aggregation)
+        return uncertainty <= self.maximum_entropy
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,9 +479,17 @@ def partition_source_predictions(
 def fit_source_components(
     partitions: SourcePartitions,
     config: SourceCalibrationConfig,
+    *,
+    entropy_aggregation: EntropyAggregation = "mean",
 ) -> FittedSourceComponents:
-    """Fit only on the two declared fitting roles; validation is never read."""
+    """Fit only on the two declared fitting roles; validation is never read.
 
+    ``entropy_aggregation`` defaults to the frozen v1 mean gate. ``"max"`` fits
+    the worst-label gate and records ``max_normalized_binary_entropy`` in the
+    sealed summary; such components cannot be sealed into a v1 result.
+    """
+
+    _entropy_gate_method(entropy_aggregation)
     decision = partitions.decision_fit
     conformal_role = partitions.conformal_and_ood_threshold_fit
     decision_folds = np.full(decision.records, 9, dtype=np.int8)
@@ -464,6 +509,7 @@ def fit_source_components(
     entropy_gate = fit_entropy_gate(
         decision_probabilities,
         target_coverage=config.decision_fit.legacy_entropy_gate.target_coverage,
+        aggregation=entropy_aggregation,
     )
 
     conformal_probabilities = temperature.predict_proba(conformal_role.raw_logits)
@@ -478,7 +524,7 @@ def fit_source_components(
         temperature=_temperature_summary(temperature),
         thresholds=_threshold_summary(thresholds),
         entropy_gate=EntropyGateSummary(
-            method="mean_normalized_binary_entropy",
+            method=entropy_gate.method,
             fit_role=SourceRole.DECISION_FIT,
             target_coverage=0.8,
             tie_rule="retain_all_scores_less_than_or_equal_to_frozen_order_statistic",
@@ -495,6 +541,7 @@ def fit_source_components(
         entropy_cutoff=entropy_gate.maximum_entropy,
         conformal=conformal,
         summary=seal_frozen_components(component_body),
+        entropy_aggregation=entropy_gate.aggregation,
     )
 
 
@@ -503,7 +550,11 @@ def evaluate_source_validation(
     fitted: FittedSourceComponents,
     config: SourceCalibrationConfig,
 ) -> SourceValidationSummary:
-    """Evaluate frozen components on source-validation rows without tuning."""
+    """Evaluate frozen components on source-validation rows without tuning.
+
+    The entropy gate uses the aggregation stored with ``fitted``; there is no
+    separate evaluation choice that could disagree with the fitted cutoff.
+    """
 
     validation = partitions.source_validation
     probabilities = fitted.temperature.predict_proba(validation.raw_logits)
@@ -516,7 +567,7 @@ def evaluate_source_validation(
     decisions = fitted.thresholds.apply(probabilities, label_order=LABEL_ORDER)
     hamming, exact = _decision_metrics(validation.targets, decisions)
 
-    entropy = normalized_bernoulli_entropy(probabilities)
+    entropy = _entropy_gate_uncertainty(probabilities, aggregation=fitted.entropy_aggregation)
     retained = entropy <= fitted.entropy_cutoff
     retained_count = int(np.count_nonzero(retained))
     if retained_count:
@@ -862,12 +913,19 @@ def fit_entropy_gate(
     probabilities: FloatArray,
     *,
     target_coverage: float,
+    aggregation: EntropyAggregation = "mean",
 ) -> FittedEntropyGate:
-    """Fit the order statistic while retaining every score tied at the cutoff."""
+    """Fit the order statistic while retaining every score tied at the cutoff.
+
+    ``aggregation`` selects the mean (default, frozen v1) or worst-label
+    normalized binary entropy. Either score retains at least
+    ``ceil(target_coverage * n)`` fit rows, more only when scores tie at the
+    cutoff; the aggregation changes which rows those are.
+    """
 
     if not math.isfinite(target_coverage) or not 0.0 < target_coverage <= 1.0:
         raise SourceCalibrationIntegrityError("entropy target coverage must lie in (0, 1]")
-    uncertainty = normalized_bernoulli_entropy(probabilities)
+    uncertainty = _entropy_gate_uncertainty(probabilities, aggregation=aggregation)
     total = int(uncertainty.size)
     requested_count = min(total, max(1, math.ceil(target_coverage * total)))
     cutoff = float(np.sort(uncertainty, kind="stable")[requested_count - 1])
@@ -877,7 +935,25 @@ def fit_entropy_gate(
         maximum_entropy=cutoff,
         selected_count=selected_count,
         fit_count=total,
+        aggregation=aggregation,
     )
+
+
+def _entropy_gate_method(aggregation: object) -> EntropyGateMethod:
+    if isinstance(aggregation, str):
+        if aggregation == "mean":
+            return "mean_normalized_binary_entropy"
+        if aggregation == "max":
+            return "max_normalized_binary_entropy"
+    raise SourceCalibrationIntegrityError("entropy gate aggregation must be 'mean' or 'max'")
+
+
+def _entropy_gate_uncertainty(
+    probabilities: FloatArray, *, aggregation: EntropyAggregation
+) -> FloatArray:
+    if _entropy_gate_method(aggregation) == "max_normalized_binary_entropy":
+        return max_normalized_bernoulli_entropy(probabilities)
+    return normalized_bernoulli_entropy(probabilities)
 
 
 def _safe_load_npz(path: Path, *, expected_records: int) -> dict[str, NDArray[np.generic]]:
@@ -1267,6 +1343,7 @@ def _label_name(value: str) -> LabelName:
 
 
 __all__ = [
+    "EntropyAggregation",
     "FittedEntropyGate",
     "FittedSourceComponents",
     "RoleData",

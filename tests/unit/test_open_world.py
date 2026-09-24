@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import FrozenInstanceError
 
 import numpy as np
@@ -8,10 +9,12 @@ import pytest
 
 from ecg_trust.open_world import (
     MahalanobisValidationError,
+    MaxNormalizedBernoulliEntropyScorer,
     NormalizedBernoulliEntropyScorer,
     OODScoreValidationError,
     ShrinkageMahalanobisDetector,
     SymmetricBinaryEnergyScorer,
+    max_normalized_bernoulli_entropy,
     normalized_bernoulli_entropy,
     symmetric_binary_energy,
 )
@@ -23,6 +26,116 @@ def test_normalized_entropy_has_documented_ood_direction_and_bounds() -> None:
     assert scores[0] == pytest.approx(0.0)
     assert 0.0 < scores[1] < scores[2]
     assert scores[2] == pytest.approx(1.0)
+
+
+def _binary_entropy_bits(probability: float) -> float:
+    if probability in (0.0, 1.0):
+        return 0.0
+    return -(
+        probability * math.log2(probability) + (1.0 - probability) * math.log2(1.0 - probability)
+    )
+
+
+def _pre_refactor_mean_entropy(probabilities: np.ndarray) -> np.ndarray:
+    matrix = np.asarray(probabilities, dtype=np.float64)
+    entropy = np.zeros_like(matrix)
+    interior = (matrix > 0.0) & (matrix < 1.0)
+    selected = matrix[interior]
+    entropy[interior] = -(
+        selected * np.log(selected) + (1.0 - selected) * np.log1p(-selected)
+    ) / math.log(2.0)
+    return entropy.mean(axis=1)
+
+
+def _entropy_fixture() -> np.ndarray:
+    generator = np.random.default_rng(20260923)
+    probabilities = generator.uniform(0.0, 1.0, size=(256, 5))
+    probabilities[:16, 0] = 0.0
+    probabilities[16:32, 1] = 1.0
+    probabilities[32:48, 2] = 0.5
+    probabilities[48] = [0.0, 1.0, 0.0, 1.0, 0.0]
+    probabilities[49] = 0.5
+    # A label just below one half whose entropy rounds one ulp above one bit.
+    probabilities[50, 3] = 0.49999999999999983
+    return probabilities
+
+
+def test_max_entropy_matches_hand_computed_worst_label_values() -> None:
+    probabilities = [
+        [0.5, 0.001, 0.999, 0.001, 0.001],
+        [0.0, 1.0, 0.0, 1.0, 0.0],
+        [0.1, 0.9, 0.0, 1.0, 0.25],
+        [0.5, 0.5, 0.5, 0.5, 0.5],
+    ]
+    worst = max_normalized_bernoulli_entropy(probabilities)
+    mean = normalized_bernoulli_entropy(probabilities)
+
+    expected_worst = [max(_binary_entropy_bits(value) for value in row) for row in probabilities]
+    expected_mean = [
+        sum(_binary_entropy_bits(value) for value in row) / len(row) for row in probabilities
+    ]
+    assert worst.dtype == np.float64 and worst.shape == (4,)
+    assert worst.tolist() == pytest.approx(expected_worst, abs=1e-12)
+    assert mean.tolist() == pytest.approx(expected_mean, abs=1e-12)
+    assert worst[0] == pytest.approx(1.0)
+    assert mean[0] == pytest.approx((1.0 + 4.0 * _binary_entropy_bits(0.001)) / 5.0)
+    assert mean[0] < 0.21
+    assert worst[1] == 0.0
+    assert worst[2] == pytest.approx(_binary_entropy_bits(0.25))
+
+
+def test_max_entropy_is_the_exact_worst_per_label_value_in_unit_interval() -> None:
+    probabilities = _entropy_fixture()
+    worst = max_normalized_bernoulli_entropy(probabilities)
+    per_label = np.column_stack(
+        [normalized_bernoulli_entropy(probabilities[:, [label]]) for label in range(5)]
+    )
+
+    # The per-label value overshoots one bit by one ulp; the worst-label score is capped.
+    assert per_label[50, 3] > 1.0
+    assert np.array_equal(worst, np.minimum(per_label.max(axis=1), 1.0))
+    assert np.all((worst >= 0.0) & (worst <= 1.0))
+    assert np.all(worst >= normalized_bernoulli_entropy(probabilities) - 1e-15)
+    assert worst[48] == 0.0
+    assert worst[49] == pytest.approx(1.0)
+    assert worst[50] == 1.0
+    one_borderline_label = [[0.49999999999999983, 0.01, 0.99, 0.01, 0.01]]
+    assert max_normalized_bernoulli_entropy(one_borderline_label).tolist() == [1.0]
+
+
+def test_mean_entropy_output_is_bit_identical_to_the_pre_refactor_formula() -> None:
+    probabilities = _entropy_fixture()
+    observed = normalized_bernoulli_entropy(probabilities)
+
+    assert observed.dtype == np.float64
+    assert observed.tobytes() == _pre_refactor_mean_entropy(probabilities).tobytes()
+    assert NormalizedBernoulliEntropyScorer().to_dict() == {
+        "schema_version": 1,
+        "artifact_type": "ecg_trust.normalized_bernoulli_entropy",
+        "score_direction": "higher_is_more_out_of_distribution",
+        "aggregation": "mean_across_labels",
+    }
+
+
+def test_worst_label_scorer_round_trips_and_refuses_mean_artifacts() -> None:
+    worst = MaxNormalizedBernoulliEntropyScorer()
+    probabilities = _entropy_fixture()
+    payload = json.loads(json.dumps(worst.to_dict(), allow_nan=False))
+
+    assert payload["artifact_type"] == "ecg_trust.max_normalized_bernoulli_entropy"
+    assert payload["aggregation"] == "max_across_labels"
+    assert MaxNormalizedBernoulliEntropyScorer.from_dict(payload) == worst
+    assert np.array_equal(
+        worst.score(probabilities), max_normalized_bernoulli_entropy(probabilities)
+    )
+    with pytest.raises(OODScoreValidationError, match="artifact_type"):
+        MaxNormalizedBernoulliEntropyScorer.from_dict(NormalizedBernoulliEntropyScorer().to_dict())
+    with pytest.raises(OODScoreValidationError, match="artifact_type"):
+        NormalizedBernoulliEntropyScorer.from_dict(payload)
+    relabeled = dict(payload)
+    relabeled["aggregation"] = "mean_across_labels"
+    with pytest.raises(OODScoreValidationError, match="aggregation"):
+        MaxNormalizedBernoulliEntropyScorer.from_dict(relabeled)
 
 
 def test_symmetric_energy_treats_confident_positive_and_negative_equally() -> None:
@@ -56,6 +169,10 @@ def test_stateless_scorers_are_deterministic_and_json_round_trip() -> None:
         (normalized_bernoulli_entropy, [0.5, 0.5], "two-dimensional"),
         (normalized_bernoulli_entropy, [[0.5, np.nan]], "finite"),
         (normalized_bernoulli_entropy, [[-0.1, 0.5]], r"\[0, 1\]"),
+        (max_normalized_bernoulli_entropy, [0.5, 0.5], "two-dimensional"),
+        (max_normalized_bernoulli_entropy, [[0.5, np.nan]], "finite"),
+        (max_normalized_bernoulli_entropy, [[0.5, 1.1]], r"\[0, 1\]"),
+        (max_normalized_bernoulli_entropy, [[]], "samples and labels"),
         (symmetric_binary_energy, [[0.0, np.inf]], "finite"),
         (symmetric_binary_energy, [], "two-dimensional"),
     ],
@@ -220,7 +337,10 @@ def test_energy_tiny_temperature_has_confident_limit_and_zero_limit() -> None:
     assert result[1] == -1e-320 * np.log(2.0)
 
 
-@pytest.mark.parametrize("function", [normalized_bernoulli_entropy, symmetric_binary_energy])
+@pytest.mark.parametrize(
+    "function",
+    [normalized_bernoulli_entropy, max_normalized_bernoulli_entropy, symmetric_binary_energy],
+)
 def test_scores_reject_complex_arrays_without_discarding_imaginary_parts(function: object) -> None:
     with pytest.raises(OODScoreValidationError, match="real"):
         function(np.asarray([[0.5 + 2j]]))

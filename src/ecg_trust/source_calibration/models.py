@@ -499,8 +499,11 @@ class ThresholdFitSummary(StrictFrozenModel):
         return self
 
 
+EntropyGateMethod = Literal["mean_normalized_binary_entropy", "max_normalized_binary_entropy"]
+
+
 class EntropyGateSummary(StrictFrozenModel):
-    method: Literal["mean_normalized_binary_entropy"]
+    method: EntropyGateMethod
     fit_role: Literal[SourceRole.DECISION_FIT]
     target_coverage: UnitFloat
     tie_rule: Literal["retain_all_scores_less_than_or_equal_to_frozen_order_statistic"]
@@ -697,6 +700,14 @@ class SourceCalibrationResultBody(StrictFrozenModel):
     source_validation: SourceValidationSummary
     open_world: OpenWorldPendingSummary
     claims: ClaimBoundary
+
+    @model_validator(mode="after")
+    def _entropy_gate_is_frozen_mean(self) -> Self:
+        # Protocol v1 froze the mean gate, and downstream consumers apply the
+        # mean score to maximum_entropy; other aggregations need a new protocol.
+        if self.frozen_components.entropy_gate.method != "mean_normalized_binary_entropy":
+            raise ValueError("protocol v1 results must use the frozen mean entropy gate")
+        return self
 
 
 class SourceCalibrationResult(SourceCalibrationResultBody):
