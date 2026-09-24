@@ -55,6 +55,8 @@ def _entropy_fixture() -> np.ndarray:
     probabilities[32:48, 2] = 0.5
     probabilities[48] = [0.0, 1.0, 0.0, 1.0, 0.0]
     probabilities[49] = 0.5
+    # A label just below one half whose entropy rounds one ulp above one bit.
+    probabilities[50, 3] = 0.49999999999999983
     return probabilities
 
 
@@ -89,11 +91,16 @@ def test_max_entropy_is_the_exact_worst_per_label_value_in_unit_interval() -> No
         [normalized_bernoulli_entropy(probabilities[:, [label]]) for label in range(5)]
     )
 
-    assert np.array_equal(worst, per_label.max(axis=1))
+    # The per-label value overshoots one bit by one ulp; the worst-label score is capped.
+    assert per_label[50, 3] > 1.0
+    assert np.array_equal(worst, np.minimum(per_label.max(axis=1), 1.0))
     assert np.all((worst >= 0.0) & (worst <= 1.0))
     assert np.all(worst >= normalized_bernoulli_entropy(probabilities) - 1e-15)
     assert worst[48] == 0.0
     assert worst[49] == pytest.approx(1.0)
+    assert worst[50] == 1.0
+    one_borderline_label = [[0.49999999999999983, 0.01, 0.99, 0.01, 0.01]]
+    assert max_normalized_bernoulli_entropy(one_borderline_label).tolist() == [1.0]
 
 
 def test_mean_entropy_output_is_bit_identical_to_the_pre_refactor_formula() -> None:

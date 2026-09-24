@@ -45,7 +45,11 @@ from ecg_trust.source_calibration import (
     verify_clean_git_revision,
     verify_source_inputs,
 )
-from ecg_trust.source_calibration.models import canonical_json_bytes, canonical_sha256
+from ecg_trust.source_calibration.models import (
+    EntropyGateSummary,
+    canonical_json_bytes,
+    canonical_sha256,
+)
 
 LABELS = ("NORM", "MI", "STTC", "CD", "HYP")
 REVISION = "a" * 40
@@ -399,11 +403,14 @@ def test_entropy_gate_retains_all_cutoff_ties() -> None:
     assert gate.achieved_coverage == 0.75
 
 
-def _pre_change_mean_gate(probabilities: np.ndarray, target_coverage: float) -> tuple[float, int]:
-    uncertainty = normalized_bernoulli_entropy(probabilities)
+def _order_statistic_gate(uncertainty: np.ndarray, target_coverage: float) -> tuple[float, int]:
     requested = min(uncertainty.size, max(1, int(np.ceil(target_coverage * uncertainty.size))))
     cutoff = float(np.sort(uncertainty, kind="stable")[requested - 1])
     return cutoff, int(np.count_nonzero(uncertainty <= cutoff))
+
+
+def _pre_change_mean_gate(probabilities: np.ndarray, target_coverage: float) -> tuple[float, int]:
+    return _order_statistic_gate(normalized_bernoulli_entropy(probabilities), target_coverage)
 
 
 def test_worst_label_gate_rejects_a_borderline_label_the_mean_gate_admits() -> None:
@@ -418,7 +425,14 @@ def test_worst_label_gate_rejects_a_borderline_label_the_mean_gate_admits() -> N
     max_gate = fit_entropy_gate(fit, target_coverage=0.8, aggregation="max")
 
     assert (mean_gate.fit_count, max_gate.fit_count) == (200, 200)
-    assert mean_gate.selected_count >= 160 and max_gate.selected_count >= 160
+    # Each cutoff is the 160th smallest fit score of its own aggregation.
+    mean_scores = normalized_bernoulli_entropy(fit)
+    max_scores = max_normalized_bernoulli_entropy(fit)
+    assert mean_gate.maximum_entropy == float(np.sort(mean_scores, kind="stable")[159])
+    assert max_gate.maximum_entropy == float(np.sort(max_scores, kind="stable")[159])
+    assert max_gate.maximum_entropy > mean_gate.maximum_entropy
+    assert int(mean_gate.retains(fit).sum()) == mean_gate.selected_count >= 160
+    assert int(max_gate.retains(fit).sum()) == max_gate.selected_count >= 160
     assert normalized_bernoulli_entropy(borderline)[0] == pytest.approx(0.2091262, abs=1e-6)
     assert max_normalized_bernoulli_entropy(borderline)[0] == pytest.approx(1.0)
     # Failing before: the frozen mean gate admits one label at probability one half.
@@ -451,10 +465,34 @@ def test_entropy_gate_default_is_the_unchanged_mean_gate() -> None:
     )
     worst = fit_entropy_gate(probabilities, target_coverage=0.8, aggregation="max")
     assert worst.method == "max_normalized_binary_entropy"
+    assert (worst.maximum_entropy, worst.selected_count) == _order_statistic_gate(
+        max_normalized_bernoulli_entropy(probabilities), 0.8
+    )
     assert np.array_equal(
         worst.retains(probabilities),
         max_normalized_bernoulli_entropy(probabilities) <= worst.maximum_entropy,
     )
+
+
+def test_worst_label_gate_cutoff_stays_inside_the_sealed_unit_interval() -> None:
+    # One label a few ulps below one half: its entropy rounds one ulp above one bit.
+    fit = np.tile([0.49999999999999983, 0.01, 0.99, 0.01, 0.01], (10, 1))
+    gate = fit_entropy_gate(fit, target_coverage=0.8, aggregation="max")
+
+    assert gate.maximum_entropy == 1.0
+    assert int(gate.retains(fit).sum()) == gate.selected_count == 10
+    summary = EntropyGateSummary(
+        method=gate.method,
+        fit_role=SourceRole.DECISION_FIT,
+        target_coverage=0.8,
+        tie_rule="retain_all_scores_less_than_or_equal_to_frozen_order_statistic",
+        maximum_entropy=gate.maximum_entropy,
+        selected_count=gate.selected_count,
+        fit_count=gate.fit_count,
+        achieved_coverage=gate.achieved_coverage,
+    )
+    assert summary.method == "max_normalized_binary_entropy"
+    assert summary.maximum_entropy == 1.0
 
 
 @pytest.mark.parametrize("aggregation", ["median", "MAX", "", None, 1, True])
@@ -542,6 +580,11 @@ def test_worst_label_components_bind_fit_and_validation_to_one_aggregation(
     assert worst.entropy_aggregation == "max"
     assert worst.summary.entropy_gate.method == "max_normalized_binary_entropy"
     assert worst.entropy_cutoff == worst.summary.entropy_gate.maximum_entropy
+    decision_probabilities = worst.temperature.predict_proba(partitions.decision_fit.raw_logits)
+    assert (worst.entropy_cutoff, worst.summary.entropy_gate.selected_count) == (
+        _order_statistic_gate(max_normalized_bernoulli_entropy(decision_probabilities), 0.8)
+    )
+    assert worst.entropy_cutoff != mean.entropy_cutoff
     assert worst.summary.temperature == mean.summary.temperature
     assert worst.summary.thresholds == mean.summary.thresholds
     assert worst.summary.conformal == mean.summary.conformal
@@ -559,6 +602,10 @@ def test_worst_label_components_bind_fit_and_validation_to_one_aggregation(
         replace(worst, entropy_aggregation="mean")
     with pytest.raises(SourceCalibrationIntegrityError, match="aggregation"):
         replace(mean, entropy_aggregation="max")
+    with pytest.raises(SourceCalibrationIntegrityError, match="cutoff"):
+        replace(mean, entropy_cutoff=worst.entropy_cutoff)
+    with pytest.raises(SourceCalibrationIntegrityError, match="cutoff"):
+        replace(worst, entropy_cutoff=mean.entropy_cutoff)
     with pytest.raises(SourceCalibrationIntegrityError, match="aggregation"):
         fit_source_components(
             partitions,

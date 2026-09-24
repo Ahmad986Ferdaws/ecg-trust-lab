@@ -224,6 +224,10 @@ class FittedSourceComponents:
             raise SourceCalibrationIntegrityError(
                 "entropy gate aggregation differs from its frozen summary"
             )
+        if self.entropy_cutoff != self.summary.entropy_gate.maximum_entropy:
+            raise SourceCalibrationIntegrityError(
+                "entropy gate cutoff differs from its frozen summary"
+            )
 
 
 @dataclass(frozen=True, slots=True)

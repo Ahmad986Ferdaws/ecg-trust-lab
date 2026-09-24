@@ -47,14 +47,18 @@ def max_normalized_bernoulli_entropy(probabilities: ArrayLike) -> FloatArray:
 
     Each row's score is the largest of its per-label entropies, which are
     computed exactly as in :func:`normalized_bernoulli_entropy`, so the result
-    is one of those per-label values with no aggregation rounding. One label at
-    probability one half scores one however confident the other labels are;
-    zero is obtained only when every probability is zero or one. In exact
-    arithmetic the mean score never exceeds this score. Higher values are
-    treated as more uncertain/OOD-like.
+    is one of those per-label values with no aggregation rounding, capped at
+    one. The cap only removes floating-point overshoot: a label within about
+    ``1e-13`` of one half can round one ulp above one, which exact binary
+    entropy never does. One label at probability one half scores one however
+    confident the other labels are; zero is obtained only when every
+    probability is zero or one. In exact arithmetic the mean score never
+    exceeds this score. Higher values are treated as more uncertain/OOD-like.
     """
 
-    return _per_label_normalized_entropy(probabilities).max(axis=1)
+    worst = _per_label_normalized_entropy(probabilities).max(axis=1)
+    np.minimum(worst, 1.0, out=worst)
+    return worst
 
 
 def symmetric_binary_energy(logits: ArrayLike, *, temperature: float = 1.0) -> FloatArray:
