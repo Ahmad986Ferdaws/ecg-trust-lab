@@ -1,5 +1,6 @@
 """Distribution-free prediction sets for ECG Trust Lab research."""
 
+from ecg_trust.conformal.class_conditional import ClassConditionalLabelwiseConformal
 from ecg_trust.conformal.multilabel import (
     BinaryDecision,
     BinaryPredictionSets,
@@ -13,6 +14,7 @@ from ecg_trust.conformal.multilabel import (
 __all__ = [
     "BinaryDecision",
     "BinaryPredictionSets",
+    "ClassConditionalLabelwiseConformal",
     "ConformalMetrics",
     "ConformalValidationError",
     "LabelwiseBinaryConformal",

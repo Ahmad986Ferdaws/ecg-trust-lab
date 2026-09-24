@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from ecg_trust.conformal import LabelwiseBinaryConformal
+from ecg_trust.conformal import ClassConditionalLabelwiseConformal, LabelwiseBinaryConformal
 from ecg_trust.constants import SUPERCLASSES
 from ecg_trust.contracts import TrustDecision
 from ecg_trust.quality.signal_quality import (
@@ -394,6 +394,26 @@ def test_model_failure_and_release_mismatch_fail_without_private_details() -> No
             _analyze(_engine(runner, detector=FakeDetector(0.5), conformal=_conformal()))
         assert "private" not in str(caught.value).lower()
         assert "api_key" not in str(caught.value).lower()
+
+
+def test_engine_refuses_the_opt_in_class_conditional_conformal_artifact() -> None:
+    budgets = dict.fromkeys(SUPERCLASSES, 0.1)
+    probabilities = np.tile([[0.2], [0.8]], (10, len(SUPERCLASSES)))
+    class_conditional = ClassConditionalLabelwiseConformal.fit(
+        probabilities,
+        (probabilities > 0.5).astype(np.int8),
+        label_names=SUPERCLASSES,
+        negative_alphas=budgets,
+        positive_alphas=budgets,
+    )
+
+    assert _engine(FakeRunner(), detector=FakeDetector(0.5), conformal=_conformal()).is_ready()
+    with pytest.raises(SentinelValidationError, match="runtime assembly failed"):
+        _engine(
+            FakeRunner(),
+            detector=FakeDetector(0.5),
+            conformal=class_conditional,  # type: ignore[arg-type]
+        )
 
 
 def test_engine_readiness_requires_distribution_and_conformal_components() -> None:
