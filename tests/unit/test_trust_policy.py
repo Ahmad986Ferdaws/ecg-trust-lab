@@ -18,6 +18,7 @@ from ecg_trust.quality.signal_quality import (
 )
 from ecg_trust.trust_policy import (
     DEFAULT_TRUST_POLICY_CONFIG,
+    PUBLIC_CONFIDENCE_ABSTENTION_REASON,
     TrustPolicyConfig,
     TrustPolicyInputs,
     TrustPolicyResult,
@@ -270,6 +271,8 @@ def test_default_policy_keeps_label_coherence_disabled_and_payload_unchanged() -
     assert DEFAULT_TRUST_POLICY_CONFIG.require_label_coherence is False
     assert result.decision is TrustDecision.PREDICTION_ALLOWED
     assert result.incoherent_labels == ()
+    assert result.label_coherence_required is False
+    assert result.public_reason_codes == ("ALL_TRUST_GATES_PASSED",)
     assert json.dumps(result.to_dict()) == (
         '{"policy_version": "trust-policy-v1", "decision": "PREDICTION_ALLOWED", '
         '"predictions_exposed": true, "reason_codes": ["ALL_TRUST_GATES_PASSED"], '
@@ -290,6 +293,7 @@ def test_coherence_gate_withholds_norm_with_infarction_that_v1_releases() -> Non
     assert after.reason_codes == (TrustReasonCode.LABEL_SET_INCOHERENT,)
     assert after.incoherent_labels == ("NORM", "MI")
     assert after.uncertain_labels == ()
+    assert after.public_reason_codes == (PUBLIC_CONFIDENCE_ABSTENTION_REASON,)
     assert after.to_dict() == {
         "policy_version": "trust-policy-label-coherence-dev",
         "decision": "ABSTAIN",
@@ -298,6 +302,7 @@ def test_coherence_gate_withholds_norm_with_infarction_that_v1_releases() -> Non
         "quality_reason_codes": [],
         "distribution_reason_codes": [],
         "uncertain_labels": [],
+        "label_coherence_required": True,
         "incoherent_labels": ["NORM", "MI"],
     }
 
@@ -343,7 +348,14 @@ def test_coherence_gate_changes_only_otherwise_allowed_singleton_sets() -> None:
         if conflict:
             assert gated.reason_codes == (TrustReasonCode.LABEL_SET_INCOHERENT,)
         else:
-            assert replace(gated, policy_version=default.policy_version) == default
+            assert (
+                replace(
+                    gated,
+                    policy_version=default.policy_version,
+                    label_coherence_required=False,
+                )
+                == default
+            )
 
 
 @pytest.mark.parametrize(
@@ -380,7 +392,10 @@ def test_earlier_gates_keep_precedence_over_label_coherence(changes: dict[str, o
     gated = evaluate_trust_policy(evidence, config=COHERENCE_CONFIG)
 
     assert TrustReasonCode.LABEL_SET_INCOHERENT not in gated.reason_codes
-    assert replace(gated, policy_version=default.policy_version) == default
+    assert (
+        replace(gated, policy_version=default.policy_version, label_coherence_required=False)
+        == default
+    )
 
 
 def test_label_coherence_cannot_be_attributed_to_the_v1_policy() -> None:
@@ -450,3 +465,112 @@ def test_result_rejects_incoherent_labels_without_a_matching_reason(
             reason_codes=reasons,
             incoherent_labels=incoherent,
         )
+
+
+def _incoherent_result(**changes: object) -> TrustPolicyResult:
+    fields: dict[str, object] = {
+        "policy_version": "trust-policy-label-coherence-dev",
+        "decision": TrustDecision.ABSTAIN,
+        "reason_codes": (TrustReasonCode.LABEL_SET_INCOHERENT,),
+        "incoherent_labels": ("NORM", "MI"),
+        "label_coherence_required": True,
+    }
+    fields.update(changes)
+    return TrustPolicyResult(**fields)  # type: ignore[arg-type]
+
+
+def test_incoherent_result_matches_what_the_gate_emits() -> None:
+    evidence = replace(_valid_inputs(), conformal_decisions=_supported("NORM", "MI"))
+
+    assert evaluate_trust_policy(evidence, config=COHERENCE_CONFIG) == _incoherent_result()
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        (
+            {"policy_version": "trust-policy-v1"},
+            "other than v1",
+        ),
+        (
+            {"policy_version": " trust-policy-v1 ", "label_coherence_required": False},
+            "requires the label-coherence gate",
+        ),
+        ({"label_coherence_required": False}, "requires the label-coherence gate"),
+        ({"label_coherence_required": 1}, "must be boolean"),
+        ({"decision": TrustDecision.INVALID_INPUT}, "must end in ABSTAIN"),
+        ({"uncertain_labels": ("STTC",)}, "singleton label sets"),
+        (
+            {
+                "reason_codes": (
+                    TrustReasonCode.LABEL_SET_INCOHERENT,
+                    TrustReasonCode.CONFORMAL_SET_UNCERTAIN,
+                )
+            },
+            "singleton label sets",
+        ),
+        ({"incoherent_labels": ("MI", "NORM")}, "canonical order"),
+        ({"incoherent_labels": ("MI", "CD")}, "listed incompatible pairs"),
+        ({"incoherent_labels": ("NORM", "MI", "CD")}, "listed incompatible pairs"),
+    ],
+)
+def test_incoherent_result_rejects_states_the_gate_cannot_emit(
+    changes: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(TrustPolicyValidationError, match=message):
+        _incoherent_result(**changes)
+
+
+def test_gated_result_cannot_be_attributed_to_the_v1_policy() -> None:
+    with pytest.raises(TrustPolicyValidationError, match="other than v1"):
+        TrustPolicyResult(
+            policy_version="trust-policy-v1",
+            decision=TrustDecision.PREDICTION_ALLOWED,
+            reason_codes=(TrustReasonCode.ALL_TRUST_GATES_PASSED,),
+            label_coherence_required=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [reason for reason in TrustReasonCode if reason is not TrustReasonCode.LABEL_SET_INCOHERENT],
+)
+def test_public_reason_codes_are_unchanged_without_the_coherence_gate(
+    reason: TrustReasonCode,
+) -> None:
+    exposed = reason is TrustReasonCode.ALL_TRUST_GATES_PASSED
+    result = TrustPolicyResult(
+        policy_version="trust-policy-v1",
+        decision=TrustDecision.PREDICTION_ALLOWED if exposed else TrustDecision.ABSTAIN,
+        reason_codes=(reason,),
+    )
+
+    assert result.public_reason_codes == (reason.value,)
+    assert result.public_reason_codes == tuple(cast(list[str], result.to_dict()["reason_codes"]))
+
+
+def test_coherence_gate_publishes_one_generic_reason_for_classifier_abstentions() -> None:
+    incoherent = evaluate_trust_policy(
+        replace(_valid_inputs(), conformal_decisions=_supported("NORM", "STTC", "HYP")),
+        config=COHERENCE_CONFIG,
+    )
+    uncertain = evaluate_trust_policy(
+        replace(
+            _valid_inputs(),
+            conformal_decisions=(BinaryDecision.UNCERTAIN,) + _supported()[1:],
+        ),
+        config=COHERENCE_CONFIG,
+    )
+    entropy = evaluate_trust_policy(
+        replace(_valid_inputs(), legacy_entropy_gate_accepted=False),
+        config=COHERENCE_CONFIG,
+    )
+    allowed = evaluate_trust_policy(_valid_inputs(), config=COHERENCE_CONFIG)
+
+    assert incoherent.reason_codes == (TrustReasonCode.LABEL_SET_INCOHERENT,)
+    assert uncertain.reason_codes == (TrustReasonCode.CONFORMAL_SET_UNCERTAIN,)
+    assert incoherent.public_reason_codes == (PUBLIC_CONFIDENCE_ABSTENTION_REASON,)
+    assert uncertain.public_reason_codes == incoherent.public_reason_codes
+    assert entropy.public_reason_codes == ("LEGACY_ENTROPY_GATE_REJECTED",)
+    assert allowed.public_reason_codes == ("ALL_TRUST_GATES_PASSED",)

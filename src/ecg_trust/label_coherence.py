@@ -17,15 +17,19 @@ Guarantees: :func:`find_incoherent_labels` is a pure, deterministic function of
 singleton decisions.  It reads no probabilities, targets, or thresholds and
 fits nothing.  A label joins a conflict only when it and its paired label are
 both ``SUPPORTED``; ``NOT_SUPPORTED`` never conflicts, so an all-negative set is
-always coherent.
+always coherent by definition.  "Coherent" means only that no listed pair is
+jointly ``SUPPORTED``, not that the set is plausible in the cohort.
 
 Limits: the pairs are a hand-stated rule motivated by whole-cohort descriptive
 counts that include the already observed fold 10.  They are not fitted or
 validated, and genuine co-occurrences exist (at most 39 ``NORM`` records across
 the listed pairs, which can overlap), so applying the rule trades some correct
 releases for fewer implausible ones.  It cannot detect other implausible
-combinations or establish that a coherent set is clinically correct.  It is
-not part of ``trust-policy-v1``; using it in any release requires a new
+combinations or establish that a coherent set is clinically correct.  In
+particular, the empty supported set has zero support in the included cohort
+(``docs/DATA_CARD.md``: no included row has an all-zero target), less than any
+listed pair, yet it is deliberately out of scope and never flagged.  It is not
+part of ``trust-policy-v1``; using it in any release requires a new
 preregistered protocol.
 """
 

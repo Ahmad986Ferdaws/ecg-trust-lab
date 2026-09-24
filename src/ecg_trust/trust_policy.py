@@ -5,7 +5,9 @@ threshold, inspect target labels, or run a classifier.  It combines already
 frozen evidence in safety order and controls whether downstream code may expose
 class results.  An optional, default-off label-coherence gate (see
 :mod:`ecg_trust.label_coherence`) can also withhold a jointly implausible set of
-singleton decisions; it is not part of ``trust-policy-v1``.
+singleton decisions; it is not part of ``trust-policy-v1``.  Its specific reason
+and labels are audit-only: :attr:`TrustPolicyResult.public_reason_codes` is the
+only reason vocabulary that may cross a public boundary.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from ecg_trust.label_coherence import find_incoherent_labels
 from ecg_trust.quality.signal_quality import QualityStatus, SignalQualityReport
 
 _V1_POLICY_VERSION: Final = "trust-policy-v1"
+PUBLIC_CONFIDENCE_ABSTENTION_REASON: Final = "CONFIDENCE_GATE_ABSTAINED"
 
 
 class TrustPolicyValidationError(ValueError):
@@ -44,14 +47,24 @@ class TrustReasonCode(StrEnum):
     ALL_TRUST_GATES_PASSED = "ALL_TRUST_GATES_PASSED"
 
 
+# Under the coherence gate these two abstentions share one public code, so a
+# caller cannot tell a jointly supported NORM plus MI/STTC/HYP set (the only way
+# LABEL_SET_INCOHERENT arises) from an uncertain label-wise set.
+_COHERENCE_MASKED_REASONS: Final = frozenset(
+    {TrustReasonCode.CONFORMAL_SET_UNCERTAIN, TrustReasonCode.LABEL_SET_INCOHERENT}
+)
+
+
 @dataclass(frozen=True, slots=True)
 class TrustPolicyConfig:
-    """Immutable behavior of the first Sentinel decision release.
+    """Immutable Sentinel decision-policy behavior.
 
-    ``require_label_coherence`` is an opt-in development gate that is off by
-    default.  It cannot be enabled under the v1 version string, so its results
-    are never attributed to ``trust-policy-v1``; enabling it for any release
-    requires a new preregistered protocol.
+    The defaults are ``trust-policy-v1``, the first Sentinel decision release.
+    Any other configuration is development-only.  ``require_label_coherence`` is
+    an opt-in development gate that is off by default.  It cannot be enabled
+    under the v1 version string, so its results are never attributed to
+    ``trust-policy-v1``; enabling it for any release requires a new
+    preregistered protocol.
     """
 
     version: str = _V1_POLICY_VERSION
@@ -124,7 +137,13 @@ class TrustPolicyInputs:
 
 @dataclass(frozen=True, slots=True)
 class TrustPolicyResult:
-    """Final disposition; only one state permits result exposure."""
+    """Final disposition; only one state permits result exposure.
+
+    This is the internal audit record.  ``uncertain_labels`` and
+    ``incoherent_labels`` name labels of a withheld case, and
+    ``LABEL_SET_INCOHERENT`` implies which labels were supported, so public
+    boundaries publish :attr:`public_reason_codes` instead of these fields.
+    """
 
     policy_version: str
     decision: TrustDecision
@@ -133,6 +152,7 @@ class TrustPolicyResult:
     distribution_reason_codes: tuple[str, ...] = ()
     uncertain_labels: tuple[str, ...] = ()
     incoherent_labels: tuple[str, ...] = ()
+    label_coherence_required: bool = False
 
     def __post_init__(self) -> None:
         if not self.policy_version.strip():
@@ -163,12 +183,68 @@ class TrustPolicyResult:
             raise TrustPolicyValidationError(
                 "prediction exposure must be justified only by all gates passing"
             )
+        if not isinstance(self.label_coherence_required, bool):
+            raise TrustPolicyValidationError("label_coherence_required must be boolean")
+        if self.label_coherence_required and self.policy_version.strip() == _V1_POLICY_VERSION:
+            raise TrustPolicyValidationError(
+                "the label-coherence gate requires a policy version other than v1"
+            )
+        if TrustReasonCode.LABEL_SET_INCOHERENT in self.reason_codes:
+            self._validate_incoherent_label_set()
+
+    def _validate_incoherent_label_set(self) -> None:
+        if not self.label_coherence_required:
+            raise TrustPolicyValidationError(
+                "an incoherent label set requires the label-coherence gate"
+            )
+        if self.decision is not TrustDecision.ABSTAIN:
+            raise TrustPolicyValidationError("an incoherent label set must end in ABSTAIN")
+        if self.uncertain_labels or TrustReasonCode.CONFORMAL_SET_UNCERTAIN in self.reason_codes:
+            raise TrustPolicyValidationError(
+                "label coherence is defined only for singleton label sets"
+            )
+        supported = tuple(
+            BinaryDecision.SUPPORTED
+            if label in self.incoherent_labels
+            else BinaryDecision.NOT_SUPPORTED
+            for label in SUPERCLASSES
+        )
+        if find_incoherent_labels(supported) != self.incoherent_labels:
+            raise TrustPolicyValidationError(
+                "incoherent_labels must be exactly the labels of listed incompatible pairs, "
+                "in canonical order"
+            )
 
     @property
     def predictions_exposed(self) -> bool:
         """Whether an API or UI is permitted to reveal class results."""
 
         return self.decision is TrustDecision.PREDICTION_ALLOWED
+
+    @property
+    def public_reason_codes(self) -> tuple[str, ...]:
+        """Return the reason codes that may cross a public boundary.
+
+        Without the coherence gate these are the policy reasons unchanged.
+        ``LABEL_SET_INCOHERENT`` arises only when ``NORM`` and at least one of
+        ``MI``, ``STTC``, or ``HYP`` are ``SUPPORTED``, so publishing it would
+        disclose class results of a withheld case.  Under the gate, that reason and
+        ``CONFORMAL_SET_UNCERTAIN`` are therefore both published as the generic
+        ``CONFIDENCE_GATE_ABSTAINED``, which does not say which gate fired.
+        """
+
+        if not self.label_coherence_required:
+            return tuple(reason.value for reason in self.reason_codes)
+        public: list[str] = []
+        for reason in self.reason_codes:
+            value = (
+                PUBLIC_CONFIDENCE_ABSTENTION_REASON
+                if reason in _COHERENCE_MASKED_REASONS
+                else reason.value
+            )
+            if value not in public:
+                public.append(value)
+        return tuple(public)
 
     def to_dict(self) -> dict[str, object]:
         """Return a finite JSON-safe policy result without model probabilities."""
@@ -182,9 +258,12 @@ class TrustPolicyResult:
             "distribution_reason_codes": list(self.distribution_reason_codes),
             "uncertain_labels": list(self.uncertain_labels),
         }
-        # Only the opt-in coherence gate populates this field, so default-policy
-        # payloads keep their existing keys exactly.  The labels reveal supported
-        # decisions of a withheld case; public case responses carry only the reason.
+        # Only the opt-in coherence gate populates these fields, so default-policy
+        # payloads keep their existing keys exactly.  This is an audit record: the
+        # labels reveal supported decisions of a withheld case, so public
+        # boundaries use ``public_reason_codes`` and never this payload.
+        if self.label_coherence_required:
+            payload["label_coherence_required"] = True
         if self.incoherent_labels:
             payload["incoherent_labels"] = list(self.incoherent_labels)
         return payload
@@ -324,11 +403,13 @@ def _result(
         distribution_reason_codes=distribution_reason_codes,
         uncertain_labels=uncertain_labels,
         incoherent_labels=incoherent_labels,
+        label_coherence_required=config.require_label_coherence,
     )
 
 
 __all__ = [
     "DEFAULT_TRUST_POLICY_CONFIG",
+    "PUBLIC_CONFIDENCE_ABSTENTION_REASON",
     "TrustPolicyConfig",
     "TrustPolicyInputs",
     "TrustPolicyResult",

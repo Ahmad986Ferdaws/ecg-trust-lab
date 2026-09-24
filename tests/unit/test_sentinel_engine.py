@@ -431,9 +431,43 @@ def test_opt_in_label_coherence_withholds_confident_norm_with_infarction() -> No
     assert gated.calibrated_probabilities is None
     assert gated.label_prediction_sets is None
     public = gated.to_public_dict()
-    assert public["reason_codes"] == ["LABEL_SET_INCOHERENT"]
+    assert public["reason_codes"] == ["CONFIDENCE_GATE_ABSTAINED"]
     assert "probabilities" not in public
     assert all(label not in repr(public) for label in SUPERCLASSES)
+
+
+def test_public_incoherent_abstention_is_indistinguishable_from_uncertainty() -> None:
+    # The gate fires only when NORM and at least one of MI, STTC, or HYP are
+    # supported, so a distinct public reason would disclose withheld results.
+    coherence = TrustPolicyConfig(
+        version="trust-policy-label-coherence-dev",
+        require_label_coherence=True,
+    )
+    incoherent = _analyze(
+        _engine(
+            FakeRunner(probabilities=(0.9, 0.9, 0.1, 0.1, 0.1)),
+            detector=FakeDetector(0.5),
+            conformal=_conformal(),
+            policy_config=coherence,
+        )
+    )
+    uncertain = _analyze(
+        _engine(
+            FakeRunner(),
+            detector=FakeDetector(0.5),
+            conformal=_conformal(0.95),
+            policy_config=coherence,
+        )
+    )
+    default_uncertain = _analyze(
+        _engine(FakeRunner(), detector=FakeDetector(0.5), conformal=_conformal(0.95))
+    )
+
+    assert incoherent.policy.reason_codes == (TrustReasonCode.LABEL_SET_INCOHERENT,)
+    assert uncertain.policy.reason_codes == (TrustReasonCode.CONFORMAL_SET_UNCERTAIN,)
+    assert incoherent.to_public_dict() == uncertain.to_public_dict()
+    assert "LABEL_SET_INCOHERENT" not in repr(incoherent.to_public_dict())
+    assert default_uncertain.to_public_dict()["reason_codes"] == ["CONFORMAL_SET_UNCERTAIN"]
 
 
 def test_model_failure_and_release_mismatch_fail_without_private_details() -> None:
