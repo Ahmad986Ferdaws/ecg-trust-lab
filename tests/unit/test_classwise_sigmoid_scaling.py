@@ -16,6 +16,7 @@ from ecg_trust.evaluation import (
     ClasswiseSigmoidScalingResult,
     EvaluationValidationError,
     PerLabelSigmoidScaling,
+    _damped_newton_sigmoid_scaling,
     compute_multilabel_metrics,
     fit_classwise_sigmoid_scaling,
     fit_temperature_scaling,
@@ -50,6 +51,42 @@ def _per_label_nll(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:
 
 def _fold_9(targets: np.ndarray) -> np.ndarray:
     return np.full(targets.shape[0], 9)
+
+
+def _regularized_objective(
+    logits: np.ndarray,
+    targets: np.ndarray,
+    slope: float,
+    intercept: float,
+    regularization: float,
+) -> float:
+    scaled = slope * logits + intercept
+    nll = float(np.mean(np.logaddexp(0.0, scaled) - targets * scaled))
+    return nll + regularization * ((slope - 1.0) ** 2 + intercept**2)
+
+
+def _best_intercept_at_slope(
+    logits: np.ndarray, targets: np.ndarray, slope: float, regularization: float
+) -> float:
+    """Golden-section search for the intercept, independent of the Newton solver."""
+
+    def objective(intercept: float) -> float:
+        return _regularized_objective(logits, targets, slope, intercept, regularization)
+
+    ratio = (math.sqrt(5.0) - 1.0) / 2.0
+    lower, upper = -10.0, 10.0
+    left, right = upper - ratio * (upper - lower), lower + ratio * (upper - lower)
+    left_value, right_value = objective(left), objective(right)
+    while upper - lower > 1e-10:
+        if left_value <= right_value:
+            upper, right, right_value = right, left, left_value
+            left = upper - ratio * (upper - lower)
+            left_value = objective(left)
+        else:
+            lower, left, left_value = left, right, right_value
+            right = lower + ratio * (upper - lower)
+            right_value = objective(right)
+    return (lower + upper) / 2.0
 
 
 def test_one_temperature_cannot_fix_opposite_miscalibration_but_classwise_scaling_does() -> None:
@@ -126,6 +163,86 @@ def test_positive_slopes_preserve_each_label_ranking_even_at_the_bounds() -> Non
     for before, after in zip(raw.per_label, calibrated.per_label, strict=True):
         assert after.roc_auc == before.roc_auc
         assert after.average_precision == before.average_precision
+
+
+def test_rare_labels_at_a_slope_bound_refit_the_intercept_at_that_bound() -> None:
+    rng = np.random.default_rng(2029)
+    true_logits = rng.normal(-2.2, 1.5, size=(2000, 5))
+    targets = (rng.random(true_logits.shape) < stable_sigmoid(true_logits)).astype(np.int64)
+    logits = true_logits.copy()
+    logits[:, CD] = -true_logits[:, CD]
+    logits[:, HYP] = true_logits[:, HYP] / 50.0
+    regularization = 1e-6
+
+    result = fit_classwise_sigmoid_scaling(
+        logits=logits,
+        y_true=targets,
+        calibration_fold_ids=_fold_9(targets),
+        regularization=regularization,
+    )
+
+    assert np.all(targets.mean(axis=0) < 0.2)
+    grid_slopes = np.geomspace(0.05, 20.0, 21)[:, None]
+    grid_intercepts = np.linspace(-4.0, 4.0, 41)[None, :]
+    for index, bound in ((CD, "lower"), (HYP, "upper")):
+        item = result.per_label[index]
+        column = logits[:, index]
+        label_targets = targets[:, index].astype(np.float64)
+        assert item.active_slope_bound == bound
+        assert item.converged is True
+        assert item.intercept == pytest.approx(
+            _best_intercept_at_slope(column, label_targets, item.slope, regularization),
+            abs=1e-6,
+        )
+        zero_intercept = _regularized_objective(
+            column, label_targets, item.slope, 0.0, regularization
+        )
+        fitted = _regularized_objective(
+            column, label_targets, item.slope, item.intercept, regularization
+        )
+        assert item.nll_after is not None
+        assert item.nll_after < zero_intercept - 0.05
+        # Convexity puts the constrained minimizer on the violated bound, so no
+        # feasible (slope, intercept) pair may beat the fitted map.
+        scaled = grid_slopes[:, :, None] * column + grid_intercepts[:, :, None]
+        grid = np.mean(np.logaddexp(0.0, scaled) - label_targets * scaled, axis=2)
+        grid += regularization * (np.square(grid_slopes - 1.0) + np.square(grid_intercepts))
+        assert fitted <= float(grid.min())
+
+
+def test_constant_logit_columns_are_fitted_exactly_at_the_regularization_floor() -> None:
+    logits = np.full((6, len(LABEL_ORDER)), -8.0)
+    targets = np.zeros(logits.shape, dtype=np.int64)
+    targets[:3] = 1
+
+    result = fit_classwise_sigmoid_scaling(
+        logits=logits,
+        y_true=targets,
+        calibration_fold_ids=_fold_9(targets),
+        regularization=1e-12,
+    )
+
+    assert result.status == "optimized"
+    assert result.converged is True
+    for item in result.per_label:
+        assert item.nll_before == pytest.approx(math.log1p(math.exp(-8.0)) + 4.0, rel=1e-12)
+        assert item.nll_after == pytest.approx(math.log(2.0), abs=1e-12)
+        assert (item.slope, item.active_slope_bound) == (0.05, "lower")
+        assert item.intercept == pytest.approx(0.4, abs=1e-5)
+
+    # Below the floor, rounding cancels this Newton step to exactly zero. The
+    # solver must report that as a failure, not as convergence at the identity.
+    column = logits[:, NORM]
+    label_targets = targets[:, NORM].astype(np.float64)
+    assert _damped_newton_sigmoid_scaling(
+        column,
+        label_targets,
+        start=(1.0, 0.0),
+        free=(0, 1),
+        regularization=1e-20,
+        tolerance=1e-12,
+        max_steps=128,
+    ) == (1.0, 0.0, 0, False)
 
 
 def test_strong_regularization_shrinks_every_label_toward_the_identity_map() -> None:
@@ -297,6 +414,9 @@ def test_exhausted_step_budget_is_reported_without_increasing_nll() -> None:
             "label_order",
         ),
         ({"regularization": 0.0}, EvaluationValidationError, "regularization"),
+        ({"regularization": 1e-13}, EvaluationValidationError, "at least 1e-12"),
+        ({"regularization": 1e-20}, EvaluationValidationError, "at least 1e-12"),
+        ({"regularization": 5e-324}, EvaluationValidationError, "at least 1e-12"),
         ({"regularization": -1.0}, EvaluationValidationError, "regularization"),
         ({"regularization": math.inf}, EvaluationValidationError, "regularization"),
         ({"regularization": math.nan}, EvaluationValidationError, "regularization"),
@@ -404,6 +524,7 @@ def _set_per_label(index: int, key: str, value: object) -> Callable[[dict[str, A
         (_set_top_level("fit_intercept", False), EvaluationValidationError, "slope-only"),
         (_set_top_level("slope_bounds", [0.9, 1.1]), EvaluationValidationError, "slope_bounds"),
         (_set_top_level("regularization", 0.0), EvaluationValidationError, "regularization"),
+        (_set_top_level("regularization", 1e-20), EvaluationValidationError, "at least 1e-12"),
         (_set_top_level("status", "identity_optimal"), EvaluationValidationError, "summarize"),
         (_set_top_level("converged", False), EvaluationValidationError, "summarize"),
         (_set_top_level("nll_after", 0.0), EvaluationValidationError, "summarize"),

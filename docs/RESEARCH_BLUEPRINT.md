@@ -297,7 +297,7 @@ Calibrators fitted on fold 9:
 2. regularized classwise sigmoid scaling, `sigmoid(z_k / T_k + b_k)`;
 3. isotonic regression only as an exploratory comparator because HYP and rare probability regions may be data-limited.
 
-Engineering note (added after this snapshot; it does not amend any frozen protocol): option 2 is available as `ecg_trust.evaluation.fit_classwise_sigmoid_scaling`, parameterized as `sigmoid(a_k * z_k + b_k)` with `a_k = 1 / T_k` held in a strictly positive interval, a ridge penalty toward the identity map, and an optional slope-only mode. It fits on fold 9 only and is opt-in: no frozen pipeline, configuration, or artifact uses it. Enabling it for any release requires a new preregistered protocol that fixes its settings before held-out or external data are opened.
+Engineering note (added after this snapshot; it does not amend any frozen protocol): option 2 is available as `ecg_trust.evaluation.fit_classwise_sigmoid_scaling`, parameterized as `sigmoid(a_k * z_k + b_k)` with `a_k = 1 / T_k` held in a strictly positive interval, a ridge penalty toward the identity map, and an optional slope-only mode. It fits on fold 9 only and is opt-in: no frozen pipeline, configuration, or artifact uses it. H2 therefore remains untested. PTB-XL fold 10 (opened August 9, 2026 UTC) and the SPH r2 external-transport cohort (completed August 16, 2026 UTC) have already been opened, so any evaluation of this calibrator on either is post hoc and exploratory, not a confirmatory test of H2. A confirmatory test, or enabling it for any release, requires a new preregistered protocol that fixes its settings in advance and a cohort that has not yet been opened.
 
 ### 9.3 Selective prediction and abstention
 

@@ -27,6 +27,10 @@ BoolArray = NDArray[np.bool_]
 _SIGMOID_SCALING_FITTED_STATUSES = frozenset({"optimized", "identity_optimal"})
 _ARMIJO_FRACTION = 0.25
 _MAX_BACKTRACKING_HALVINGS = 64
+# Smallest classwise ridge penalty. On the mean-NLL scale a weaker penalty is
+# below the 1e-12 improvement margin, and Newton steps on near-constant logit
+# columns lose their precision to rounding.
+_MIN_SIGMOID_SCALING_REGULARIZATION = 1e-12
 
 
 class EvaluationValidationError(ValueError):
@@ -392,7 +396,7 @@ class ClasswiseSigmoidScalingResult:
         n_samples = _nonnegative_integer(self.n_samples, name="n_samples")
         if n_samples == 0:
             raise EvaluationValidationError("n_samples must be positive")
-        regularization = _positive_real_number(self.regularization, name="regularization")
+        regularization = _validate_sigmoid_scaling_regularization(self.regularization)
         if not isinstance(self.fit_intercept, bool):
             raise EvaluationValidationError("fit_intercept must be a boolean")
         lower_slope, upper_slope = _validate_slope_bounds(self.slope_bounds)
@@ -911,8 +915,9 @@ def fit_classwise_sigmoid_scaling(
     shrinks toward the identity map and makes the objective strictly convex,
     so the constrained minimizer is unique. It is on the per-sample mean-NLL
     scale, so its shrinkage does not vanish as the calibration fold grows.
-    With ``fit_intercept=False``, ``b_k`` is fixed at zero and ``a_k`` is a
-    per-label inverse temperature.
+    ``regularization`` must be at least ``1e-12``: a weaker penalty is below
+    the solver's numerical resolution. With ``fit_intercept=False``, ``b_k`` is
+    fixed at zero and ``a_k`` is a per-label inverse temperature.
 
     ``a_k`` is constrained to ``slope_bounds``, whose lower end is strictly
     positive, so each map is strictly increasing and the label's ROC-AUC is
@@ -925,11 +930,15 @@ def fit_classwise_sigmoid_scaling(
     violates a slope bound, the slope is fixed at that bound, which is exact
     for this convex problem, and the intercept is re-optimized. A label stops
     when half its squared Newton decrement is at most ``tolerance`` or after
-    ``max_steps`` accepted Newton steps. A fit is kept only if it lowers the
-    regularized objective by more than ``1e-12``, so an ``optimized`` label
-    never has a higher calibration-fold NLL than before; otherwise the label
-    keeps the identity with status ``identity_optimal``. Labels with one
-    observed class keep the identity and are reported as excluded.
+    ``max_steps`` accepted Newton steps. It also stops, with ``converged``
+    false, when no backtracking step satisfies the Armijo condition or when
+    rounding makes the computed decrement smaller than half the lower bound
+    that a positive-definite Hessian guarantees. A fit is kept only if it
+    lowers the regularized objective by more than ``1e-12``, so an
+    ``optimized`` label never has a higher calibration-fold NLL than before;
+    otherwise the label keeps the identity with status ``identity_optimal``.
+    Labels with one observed class keep the identity and are reported as
+    excluded.
 
     This is a library capability only. No frozen pipeline calls it, its
     defaults are engineering defaults rather than preregistered values, and a
@@ -945,7 +954,7 @@ def fit_classwise_sigmoid_scaling(
     source_folds = _validate_calibration_fold_ids(
         calibration_fold_ids, n_samples=targets.shape[0]
     )
-    penalty = _positive_real_number(regularization, name="regularization")
+    penalty = _validate_sigmoid_scaling_regularization(regularization)
     if not isinstance(fit_intercept, bool):
         raise EvaluationValidationError("fit_intercept must be a boolean")
     lower_slope, upper_slope = _validate_slope_bounds(slope_bounds)
@@ -1486,7 +1495,10 @@ def _damped_newton_sigmoid_scaling(
 
     Returns slope, intercept, accepted steps, and whether half the squared
     Newton decrement reached ``tolerance``. Accepted steps satisfy the Armijo
-    condition, so the objective never increases from ``start``.
+    condition, so the objective never increases from ``start``. A computed
+    decrement below half of ``|g|^2 / trace(H)`` over the free coordinates,
+    the least value a positive-definite Hessian allows, means rounding has
+    corrupted the direction, so the solve stops without claiming convergence.
     """
 
     slope, intercept = start
@@ -1500,6 +1512,8 @@ def _damped_newton_sigmoid_scaling(
         decrement = -(gradient[0] * direction[0] + gradient[1] * direction[1])
         if not math.isfinite(decrement):
             raise EvaluationValidationError("sigmoid-scaling Newton step must be finite")
+        if decrement < 0.5 * _newton_decrement_lower_bound(gradient, hessian, free):
+            return slope, intercept, steps, False
         if decrement / 2.0 <= tolerance:
             return slope, intercept, steps, True
         if steps >= max_steps:
@@ -1593,6 +1607,18 @@ def _newton_direction(
     return 0.0, -intercept_gradient / h_bb
 
 
+def _newton_decrement_lower_bound(
+    gradient: tuple[float, float],
+    hessian: tuple[float, float, float, float],
+    free: tuple[int, ...],
+) -> float:
+    """Return ``|g|^2 / trace(H)`` over ``free``, a lower bound on ``g' H^-1 g``."""
+
+    diagonal = (hessian[0], hessian[2])
+    squared_norm = math.fsum(gradient[index] * gradient[index] for index in free)
+    return squared_norm / math.fsum(diagonal[index] for index in free)
+
+
 def _finite_real_number(value: object, *, name: str) -> float:
     if isinstance(value, (bool, np.bool_)) or not isinstance(
         value, (int, float, np.integer, np.floating)
@@ -1627,6 +1653,16 @@ def _field_tuple(value: object, *, name: str) -> tuple[object, ...]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise EvaluationValidationError(f"{name} must be a sequence")
     return tuple(value)
+
+
+def _validate_sigmoid_scaling_regularization(value: object) -> float:
+    penalty = _positive_real_number(value, name="regularization")
+    if penalty < _MIN_SIGMOID_SCALING_REGULARIZATION:
+        raise EvaluationValidationError(
+            f"regularization must be at least {_MIN_SIGMOID_SCALING_REGULARIZATION:g}; "
+            "a weaker penalty is below the solver's numerical resolution"
+        )
+    return penalty
 
 
 def _validate_slope_bounds(bounds: object) -> tuple[float, float]:
