@@ -240,7 +240,9 @@ def test_runner_wires_only_development_folds_and_writes_auditable_artifacts(
 
 def test_runner_rejects_normalization_contaminated_by_fold_9(tmp_path: Path) -> None:
     _manifest_frame().to_csv(tmp_path / "manifest.csv", index=False)
-    _normalization(folds=(*TRAIN_FOLDS, 9)).save(tmp_path / "normalization.json")
+    contaminated = _normalization().to_dict()
+    contaminated["provenance"]["training_folds"] = [*TRAIN_FOLDS, 9]
+    (tmp_path / "normalization.json").write_text(json.dumps(contaminated), encoding="utf-8")
     config = DevelopmentExperimentConfig.from_mapping(
         _config_payload(tmp_path), base_dir=tmp_path
     )
