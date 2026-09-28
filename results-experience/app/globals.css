@@ -871,6 +871,7 @@ html[data-motion="paused"] {
   .experience-shell h2 { max-width: none !important; font-size: 22pt !important; line-height: 1.15; }
   .experience-shell h3 { max-width: none !important; font-size: 14pt !important; line-height: 1.25; }
   .experience-shell h2, .experience-shell h3 { break-after: avoid; }
+  .experience-shell header { break-inside: avoid; }
   .experience-shell p, .experience-shell li { orphans: 3; widows: 3; }
 
   .hero-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }

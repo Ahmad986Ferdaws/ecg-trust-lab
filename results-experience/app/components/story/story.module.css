@@ -1583,6 +1583,13 @@
   .boundaryList li > span { margin-bottom: 8pt; }
   .gateNumbers .metricValue { margin-block: 6pt; font-size: 18pt; }
   .gateNumbers > div { display: block; }
+  .gateNumbers {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12pt;
+    break-inside: avoid;
+  }
+  .researchStatus { break-after: avoid; margin-bottom: 12pt; }
   .inferenceNote { margin-block: 12pt; padding: 8pt 0; }
   .supportPlot { display: none; }
   .cohortTable { width: 100%; }
