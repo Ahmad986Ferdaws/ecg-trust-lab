@@ -19,6 +19,11 @@ not describe it as a reproduced failure.
 
 ## Validate the change
 
+The quality workflows run on pull requests and pushes to `main`. Feature-branch
+pushes use their pull request run, avoiding duplicate jobs for the same change.
+Each workflow also supports manual dispatch for branch checks before opening a
+pull request. The results-experience workflow retains its relevant path filters.
+
 The [CPU quality workflow](.github/workflows/cpu-quality.yml) is the authoritative
 engineering setup. In a disposable checkout, with Python 3.12 and uv 0.12.15:
 
