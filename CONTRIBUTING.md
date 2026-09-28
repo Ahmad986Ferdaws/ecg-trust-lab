@@ -42,6 +42,20 @@ mean the CPU tests ran on Windows. Report skipped tests and environment limits.
 The CPU setup bypasses the scientific CUDA package source without rewriting
 the tracked dependency files. Do not use a later syncing command to replace it.
 
+CPU CI also builds the wheel and exercises an isolated installation. To reproduce
+that check without replacing the editable development installation:
+
+```bash
+wheel_check_dir="$(mktemp -d)"
+uv build --wheel --out-dir "$wheel_check_dir/wheel"
+uv pip install --no-deps --target "$wheel_check_dir/install" "$wheel_check_dir"/wheel/*.whl
+uv run --no-sync python -I scripts/smoke_installed_wheel.py "$wheel_check_dir/install"
+```
+
+The check confirms imports come from that installation, verifies the console
+entry point and type marker, and renders the packaged demo template and local
+Plotly asset. It needs no private artifacts and performs no model inference.
+
 For public result presentation, Node.js 22.13+ can run the dependency-free check:
 
 ```bash
