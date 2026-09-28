@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Iterable
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -168,6 +169,7 @@ def test_device_selection_handles_cpu_cuda_and_bf16(
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "device", lambda _: nullcontext())
     monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
     runtime = select_device("cuda:0")
     assert runtime.device == torch.device("cuda:0")
