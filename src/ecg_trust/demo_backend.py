@@ -604,7 +604,9 @@ def load_wfdb_physical_signal(record_path: str | Path) -> Tensor:
     try:
         record = wfdb.rdrecord(str(path))
     except Exception as error:
-        raise DemoInputError(f"could not read WFDB record {path!s}: {error}") from error
+        raise DemoInputError(
+            "could not read WFDB record; verify the matched header and signal files"
+        ) from error
     try:
         frequency = float(cast(float | int | str, getattr(record, "fs", None)))
     except (TypeError, ValueError) as error:
