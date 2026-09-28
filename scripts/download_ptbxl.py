@@ -9,6 +9,12 @@ At most twice the worker count is in flight. Interrupting stops new work,
 cancels queued transfers, and wakes retry waits. Active transfers check for
 cancellation between reads; a blocked socket still uses the configured timeout.
 Partial files are retained for the next resumable run.
+
+Retries apply to connection failures and HTTP 408, 416, 429, 500, 502, 503,
+and 504. Other HTTP errors fail immediately. Retry-After seconds and HTTP-date
+values are honored up to five minutes; a longer server delay stops the transfer
+instead of retrying prematurely. Missing or malformed values use exponential
+backoff up to 16 seconds. See RFC 9110 section 10.2.3.
 """
 
 from __future__ import annotations
@@ -25,6 +31,8 @@ from collections import Counter
 from collections.abc import Mapping
 from concurrent.futures import FIRST_COMPLETED, CancelledError, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from datetime import UTC
+from email.utils import parsedate_to_datetime
 from http.client import IncompleteRead
 from pathlib import Path
 from threading import Event
@@ -58,6 +66,8 @@ ROOT_FILES: tuple[str, ...] = (
     "scp_statements.csv",
 )
 USER_AGENT = "ecg-trust-ptbxl-downloader/0.1 (+https://physionet.org/)"
+RETRYABLE_HTTP_STATUSES = frozenset({408, 416, 429, 500, 502, 503, 504})
+MAX_RETRY_AFTER_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -173,6 +183,7 @@ def _download_once(
     try:
         response_context = urlopen(request, timeout=timeout)  # noqa: S310 - fixed HTTPS origin
     except HTTPError as exc:
+        exc.close()
         if exc.code == 416 and start:
             if expected_sha256 is not None and sha256_file(partial) == expected_sha256:
                 os.replace(partial, destination)
@@ -221,6 +232,31 @@ def _check_cancelled(cancellation: Event | None) -> None:
     if cancellation is not None and cancellation.is_set():
         raise CancelledError("download cancelled")
 
+def _http_retry_delay(error: HTTPError, fallback: float) -> float | None:
+    """Honor RFC 9110 Retry-After, or stop rather than retry ahead of a long delay."""
+
+    if error.code not in RETRYABLE_HTTP_STATUSES:
+        return None
+    value = error.headers.get("Retry-After") if error.headers is not None else None
+    if value is None:
+        return fallback
+    value = value.strip()
+    if re.fullmatch(r"[0-9]+", value):
+        digits = value.lstrip("0") or "0"
+        if len(digits) > len(str(MAX_RETRY_AFTER_SECONDS)):
+            return None
+        delay = float(int(digits))
+    else:
+        try:
+            date = parsedate_to_datetime(value)
+            if date.tzinfo is None:
+                # The obsolete asctime HTTP-date form has no explicit zone.
+                date = date.replace(tzinfo=UTC)
+            delay = max(0.0, date.timestamp() - time.time())
+        except (ValueError, TypeError, OverflowError):
+            return fallback
+    return delay if delay <= MAX_RETRY_AFTER_SECONDS else None
+
 
 def download_file(
     relative_path: str,
@@ -252,6 +288,16 @@ def download_file(
                 force=force,
                 cancellation=cancellation,
             )
+        except HTTPError as exc:
+            exc.close()
+            last_error = exc
+            delay = _http_retry_delay(exc, 2 ** min(attempt - 1, 4))
+            if attempt == retries or delay is None:
+                break
+            if cancellation is None:
+                time.sleep(delay)
+            elif cancellation.wait(delay):
+                raise CancelledError("download cancelled") from exc
         except (OSError, ManifestError, IncompleteRead) as exc:
             last_error = exc
             if attempt == retries:
