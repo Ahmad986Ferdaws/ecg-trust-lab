@@ -285,6 +285,21 @@ def _backend_or_503(app: FastAPI) -> InferenceBackend:
     return backend
 
 
+def _with_security_headers(response: Response, nonce: str, *, cacheable: bool = False) -> Response:
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = (
+        f"default-src 'self'; script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+    )
+    if not cacheable:
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 def create_app(
     *,
     backend: InferenceBackend | None = None,
@@ -314,18 +329,20 @@ def create_app(
         csp_nonce = secrets.token_urlsafe(32)
         request.state.csp_nonce = csp_nonce
         response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Content-Security-Policy"] = (
-            f"default-src 'self'; script-src 'self' 'nonce-{csp_nonce}'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+        return _with_security_headers(
+            response,
+            csp_nonce,
+            cacheable=request.url.path == "/assets/plotly.min.js" and response.status_code == 200,
         )
-        if request.url.path != "/assets/plotly.min.js":
-            response.headers["Cache-Control"] = "no-store"
-            response.headers["Pragma"] = "no-cache"
-        return response
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(request: Request, error: Exception) -> Response:
+        # Starlette's outer error middleware bypasses the ordinary response
+        # middleware when an unhandled exception escapes a route.
+        return _with_security_headers(
+            JSONResponse(status_code=500, content={"detail": "internal server error"}),
+            getattr(request.state, "csp_nonce", secrets.token_urlsafe(32)),
+        )
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> Response:
