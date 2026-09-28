@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,6 +24,7 @@ from ecg_trust.monitoring.trust_monitoring import (
     TrustMonitoringConfig,
     compare_telemetry_windows,
 )
+from scripts import replay_trust_monitoring
 from scripts.replay_trust_monitoring import main
 
 
@@ -134,6 +139,7 @@ def test_cli_freeze_replay_and_configuration_drift(tmp_path: Path) -> None:
     sealed = tmp_path / "sealed.json"
     assert main(["freeze", "--reference", str(reference), "--output", str(sealed)]) == 0
     frozen = FrozenMonitoringReference.from_json(sealed.read_text())
+    assert sealed.read_bytes() == frozen.to_json().encode("utf-8")
     windows = tmp_path / "windows.json"
     windows.write_text(json.dumps([_window(1, 20).to_dict(), _window(2).to_dict()]))
     result = tmp_path / "replay.json"
@@ -169,3 +175,57 @@ def test_cli_freeze_replay_and_configuration_drift(tmp_path: Path) -> None:
         main([*arguments, "--config", str(changed)])
     assert caught.value.code == 2
     assert not new_output.exists()
+
+
+@pytest.mark.parametrize("failure", ["write", "close", "publish"])
+def test_atomic_publication_cleans_failed_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    original_temporary = tempfile.NamedTemporaryFile
+
+    @contextmanager
+    def staged(
+        *, mode: str, encoding: str, dir: Path, prefix: str, suffix: str, delete: bool
+    ) -> Iterator[object]:
+        with original_temporary(
+            mode=mode, encoding=encoding, dir=dir, prefix=prefix, suffix=suffix, delete=delete
+        ) as stream:
+            write = stream.write
+
+            def interrupted_write(content: str) -> int:
+                write(content[:5])
+                raise OSError("injected write failure")
+
+            if failure == "write":
+                monkeypatch.setattr(stream, "write", interrupted_write)
+            yield stream
+            if failure == "close":
+                raise OSError("injected close failure")
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", staged)
+    if failure == "publish":
+
+        def interrupted_publish(source: Path, destination: Path) -> None:
+            assert source.read_text() == "complete canonical payload"
+            assert not destination.exists()
+            raise OSError("injected publish failure")
+
+        monkeypatch.setattr(os, "link", interrupted_publish)
+    destination = tmp_path / "audit.json"
+    with pytest.raises(OSError, match="injected"):
+        replay_trust_monitoring._publish_new(destination, "complete canonical payload")
+    assert not destination.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_atomic_publication_preserves_existing_file_and_symlink(tmp_path: Path) -> None:
+    existing = tmp_path / "existing.json"
+    existing.write_bytes(b"retained artifact")
+    linked = tmp_path / "linked.json"
+    linked.symlink_to(existing)
+    for destination in (existing, linked):
+        with pytest.raises(FileExistsError):
+            replay_trust_monitoring._publish_new(destination, "replacement")
+        assert existing.read_bytes() == b"retained artifact"
+        assert linked.is_symlink()
+        assert not list(tmp_path.glob(".*.tmp"))

@@ -162,6 +162,9 @@ See the [verified environment record](docs/ENVIRONMENT.md) for exact versions
 and CUDA details, and [reproducibility guide](docs/REPRODUCIBILITY.md) for the
 complete artifact flow.
 
+Use the [frozen monitoring replay guide](docs/TRUST_MONITORING_REPLAY.md) to seal
+aggregate references and detect configuration drift during an audited replay.
+
 ## Dataset attribution
 
 PTB-XL 1.0.3 is provided by Wagner et al. through PhysioNet under CC BY 4.0.

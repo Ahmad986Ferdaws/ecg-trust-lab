@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from ecg_trust.monitoring.provenance import (
@@ -16,6 +18,29 @@ from ecg_trust.monitoring.trust_monitoring import (
     TrustMonitoringConfig,
     _require_mapping,
 )
+
+
+def _publish_new(destination: Path, content: str) -> None:
+    """Publish complete bytes atomically, refusing existing files and symlinks."""
+
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,8 +85,7 @@ def main(argv: list[str] | None = None) -> int:
                 AggregateTelemetryWindow.from_dict(_require_mapping(row, "window")) for row in rows
             )
             result = frozen.replay_to_json(windows, config=config)
-        with args.output.open("x", encoding="utf-8") as stream:
-            stream.write(result)
+        _publish_new(args.output, result)
     except (OSError, ValueError, RecursionError) as error:
         parser.error(str(error))
     return 0
