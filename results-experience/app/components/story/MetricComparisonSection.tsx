@@ -280,7 +280,7 @@ export function MetricComparisonSection({
               aria-labelledby={`metric-tab-${dataset.id}`}
               className={styles.metricPanel}
               tabIndex={hasHydrated ? (active ? 0 : -1) : 0}
-              hidden={hasHydrated && !active}
+              data-inactive={hasHydrated && !active}
             >
               <div className={styles.panelIntro}>
                 <h3>{dataset.title}</h3>

@@ -150,7 +150,9 @@
   border-top: 1px solid var(--ink);
 }
 
-.metricPanel[hidden] {
+/* CSS visibility removes inactive panels from screen navigation while allowing
+   print to include them without fighting the global [hidden] reset. */
+.metricPanel[data-inactive="true"] {
   display: none;
 }
 
@@ -1517,7 +1519,7 @@
   }
 
   .datasetTabs { display: none; }
-  .metricPanel[hidden] { display: block !important; }
+  .metricPanel[data-inactive="true"] { display: block; }
   .metricPanel { margin-block: 14pt; }
   .metricPanel + .metricPanel { break-before: page; }
   .ledgerTable { display: table; width: 100%; table-layout: auto; }
@@ -1548,7 +1550,24 @@
   .boundaryList { display: block; }
   .transportSequence li, .supportRoles li, .boundaryList li,
   .gateNumbers > div { min-height: 0; padding: 10pt 0; break-inside: avoid; }
-  .coverageHeadline, .gateDecision { padding-block: 8pt; }
+  .coverageHeadline, .gateDecision { min-height: 0; padding: 8pt 0; }
+  .coverageHeadline > strong { margin: 12pt 0; font-size: 28pt; }
+  .gateDecision > strong { margin: 12pt 0; max-width: none; font-size: 22pt; }
+  .supportStatus { margin-bottom: 12pt; gap: 6pt; font-size: 8pt; }
+  .supportStatus span:last-child { display: block; }
+  .supportRoles { margin-top: 14pt; }
+  .supportRoles h3 { margin-block: 6pt; }
+  .supportRoles dl { margin-block: 8pt; }
+  .supportBoundary { margin-top: 14pt; }
+  .supportRoles > li, .supportRoles > li:first-child, .supportRoles > li:last-child,
+  .boundaryList li, .boundaryList li:first-child, .boundaryList li:last-child {
+    min-height: 0;
+    padding: 8pt 0;
+  }
+  .boundaryList li > span { margin-bottom: 8pt; }
+  .gateNumbers .metricValue { margin-block: 6pt; font-size: 18pt; }
+  .gateNumbers > div { display: block; }
+  .inferenceNote { margin-block: 12pt; padding: 8pt 0; }
   .supportPlot { display: none; }
   .cohortTable { width: 100%; }
   .cohortTable tr { break-inside: avoid; }

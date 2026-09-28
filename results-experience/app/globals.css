@@ -821,8 +821,8 @@ html[data-motion="paused"] {
 
   .hero-copy { padding: 0; }
   .hero h1 { max-width: none; font-size: 30pt; line-height: 1.1; }
-  .experience-shell h2 { max-width: none; font-size: 22pt !important; line-height: 1.15; }
-  .experience-shell h3 { max-width: none; font-size: 14pt !important; line-height: 1.25; }
+  .experience-shell h2 { max-width: none !important; font-size: 22pt !important; line-height: 1.15; }
+  .experience-shell h3 { max-width: none !important; font-size: 14pt !important; line-height: 1.25; }
   .experience-shell h2, .experience-shell h3 { break-after: avoid; }
   .experience-shell p, .experience-shell li { orphans: 3; widows: 3; }
 
@@ -834,6 +834,7 @@ html[data-motion="paused"] {
   .study-rail li { padding-block: 8pt; break-inside: avoid; }
   .method-ledger { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 14pt; }
   .method-ledger div { min-height: 0; padding: 8pt; }
+  .method-ledger { break-inside: avoid; }
   .method-ledger dd { margin-top: 6pt; }
   .verdict-deltas { margin-top: 14pt; }
   .verdict-note { margin-top: 14pt; }
