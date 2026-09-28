@@ -107,6 +107,8 @@ test("server-renders the complete Signal Ledger evidence experience", async () =
   assert.match(html, /PREDICTION_ALLOWED/);
   assert.match(html, /Not model output/);
   assert.equal((html.match(/data-lead="/g) ?? []).length, 12);
+  assert.equal((html.match(/data-schematic-lead="/g) ?? []).length, 12,
+    "the schematic remains visible before JavaScript or WebGL is available");
   assert.equal((html.match(/name="failure-scenario"/g) ?? []).length, 9);
   assert.match(html, /type="range"/);
   assert.doesNotMatch(
@@ -180,7 +182,6 @@ test("ships audited data and a matte, evidence-bearing visual system", async () 
   assert.match(sceneSource, /LineGeometry/);
   assert.match(sceneSource, /LineMaterial/);
   assert.match(sceneSource, /frameloop=\{shouldAnimate \? "always" : "demand"\}/);
-  assert.equal((sceneSource.match(/\{ name: "/g) ?? []).length, 12);
   assert.doesNotMatch(
     sceneSource,
     /CatmullRomCurve3|TubeGeometry|AdditiveBlending|UnrealBloomPass|AfterimagePass/i,
