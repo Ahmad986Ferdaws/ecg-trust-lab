@@ -8,6 +8,7 @@ import gc
 import json
 import os
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -91,14 +92,25 @@ def _resolve_precision(requested: str, device: torch.device, *, cpu_smoke: bool)
 
 
 def _write_json(payload: dict[str, object], output_path: Path) -> None:
+    serialized = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_suffix(output_path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    os.replace(temporary, output_path)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=output_path.parent,
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(serialized)
+        os.replace(temporary, output_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def run(args: argparse.Namespace) -> dict[str, object]:
