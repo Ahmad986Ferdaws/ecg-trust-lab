@@ -2,6 +2,7 @@ import { MotionControl } from "./components/ExperienceMotion";
 import { ResultsUniverse } from "./components/ResultsUniverse";
 import { FailureLabSection } from "./components/story/FailureLabSection";
 import { MetricComparisonSection } from "./components/story/MetricComparisonSection";
+import { EvidenceSourcesSection } from "./components/story/EvidenceSourcesSection";
 import { ResearchSafetySection } from "./components/story/ResearchSafetySection";
 import { SourceSupportSection } from "./components/story/SourceSupportSection";
 import { TransportCohortSection } from "./components/story/TransportCohortSection";
@@ -130,6 +131,7 @@ export default function Home() {
             External transport is evidence of robustness—not clinical
             validation. This is a research system, not a medical device.
           </p>
+          <a className="evidence-link" href="#evidence-sources">Read the sources and limitations ↓</a>
         </div>
 
         <figure className="hero-figure">
@@ -228,6 +230,8 @@ export default function Home() {
       </section>
 
       <FailureLabSection />
+
+      <EvidenceSourcesSection />
 
       <ResearchSafetySection />
 
