@@ -67,6 +67,13 @@ test("server-renders the complete Signal Ledger evidence experience", async () =
   ]) {
     assert.ok(html.includes(`https://github.com/Ahmad986Ferdaws/ecg-trust-lab/blob/43cf519ad1e0a664a5689a913e9123fc147294c9/${path}`));
   }
+  assert.match(html, /id="metric-panel-sph-broad"/);
+  assert.match(html, /id="metric-panel-sph-no-ambiguous"/);
+  assert.match(html, /Missing mappings are unknown, not verified negative diagnoses/);
+  assert.match(html, /underlying ontology bridge remains unadjudicated/);
+  assert.match(html, /0\.904714/);
+  assert.match(html, /0\.928405/);
+  assert.match(html, /15,066/);
   assert.match(html, /id="source-support"/);
   assert.match(html, /The experiment completed\. The gate did not pass\./);
   assert.match(html, /94\.62%/);

@@ -94,6 +94,11 @@ export function TransportCohortSection({
                 <td>{countFormatter.format(cohort.broad.ecgs)}</td>
                 <td>{countFormatter.format(cohort.broad.patients)}</td>
               </tr>
+              <tr>
+                <th scope="row">{cohort.noAmbiguous.label}</th>
+                <td>{countFormatter.format(cohort.noAmbiguous.ecgs)}</td>
+                <td>{countFormatter.format(cohort.noAmbiguous.patients)}</td>
+              </tr>
             </tbody>
           </table>
         </div>
