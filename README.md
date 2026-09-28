@@ -39,6 +39,9 @@ one-shot source-support evaluation without rewriting that source artifact. The
 experiment completed successfully but missed its preregistered support gate;
 it is not an OOD-validation or clinical-validation result.
 
+The [verified counterfactual evaluation guide](docs/COUNTERFACTUAL_VERIFIED_RELEASE.md)
+shows how to bind both proposal analyses to the same frozen Sentinel release.
+
 ## Demo walkthrough
 
 [![ECG Trust Lab demo poster](publication/media/ecg-trust-lab-demo-poster.png)](publication/media/ecg-trust-lab-research-demo.mp4)
