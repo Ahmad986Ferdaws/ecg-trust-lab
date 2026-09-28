@@ -2,6 +2,7 @@ name: Results experience quality
 
 on:
   push:
+    branches: [main]
     paths:
       - 'results-experience/**'
       - 'publication/**'
@@ -13,6 +14,8 @@ on:
       - 'publication/**'
       - 'docs/**'
       - '.github/workflows/results-experience-quality.yml'
+
+  workflow_dispatch:
 
 permissions:
   contents: read
