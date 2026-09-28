@@ -886,5 +886,17 @@ html[data-motion="paused"] {
   .method-ledger dd { margin-top: 6pt; }
   .verdict-deltas { margin-top: 14pt; }
   .verdict-note { margin-top: 14pt; }
-  .site-footer { min-height: 0; padding: 14pt 0; }
+  .site-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12pt;
+    min-height: 0;
+    padding: 8pt 0;
+    background: transparent;
+    break-inside: avoid;
+  }
+  .site-footer > div { flex: 0 0 auto; gap: 3pt; }
+  .site-footer strong { font-size: 10pt; }
+  .site-footer span, .site-footer p { font-size: 8pt; line-height: 1.3; }
 }
