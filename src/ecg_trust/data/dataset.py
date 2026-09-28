@@ -26,7 +26,7 @@ import wfdb  # type: ignore[import-untyped]
 from torch.utils.data import Dataset
 
 from ecg_trust.constants import LEADS, PTBXL_VERSION, SUPERCLASSES, TARGET_COLUMNS
-from ecg_trust.data.manifest import ManifestError, validate_relative_path
+from ecg_trust.data.manifest import ManifestError, resolve_relative_path, validate_relative_path
 from ecg_trust.protocol import (
     ExperimentProtocol,
     FinalTestAccessToken,
@@ -528,13 +528,21 @@ class PTBXLDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         return position
 
     def record_path(self, index: int) -> Path:
-        """Return the suffix-free WFDB path for a selected row."""
+        """Return the WFDB stem after checking its canonical files stay under the root."""
 
         position = self._position(index)
         path = Path(self._record_references[position])
         if path.suffix.casefold() in {".hea", ".dat"}:
             path = path.with_suffix("")
-        return path if path.is_absolute() else self.root_dir / path
+        try:
+            resolved = resolve_relative_path(self.root_dir, path.as_posix())
+            # WFDB opens the header and signal files, not the suffix-free stem.
+            # Check these separately so a file symlink cannot escape the root.
+            for suffix in (".hea", ".dat"):
+                resolve_relative_path(self.root_dir, f"{path.as_posix()}{suffix}")
+        except ManifestError as error:
+            raise RecordValidationError(f"invalid WFDB record path: {error}") from error
+        return resolved
 
     def load_signal(self, index: int) -> torch.Tensor:
         """Load one signal as finite float32 ``[12, expected_samples]``."""
