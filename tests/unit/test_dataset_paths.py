@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -37,7 +38,7 @@ def test_rejects_directory_symlink_escape_before_wfdb_read(
 @pytest.mark.parametrize("suffix", [".hea", ".dat"])
 @pytest.mark.parametrize("reference_suffix", ["", ".hea", ".dat"])
 def test_rejects_canonical_record_file_symlink_escape(
-    tmp_path: Path, suffix: str, reference_suffix: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str, reference_suffix: str
 ) -> None:
     root = tmp_path / "dataset"
     root.mkdir()
@@ -45,9 +46,14 @@ def test_rejects_canonical_record_file_symlink_escape(
     outside.write_text("external waveform file", encoding="utf-8")
     (root / f"record{suffix}").symlink_to(outside)
     dataset = _dataset(root, f"record{reference_suffix}")
+    monkeypatch.setattr(
+        dataset_module.wfdb,
+        "rdheader",
+        lambda *args, **kwargs: SimpleNamespace(n_sig=12, file_name=["record.dat"] * 12),
+    )
 
     with pytest.raises(RecordValidationError, match="path escapes dataset root"):
-        dataset.record_path(0)
+        dataset.load_signal(0)
 
 
 def test_allows_symlinks_with_targets_inside_dataset_root(tmp_path: Path) -> None:
