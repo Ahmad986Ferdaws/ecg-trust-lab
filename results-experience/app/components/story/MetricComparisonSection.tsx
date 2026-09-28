@@ -3,10 +3,11 @@
 import {
   type CSSProperties,
   type KeyboardEvent,
+  useEffect,
   useRef,
-  useState,
   useSyncExternalStore,
 } from "react";
+import { cohortFromSearch, urlForCohort } from "../../../lib/cohort-url";
 import styles from "./story.module.css";
 import {
   AUDITED_BENCHMARKS,
@@ -33,6 +34,19 @@ const METRIC_ORDER: MetricKey[] = [
 const subscribeToHydration = () => () => {};
 const getHydratedSnapshot = () => true;
 const getServerHydratedSnapshot = () => false;
+const COHORT_NAVIGATION_EVENT = "ecg-cohort-navigation";
+
+function subscribeToCohortUrl(listener: () => void) {
+  window.addEventListener("popstate", listener);
+  window.addEventListener(COHORT_NAVIGATION_EVENT, listener);
+  return () => {
+    window.removeEventListener("popstate", listener);
+    window.removeEventListener(COHORT_NAVIGATION_EVENT, listener);
+  };
+}
+
+const getCohortUrlSnapshot = () => window.location.search;
+const getServerCohortUrlSnapshot = () => "";
 
 function formatEstimate(value: number) {
   return value.toFixed(6);
@@ -180,17 +194,38 @@ export function MetricComparisonSection({
   const safeInitial = datasets.some((dataset) => dataset.id === initialDatasetId)
     ? initialDatasetId
     : datasets[0]?.id;
-  const [selectedId, setSelectedId] = useState(safeInitial);
+  const search = useSyncExternalStore(
+    subscribeToCohortUrl,
+    getCohortUrlSnapshot,
+    getServerCohortUrlSnapshot,
+  );
   const hasHydrated = useSyncExternalStore(
     subscribeToHydration,
     getHydratedSnapshot,
     getServerHydratedSnapshot,
   );
   const selected =
-    datasets.find((dataset) => dataset.id === selectedId) ?? datasets[0];
+    datasets.find((dataset) => dataset.cohortId === cohortFromSearch(search)) ??
+    datasets.find((dataset) => dataset.id === safeInitial) ?? datasets[0];
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
+  useEffect(() => {
+    // History navigation keeps the roving tab stop consistent without moving
+    // focus when the reader is elsewhere in the document.
+    if (tabRefs.current.some((tab) => tab === document.activeElement)) {
+      tabRefs.current.find((tab) => tab?.id === `metric-tab-${selected?.id}`)?.focus();
+    }
+  }, [selected?.id]);
+
   if (!selected) return null;
+
+  const selectDataset = (dataset: BenchmarkDataset) => {
+    const nextUrl = urlForCohort(window.location.href, dataset.cohortId);
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextUrl === currentUrl) return;
+    window.history.pushState(window.history.state, "", nextUrl);
+    window.dispatchEvent(new Event(COHORT_NAVIGATION_EVENT));
+  };
 
   const handleTabKeys = (
     event: KeyboardEvent<HTMLButtonElement>,
@@ -216,7 +251,7 @@ export function MetricComparisonSection({
             : (currentIndex - 1 + datasets.length) % datasets.length;
     const nextDataset = datasets[nextIndex];
     if (!nextDataset) return;
-    setSelectedId(nextDataset.id);
+    selectDataset(nextDataset);
     tabRefs.current[nextIndex]?.focus();
   };
 
@@ -260,7 +295,7 @@ export function MetricComparisonSection({
                 aria-controls={`metric-panel-${dataset.id}`}
                 aria-selected={active}
                 tabIndex={hasHydrated ? (active ? 0 : -1) : 0}
-                onClick={() => setSelectedId(dataset.id)}
+                onClick={() => selectDataset(dataset)}
                 onKeyDown={(event) => handleTabKeys(event, index)}
                 className={active ? styles.activeTab : ""}
               >
