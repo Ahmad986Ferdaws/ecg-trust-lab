@@ -40,6 +40,7 @@ _RIDGE = 0.000001
 _INLIER_COVERAGE = 0.95
 _BOOTSTRAP_REPLICATES = 10_000
 _BOOTSTRAP_SEED = 20_260_829
+_MAX_SAMPLED_INDICES_PER_CHUNK = 1_000_000
 
 
 def score_quantiles(scores: ArrayLike) -> ScoreQuantiles:
@@ -162,7 +163,8 @@ def patient_cluster_bootstrap_interval(
     Each replicate samples the observed patients with replacement, carries all
     records belonging to every sampled patient, and then recomputes the
     record-weighted false-rejection rate.  Percentiles use NumPy ``linear``
-    interpolation.
+    interpolation. Draws are chunked to bound working memory while preserving
+    the frozen PCG64 stream and the ordering of all 10,000 replicates.
     """
 
     patients, rejected_values = _aligned_patient_rejections(patient_id, rejected)
@@ -179,17 +181,21 @@ def patient_cluster_bootstrap_interval(
     ).astype(np.int64, copy=False)
 
     generator = np.random.Generator(np.random.PCG64(_BOOTSTRAP_SEED))
-    sampled = generator.integers(
-        0,
-        patient_count,
-        size=(_BOOTSTRAP_REPLICATES, patient_count),
-        endpoint=False,
-    )
-    denominators = records_per_patient[sampled].sum(axis=1, dtype=np.int64)
-    numerators = rejected_per_patient[sampled].sum(axis=1, dtype=np.int64)
-    if np.any(denominators <= 0):  # pragma: no cover - guaranteed by validated inputs
-        raise ValueError("bootstrap produced an empty patient replicate")
-    rates = numerators.astype(np.float64) / denominators.astype(np.float64)
+    chunk_size = max(1, _MAX_SAMPLED_INDICES_PER_CHUNK // patient_count)
+    rates = np.empty(_BOOTSTRAP_REPLICATES, dtype=np.float64)
+    for start in range(0, _BOOTSTRAP_REPLICATES, chunk_size):
+        stop = min(start + chunk_size, _BOOTSTRAP_REPLICATES)
+        sampled = generator.integers(
+            0,
+            patient_count,
+            size=(stop - start, patient_count),
+            endpoint=False,
+        )
+        denominators = records_per_patient[sampled].sum(axis=1, dtype=np.int64)
+        numerators = rejected_per_patient[sampled].sum(axis=1, dtype=np.int64)
+        if np.any(denominators <= 0):  # pragma: no cover - guaranteed by validated inputs
+            raise ValueError("bootstrap produced an empty patient replicate")
+        rates[start:stop] = numerators.astype(np.float64) / denominators.astype(np.float64)
     lower, upper, one_sided_upper = np.quantile(
         rates,
         np.asarray([0.025, 0.975, 0.95], dtype=np.float64),
