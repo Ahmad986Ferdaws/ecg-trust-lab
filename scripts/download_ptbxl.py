@@ -151,11 +151,23 @@ def download_file(
 def read_record_stems(metadata_path: Path) -> list[str]:
     """Read and validate the unique 100 Hz waveform stems from metadata."""
 
-    with metadata_path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        if reader.fieldnames is None or "filename_lr" not in reader.fieldnames:
-            raise ManifestError("ptbxl_database.csv has no filename_lr column")
-        stems = [validate_relative_path(row["filename_lr"]) for row in reader]
+    try:
+        with metadata_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle, strict=True)
+            if reader.fieldnames is None or "filename_lr" not in reader.fieldnames:
+                raise ManifestError("ptbxl_database.csv has no filename_lr column")
+            if len(set(reader.fieldnames)) != len(reader.fieldnames):
+                raise ManifestError("ptbxl_database.csv has duplicate column names")
+            stems = []
+            for row in reader:
+                if None in row or any(value is None for value in row.values()):
+                    raise ManifestError(
+                        f"ptbxl_database.csv row at line {reader.line_num} "
+                        "has the wrong field count"
+                    )
+                stems.append(validate_relative_path(row["filename_lr"]))
+    except (UnicodeError, csv.Error) as exc:
+        raise ManifestError("ptbxl_database.csv must be well-formed UTF-8 CSV") from exc
     if len(stems) != EXPECTED_RECORDS:
         raise ManifestError(f"expected {EXPECTED_RECORDS} metadata rows, found {len(stems)}")
     if len(set(stems)) != EXPECTED_RECORDS:
@@ -220,7 +232,10 @@ def acquire(
         )
 
     checksums_path = resolve_relative_path(destination, "SHA256SUMS.txt")
-    checksums = parse_sha256sums(checksums_path.read_text(encoding="utf-8"))
+    try:
+        checksums = parse_sha256sums(checksums_path.read_text(encoding="utf-8"))
+    except UnicodeError as exc:
+        raise ManifestError("SHA256SUMS.txt must be UTF-8 text") from exc
     paths = selected_paths(resolve_relative_path(destination, "ptbxl_database.csv"))
     paths_to_verify = [path for path in paths if path != "SHA256SUMS.txt"]
     missing_checksum_entries = sorted(path for path in paths_to_verify if path not in checksums)
