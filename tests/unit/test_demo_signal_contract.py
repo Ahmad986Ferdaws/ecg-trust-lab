@@ -55,3 +55,16 @@ def test_real_signal_keeps_values_and_float32_contract() -> None:
     assert result.dtype == torch.float32
     assert result.is_contiguous()
     np.testing.assert_array_equal(result.numpy(), signal.astype(np.float32))
+
+
+@pytest.mark.parametrize("default_dtype", [torch.float16, torch.bfloat16, torch.float64])
+def test_float32_conversion_is_independent_of_process_default(default_dtype: torch.dtype) -> None:
+    signal = [[0.1234567] * 1000 for _ in LEADS]
+    previous_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(default_dtype)
+        result = validate_physical_signal(signal)  # type: ignore[arg-type]
+        expected = torch.as_tensor(signal, dtype=torch.float32)
+        torch.testing.assert_close(result, expected, rtol=0, atol=0)
+    finally:
+        torch.set_default_dtype(previous_dtype)
