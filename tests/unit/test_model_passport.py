@@ -574,3 +574,49 @@ def test_renderer_is_deterministic_escaped_and_explicit_about_safety() -> None:
     assert "patient_id" not in first
     assert "raw_signal" not in first
     assert first.endswith("\n")
+
+
+def test_rendered_code_identifiers_preserve_literal_underscores() -> None:
+    from markdown_it import MarkdownIt
+
+    from ecg_trust.passport import canonical_sha256
+
+    body = json.loads(
+        _passport().model_dump_json(exclude={"passport_sha256"})
+        .replace("passport-release-001", "passport_release_001")
+        .replace("ptbxl-fold10", "ptbxl_fold10")
+    )
+    passport = ModelPassport.model_validate({**body, "passport_sha256": canonical_sha256(body)})
+    rendered = MarkdownIt().render(render_model_passport_markdown(passport))
+    assert "<code>passport_release_001</code>" in rendered
+    assert "<code>ptbxl_fold10</code>" in rendered
+    assert f"<code>{passport.conformal_evidence.method}</code>" in rendered
+    assert "\\_" not in rendered
+
+
+def test_rendered_free_text_preserves_entities_and_markup_as_literal_text() -> None:
+    from html.parser import HTMLParser
+
+    from markdown_it import MarkdownIt
+
+    class TextCollector(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.parts: list[str] = []
+            self.tags: list[str] = []
+
+        def handle_data(self, data: str) -> None:
+            self.parts.append(data)
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            self.tags.append(tag)
+
+    literal = "<custom-tag> &copy; &#65; [review] *literal* _unchanged_ | edge"
+    passport = _passport(limitations=(literal,))
+    before = model_passport_to_json_bytes(passport)
+    rendered = MarkdownIt().render(render_model_passport_markdown(passport))
+    collector = TextCollector()
+    collector.feed(rendered)
+    assert literal in "".join(collector.parts)
+    assert "custom-tag" not in collector.tags
+    assert model_passport_to_json_bytes(passport) == before
