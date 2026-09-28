@@ -578,10 +578,10 @@ def validate_physical_signal(
     if positions != list(range(len(LEADS))):
         raise DemoInputError("in-memory lead_names must already use canonical order")
     try:
-        tensor = torch.as_tensor(signal)
-        if tensor.is_complex():
+        is_complex = signal.is_complex() if isinstance(signal, Tensor) else np.iscomplexobj(signal)
+        if is_complex:
             raise DemoInputError("signal must contain real physical values")
-        tensor = tensor.to(dtype=torch.float32)
+        tensor = torch.as_tensor(signal, dtype=torch.float32)
     except (TypeError, ValueError, RuntimeError) as error:
         raise DemoInputError(f"signal must be numeric: {error}") from error
     if tensor.shape != (len(LEADS), EXPECTED_SAMPLES):
