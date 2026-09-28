@@ -120,6 +120,7 @@ function ScoreLedger({ dataset }: { dataset: BenchmarkDataset }) {
                 <span className={styles.mobileCellLabel}>Direct comparison</span>
                 <div
                   className={styles.scorePlot}
+                  role="img"
                   aria-label={`${resnet.name} ${formatEstimate(
                     resnetEstimate.value,
                   )}; ${transformer.name} ${formatEstimate(

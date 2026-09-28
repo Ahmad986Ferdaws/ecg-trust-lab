@@ -335,6 +335,7 @@ export function FailureLabSection() {
               className={styles.svgScroller}
               role="region"
               aria-label="Scrollable synthetic 12-lead ECG preview"
+              tabIndex={0}
             >
               <svg
                 className={styles.waveform}
@@ -465,6 +466,7 @@ export function FailureLabSection() {
             className={styles.tableScroller}
             role="region"
             aria-label="Scrollable Failure Lab scenario register"
+            tabIndex={0}
           >
             <table>
               <thead>

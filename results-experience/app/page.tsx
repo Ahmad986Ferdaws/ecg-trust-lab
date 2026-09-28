@@ -125,7 +125,7 @@ export default function Home() {
               <div key={fact.label}>
                 <dt>{fact.label}</dt>
                 <dd>{fact.value}</dd>
-                <small>{fact.detail}</small>
+                <dd className="hero-detail">{fact.detail}</dd>
               </div>
             ))}
           </dl>
