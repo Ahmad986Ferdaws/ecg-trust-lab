@@ -572,13 +572,16 @@ def validate_physical_signal(
         frequency, EXPECTED_FREQUENCY_HZ, rel_tol=0.0, abs_tol=1e-9
     ):
         raise DemoInputError(f"sampling frequency must be exactly {EXPECTED_FREQUENCY_HZ} Hz")
-    if not isinstance(units, str) or units.strip().casefold() != PHYSICAL_UNITS.casefold():
+    if not isinstance(units, str) or units.strip() != PHYSICAL_UNITS:
         raise DemoInputError(f"physical signal units must be {PHYSICAL_UNITS}")
     positions = _canonical_lead_positions(lead_names, "lead_names")
     if positions != list(range(len(LEADS))):
         raise DemoInputError("in-memory lead_names must already use canonical order")
     try:
-        tensor = torch.as_tensor(signal, dtype=torch.float32)
+        tensor = torch.as_tensor(signal)
+        if tensor.is_complex():
+            raise DemoInputError("signal must contain real physical values")
+        tensor = tensor.to(dtype=torch.float32)
     except (TypeError, ValueError, RuntimeError) as error:
         raise DemoInputError(f"signal must be numeric: {error}") from error
     if tensor.shape != (len(LEADS), EXPECTED_SAMPLES):
@@ -614,7 +617,13 @@ def load_wfdb_physical_signal(record_path: str | Path) -> Tensor:
     physical = getattr(record, "p_signal", None)
     if physical is None:
         raise DemoInputError("WFDB record has no physical signal")
-    array = np.asarray(physical, dtype=np.float32)
+    try:
+        raw_array = np.asarray(physical)
+        if np.iscomplexobj(raw_array):
+            raise DemoInputError("WFDB physical signal must contain real values")
+        array = raw_array.astype(np.float32)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise DemoInputError(f"WFDB physical signal must be real numeric data: {error}") from error
     if array.shape != (EXPECTED_SAMPLES, len(LEADS)):
         raise DemoInputError(
             f"WFDB physical signal must have shape [{EXPECTED_SAMPLES}, {len(LEADS)}]"
@@ -627,7 +636,7 @@ def load_wfdb_physical_signal(record_path: str | Path) -> Tensor:
     if not isinstance(raw_units, Sequence) or isinstance(raw_units, (str, bytes)):
         raise DemoInputError("WFDB record has no physical units")
     if len(raw_units) != len(LEADS) or any(
-        not isinstance(unit, str) or unit.strip().casefold() != PHYSICAL_UNITS.casefold()
+        not isinstance(unit, str) or unit.strip() != PHYSICAL_UNITS
         for unit in raw_units
     ):
         raise DemoInputError(f"all WFDB leads must use physical units {PHYSICAL_UNITS}")
