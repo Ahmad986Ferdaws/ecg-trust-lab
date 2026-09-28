@@ -10,13 +10,17 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
+import re
 import shutil
 import sys
 import time
 from collections import Counter
+from collections.abc import Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from http.client import IncompleteRead
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -61,6 +65,33 @@ def _url_for(relative_path: str) -> str:
     return BASE_URL + "/".join(quote(part) for part in canonical.split("/"))
 
 
+def _response_length(status: int, headers: Mapping[str, str], start: int) -> int | None:
+    """Validate single-range response framing before appending any bytes."""
+
+    if status not in {200, 206}:
+        raise ManifestError(f"unexpected download HTTP status: {status}")
+    length_text = headers.get("Content-Length")
+    length = None
+    if length_text is not None:
+        if re.fullmatch(r"[0-9]+", length_text) is None:
+            raise ManifestError("invalid download Content-Length")
+        length = int(length_text)
+    if status == 206:
+        # RFC 9110 sections 14.4 and 15.3.7: a single-part 206 must identify
+        # the returned byte range. This request asks for the complete remainder.
+        match = re.fullmatch(r"bytes ([0-9]+)-([0-9]+)/([0-9]+)", headers.get("Content-Range", ""))
+        if match is None or not start:
+            raise ManifestError("missing or unexpected download Content-Range")
+        first, last, total = map(int, match.groups())
+        if first != start or last < first or last != total - 1:
+            raise ManifestError("download Content-Range does not match the requested remainder")
+        range_length = last - first + 1
+        if length is not None and length != range_length:
+            raise ManifestError("download Content-Length contradicts Content-Range")
+        return range_length
+    return length
+
+
 def _download_once(
     relative_path: str,
     destination_root: Path,
@@ -101,14 +132,23 @@ def _download_once(
 
     with response_context as response:
         status = getattr(response, "status", response.getcode())
+        expected_length = _response_length(status, response.headers, start)
         append = bool(start and status == 206)
         mode = "ab" if append else "wb"
         with partial.open(mode) as handle:
             shutil.copyfileobj(response, handle, length=1024 * 1024)
 
+    transferred = partial.stat().st_size - (start if append else 0)
+    if expected_length is not None and transferred != expected_length:
+        if transferred > expected_length:
+            partial.unlink()
+        raise ManifestError("download body length does not match response headers")
     if expected_sha256 is not None:
         observed = sha256_file(partial)
         if observed != expected_sha256:
+            # A complete but incorrect file cannot be repaired by appending.
+            # Retry from byte zero instead of repeatedly resuming corrupt data.
+            partial.unlink()
             raise ManifestError(
                 f"SHA-256 mismatch after download for {canonical}: "
                 f"expected {expected_sha256}, observed {observed}"
@@ -129,6 +169,12 @@ def download_file(
 ) -> DownloadResult:
     """Download one file atomically, resuming an existing partial transfer."""
 
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        raise ValueError("timeout must be a finite positive number")
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("timeout must be a finite positive number")
+    if isinstance(retries, bool) or not isinstance(retries, int) or retries < 1:
+        raise ValueError("retries must be a positive integer")
     last_error: BaseException | None = None
     for attempt in range(1, retries + 1):
         try:
@@ -139,11 +185,11 @@ def download_file(
                 timeout=timeout,
                 force=force,
             )
-        except (OSError, ManifestError) as exc:
+        except (OSError, ManifestError, IncompleteRead) as exc:
             last_error = exc
             if attempt == retries:
                 break
-            time.sleep(min(2 ** (attempt - 1), 16))
+            time.sleep(2 ** min(attempt - 1, 4))
     assert last_error is not None
     raise last_error
 
@@ -288,8 +334,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.workers < 1 or args.workers > 64:
         parser.error("--workers must be between 1 and 64")
-    if args.timeout <= 0:
-        parser.error("--timeout must be positive")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be finite and positive")
     if args.retries < 1:
         parser.error("--retries must be positive")
     return args
@@ -307,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
             allow_missing_checksums=args.allow_missing_checksums,
             force=args.force,
         )
-    except (ManifestError, OSError) as exc:
+    except (ManifestError, OSError, IncompleteRead) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
