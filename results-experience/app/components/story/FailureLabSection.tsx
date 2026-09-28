@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable jsx-a11y/no-noninteractive-tabindex -- Both named scroll regions need keyboard focus to expose offscreen content. */
+
 import { useState } from "react";
 
 import styles from "./FailureLabSection.module.css";
