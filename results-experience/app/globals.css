@@ -788,3 +788,54 @@ html[data-motion="paused"] {
     transition-duration: 0.01ms !important;
   }
 }
+
+@page {
+  margin: 15mm;
+}
+
+@media print {
+  html, body, .experience-shell {
+    min-height: 0;
+    overflow: visible;
+    background: white;
+    font-size: 10pt;
+  }
+
+  .experience-shell * {
+    color: #121714 !important;
+    background-color: transparent !important;
+  }
+
+  .site-nav, .skip-link, .hero-figure, .evidence-link,
+  .site-footer > a {
+    display: none !important;
+  }
+
+  .experience-shell > section,
+  .experience-shell > div > section {
+    display: block;
+    width: 100%;
+    min-height: 0;
+    padding: 14pt 0 !important;
+  }
+
+  .hero-copy { padding: 0; }
+  .hero h1 { max-width: none; font-size: 30pt; line-height: 1.1; }
+  .experience-shell h2 { max-width: none; font-size: 22pt !important; line-height: 1.15; }
+  .experience-shell h3 { max-width: none; font-size: 14pt !important; line-height: 1.25; }
+  .experience-shell h2, .experience-shell h3 { break-after: avoid; }
+  .experience-shell p, .experience-shell li { orphans: 3; widows: 3; }
+
+  .hero-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .hero-facts div { display: flex; min-height: 0; padding: 8pt; }
+  .hero-facts dd { font-size: 18pt; }
+  .hero-deck { margin-block: 12pt; }
+  .study-rail > header { padding: 0; }
+  .study-rail li { padding-block: 8pt; break-inside: avoid; }
+  .method-ledger { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 14pt; }
+  .method-ledger div { min-height: 0; padding: 8pt; }
+  .method-ledger dd { margin-top: 6pt; }
+  .verdict-deltas { margin-top: 14pt; }
+  .verdict-note { margin-top: 14pt; }
+  .site-footer { min-height: 0; padding: 14pt 0; }
+}

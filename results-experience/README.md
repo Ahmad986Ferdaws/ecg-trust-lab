@@ -53,6 +53,11 @@ the component derives that label from the checked eligibility field.
 
 ## Architecture
 
+Printing or saving the notebook as PDF includes both dataset ledgers regardless
+of the active tab. The print layout removes interactive controls and the decorative
+WebGL figure, preserves the selected synthetic strip and research boundaries,
+and expands scrolling content for the page.
+
 - `app/components/ResultsUniverse.tsx` — a one-pass 12-lead acquisition built
   with Three.js `Line2`, `LineGeometry`, and `LineMaterial`
 - `app/components/ExperienceMotion.tsx` — shared play/pause and reduced-motion

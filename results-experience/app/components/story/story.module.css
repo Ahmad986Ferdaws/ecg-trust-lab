@@ -1506,3 +1506,51 @@
     transition: none;
   }
 }
+
+@media print {
+  .sectionHeader, .safetyHeader, .panelIntro, .transportLedger,
+  .transportMethodNote, .supportHeader, .uncertaintyLedger,
+  .supportBoundary, .researchConclusion {
+    display: block;
+    margin-bottom: 12pt;
+    padding-block: 8pt;
+  }
+
+  .datasetTabs { display: none; }
+  .metricPanel[hidden] { display: block !important; }
+  .metricPanel { margin-block: 14pt; }
+  .metricPanel + .metricPanel { break-before: page; }
+  .ledgerTable { display: table; width: 100%; table-layout: auto; }
+  .ledgerTable thead {
+    display: table-header-group;
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+  .ledgerTable tbody { display: table-row-group; }
+  .ledgerTable tr, .ledgerTable tbody tr { display: table-row; break-inside: avoid; }
+  .ledgerTable th, .ledgerTable td,
+  .ledgerTable tbody th, .ledgerTable tbody td {
+    display: table-cell;
+    width: auto;
+    min-height: 0;
+    padding: 8pt 6pt;
+    font-size: 9pt;
+  }
+  .ledgerTable col { width: auto; }
+  .ledgerTable .plotCell, .ledgerTable .plotColumn,
+  .ledgerTable thead th:nth-child(2), .ledgerTable .mobileCellLabel { display: none; }
+  .ledgerTable strong { font-size: 10pt; }
+  .transportSequence, .supportHero, .supportRoles, .gateNumbers,
+  .boundaryList { display: block; }
+  .transportSequence li, .supportRoles li, .boundaryList li,
+  .gateNumbers > div { min-height: 0; padding: 10pt 0; break-inside: avoid; }
+  .coverageHeadline, .gateDecision { padding-block: 8pt; }
+  .supportPlot { display: none; }
+  .cohortTable { width: 100%; }
+  .cohortTable tr { break-inside: avoid; }
+  .metricValue { font-size: 18pt; }
+}
