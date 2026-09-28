@@ -53,6 +53,7 @@ def _record(
         fs=frequency_hz,
         p_signal=signal[:, columns],
         sig_name=list(lead_order),
+        units=["mV"] * len(lead_order),
     )
 
 
@@ -180,6 +181,38 @@ def test_rejects_malformed_wfdb_records(
     )
 
     with pytest.raises(RecordValidationError, match=message):
+        dataset.load_signal(0)
+
+
+@pytest.mark.parametrize("units", [None, "mV", b"mV", [], ["mV"] * 11, ["mV"] * 13])
+def test_requires_one_declared_physical_unit_per_lead(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, units: object
+) -> None:
+    record = _record(_signal())
+    record.units = units
+    monkeypatch.setattr(dataset_module.wfdb, "rdrecord", lambda _: record)
+    dataset = PTBXLDataset(
+        _manifest({"record_path": "record", "strat_fold": 1, **_targets("NORM")}),
+        tmp_path,
+    )
+
+    with pytest.raises(RecordValidationError, match="one physical unit per lead"):
+        dataset.load_signal(0)
+
+
+@pytest.mark.parametrize("unit", ["uV", "V", "MV", "mv", "", None, 1])
+def test_rejects_non_millivolt_leads_without_silent_conversion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unit: object
+) -> None:
+    record = _record(_signal(), lead_order=tuple(reversed(LEADS)))
+    record.units[0] = unit
+    monkeypatch.setattr(dataset_module.wfdb, "rdrecord", lambda _: record)
+    dataset = PTBXLDataset(
+        _manifest({"record_path": "record", "strat_fold": 1, **_targets("NORM")}),
+        tmp_path,
+    )
+
+    with pytest.raises(RecordValidationError, match="lead 'V6'.*expected 'mV'"):
         dataset.load_signal(0)
 
 
