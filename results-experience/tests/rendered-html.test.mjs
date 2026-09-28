@@ -110,7 +110,7 @@ test("ships audited data and a matte, evidence-bearing visual system", async () 
     await Promise.all([
       readFile(new URL("../lib/results.ts", import.meta.url), "utf8"),
       readFile(
-        new URL("../app/components/ResultsUniverse.tsx", import.meta.url),
+        new URL("../app/components/ResultsWebGL.tsx", import.meta.url),
         "utf8",
       ),
       readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
@@ -186,4 +186,23 @@ test("ships audited data and a matte, evidence-bearing visual system", async () 
     sourceSupportSource,
     /patient_id|ecg_id|embedding|filesystem|source-validation-one-shot-claim/i,
   );
+});
+
+test("keeps the WebGL renderer outside initial page preloads", async () => {
+  const { default: assets } = await import("../dist/server/vinext-client-assets.js");
+  const rendererFiles = assets.dynamicPreloads["app/components/ResultsWebGL.tsx"];
+  const initialFiles = assets.dynamicPreloads["app/components/ResultsUniverse.tsx"];
+  const renderer = rendererFiles?.find((file) => /ResultsWebGL.*\.js$/.test(file));
+  assert.ok(renderer, "the renderer must be a separately loadable JavaScript chunk");
+  assert.ok(initialFiles, "the schematic shell must remain in the initial client graph");
+  assert.ok(!initialFiles.includes(renderer), "the shell must not preload the heavy renderer");
+
+  const shell = initialFiles.find((file) => /ResultsUniverse.*\.js$/.test(file));
+  assert.ok(shell);
+  const { size } = await stat(new URL(`../dist/client/${shell}`, import.meta.url));
+  assert.ok(size < 50_000, `the initial schematic shell should stay small, found ${size} bytes`);
+
+  const response = await render();
+  const html = await response.text();
+  assert.ok(!html.includes(renderer), "server HTML must not eagerly request the optional renderer");
 });
