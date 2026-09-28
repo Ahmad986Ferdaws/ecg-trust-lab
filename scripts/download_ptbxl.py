@@ -4,6 +4,11 @@
 Downloads are written to ``.part`` files and resumed with HTTP Range requests.
 Every selected file represented in PhysioNet's SHA256SUMS inventory is checked
 before the command reports success.
+
+At most twice the worker count is in flight. Interrupting stops new work,
+cancels queued transfers, and wakes retry waits. Active transfers check for
+cancellation between reads; a blocked socket still uses the configured timeout.
+Partial files are retained for the next resumable run.
 """
 
 from __future__ import annotations
@@ -13,16 +18,16 @@ import csv
 import math
 import os
 import re
-import shutil
 import stat
 import sys
 import time
 from collections import Counter
 from collections.abc import Mapping
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, CancelledError, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from http.client import IncompleteRead
 from pathlib import Path
+from threading import Event
 from typing import BinaryIO
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -141,7 +146,9 @@ def _download_once(
     expected_sha256: str | None,
     timeout: float,
     force: bool,
+    cancellation: Event | None = None,
 ) -> DownloadResult:
+    _check_cancelled(cancellation)
     canonical = validate_relative_path(relative_path)
     destination = resolve_relative_path(destination_root, canonical)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -178,7 +185,16 @@ def _download_once(
         expected_length = _response_length(status, response.headers, start)
         append = bool(start and status == 206)
         with _open_partial(partial, append=append) as handle:
-            shutil.copyfileobj(response, handle, length=1024 * 1024)
+            # read1 returns after one underlying read, so a slow peer cannot
+            # indefinitely delay cancellation while filling a large buffer.
+            read = getattr(response, "read1", response.read)
+            while True:
+                _check_cancelled(cancellation)
+                chunk = read(1024 * 1024)
+                _check_cancelled(cancellation)
+                if not chunk:
+                    break
+                handle.write(chunk)
 
     _check_partial(partial)
     transferred = partial.stat().st_size - (start if append else 0)
@@ -201,6 +217,11 @@ def _download_once(
     return DownloadResult(canonical, "downloaded", bytes_written)
 
 
+def _check_cancelled(cancellation: Event | None) -> None:
+    if cancellation is not None and cancellation.is_set():
+        raise CancelledError("download cancelled")
+
+
 def download_file(
     relative_path: str,
     destination_root: Path,
@@ -209,6 +230,7 @@ def download_file(
     timeout: float,
     retries: int,
     force: bool = False,
+    cancellation: Event | None = None,
 ) -> DownloadResult:
     """Download one file atomically, resuming an existing partial transfer."""
 
@@ -220,6 +242,7 @@ def download_file(
         raise ValueError("retries must be a positive integer")
     last_error: BaseException | None = None
     for attempt in range(1, retries + 1):
+        _check_cancelled(cancellation)
         try:
             return _download_once(
                 relative_path,
@@ -227,12 +250,17 @@ def download_file(
                 expected_sha256=expected_sha256,
                 timeout=timeout,
                 force=force,
+                cancellation=cancellation,
             )
         except (OSError, ManifestError, IncompleteRead) as exc:
             last_error = exc
             if attempt == retries:
                 break
-            time.sleep(2 ** min(attempt - 1, 4))
+            delay = 2 ** min(attempt - 1, 4)
+            if cancellation is None:
+                time.sleep(delay)
+            elif cancellation.wait(delay):
+                raise CancelledError("download cancelled") from exc
     assert last_error is not None
     raise last_error
 
@@ -286,6 +314,66 @@ def _bootstrap_file(
     print(f"{result.status}: {name}")
 
 
+def _download_many(
+    paths: list[str],
+    destination: Path,
+    *,
+    checksums: dict[str, str],
+    workers: int,
+    timeout: float,
+    retries: int,
+    force: bool,
+) -> Counter[str]:
+    """Bound queued work and cooperatively stop active transfers on interruption."""
+
+    cancellation = Event()
+    executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="ptbxl")
+    futures: dict[Future[DownloadResult], str] = {}
+    remaining = iter(paths)
+    totals: Counter[str] = Counter()
+    failures: list[tuple[str, Exception]] = []
+    completed = 0
+    try:
+        while True:
+            while len(futures) < 2 * workers:
+                path = next(remaining, None)
+                if path is None:
+                    break
+                future = executor.submit(
+                    download_file,
+                    path,
+                    destination,
+                    expected_sha256=checksums.get(path),
+                    timeout=timeout,
+                    retries=retries,
+                    force=force,
+                    cancellation=cancellation,
+                )
+                futures[future] = path
+            if not futures:
+                break
+            done, _ = wait(futures, return_when=FIRST_COMPLETED)
+            for future in done:
+                path = futures.pop(future)
+                try:
+                    result = future.result()
+                    totals[result.status] += 1
+                except CancelledError:
+                    raise
+                except Exception as exc:
+                    failures.append((path, exc))
+                completed += 1
+                if completed % 500 == 0 or completed == len(paths):
+                    print(f"progress: {completed}/{len(paths)} files")
+    finally:
+        cancellation.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+    if failures:
+        details = "\n".join(f"  {path}: {error}" for path, error in failures[:20])
+        raise ManifestError(f"{len(failures)} downloads failed:\n{details}")
+    return totals
+
+
 def acquire(
     destination: Path,
     *,
@@ -324,33 +412,15 @@ def acquire(
 
     if not verify_only:
         pending = [path for path in paths if path not in {"SHA256SUMS.txt", "ptbxl_database.csv"}]
-        totals: Counter[str] = Counter()
-        failures: list[tuple[str, BaseException]] = []
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="ptbxl") as executor:
-            futures: dict[Future[DownloadResult], str] = {
-                executor.submit(
-                    download_file,
-                    path,
-                    destination,
-                    expected_sha256=checksums.get(path),
-                    timeout=timeout,
-                    retries=retries,
-                    force=force,
-                ): path
-                for path in pending
-            }
-            for completed, future in enumerate(as_completed(futures), start=1):
-                relative_path = futures[future]
-                try:
-                    result = future.result()
-                    totals[result.status] += 1
-                except BaseException as exc:  # collect all transfer failures before exiting
-                    failures.append((relative_path, exc))
-                if completed % 500 == 0 or completed == len(pending):
-                    print(f"progress: {completed}/{len(pending)} files")
-        if failures:
-            details = "\n".join(f"  {path}: {error}" for path, error in failures[:20])
-            raise ManifestError(f"{len(failures)} downloads failed:\n{details}")
+        totals = _download_many(
+            pending,
+            destination,
+            checksums=checksums,
+            workers=workers,
+            timeout=timeout,
+            retries=retries,
+            force=force,
+        )
         print("download summary: " + ", ".join(f"{key}={value}" for key, value in totals.items()))
 
     verifiable = [path for path in paths_to_verify if path in checksums]
