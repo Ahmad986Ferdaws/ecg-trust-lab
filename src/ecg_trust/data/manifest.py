@@ -13,6 +13,7 @@ import json
 import math
 import os
 import re
+import tempfile
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from numbers import Real
@@ -450,15 +451,43 @@ def write_manifest_artifacts(
 ) -> ManifestArtifacts:
     """Write deterministic CSV, Parquet, summary JSON, and hash inventory."""
 
+    if (
+        not isinstance(stem, str)
+        or not stem
+        or stem != stem.strip()
+        or stem.endswith(".")
+        or any(
+            character in '<>:"/\\|?*' or ord(character) < 32 or ord(character) == 127
+            for character in stem
+        )
+        or PureWindowsPath(stem).is_reserved()
+    ):
+        raise ManifestError(
+            "artifact stem must be a portable filename without directory components"
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
+    # A private, unique staging directory avoids following pre-existing .tmp
+    # aliases and cleans incomplete serialization without touching old outputs.
+    with tempfile.TemporaryDirectory(prefix=f".{stem}.", dir=output_dir) as staging:
+        return _write_staged_manifest(manifest, summary, output_dir, Path(staging), stem=stem)
+
+
+def _write_staged_manifest(
+    manifest: pd.DataFrame,
+    summary: Mapping[str, object],
+    output_dir: Path,
+    staging_dir: Path,
+    *,
+    stem: str,
+) -> ManifestArtifacts:
     csv_path = output_dir / f"{stem}.csv"
     parquet_path = output_dir / f"{stem}.parquet"
     summary_path = output_dir / f"{stem}.summary.json"
     checksums_path = output_dir / f"{stem}.sha256"
-    csv_temp = csv_path.with_suffix(csv_path.suffix + ".tmp")
-    parquet_temp = parquet_path.with_suffix(parquet_path.suffix + ".tmp")
-    summary_temp = summary_path.with_suffix(summary_path.suffix + ".tmp")
-    checksums_temp = checksums_path.with_suffix(checksums_path.suffix + ".tmp")
+    csv_temp = staging_dir / csv_path.name
+    parquet_temp = staging_dir / parquet_path.name
+    summary_temp = staging_dir / summary_path.name
+    checksums_temp = staging_dir / checksums_path.name
 
     manifest.to_csv(
         csv_temp,
