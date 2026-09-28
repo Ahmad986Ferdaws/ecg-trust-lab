@@ -39,7 +39,30 @@ jobs:
         run: |
           uv run --no-sync python -c "import torch; assert torch.version.cuda is None; assert not torch.cuda.is_available(); print(torch.__version__)"
       - name: Tests
-        run: uv run --no-sync pytest -q --basetemp=.pytest-tmp-cpu
+        id: tests
+        run: >-
+          uv run --no-sync pytest -q --basetemp=.pytest-tmp-cpu
+          --junitxml="${{ runner.temp }}/cpu-tests-junit.xml"
+          -o junit_logging=no -o junit_log_passing_tests=false
+      - name: Summarize test results
+        id: test_report
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        run: >-
+          uv run --no-sync python scripts/summarize_test_results.py
+          --junit "${{ runner.temp }}/cpu-tests-junit.xml"
+          --output-dir "${{ runner.temp }}/cpu-test-metadata"
+          --summary "$GITHUB_STEP_SUMMARY"
+          --test-outcome "${{ steps.tests.outcome }}"
+      - name: Upload test outcome metadata
+        if: ${{ !cancelled() && steps.test_report.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cpu-test-metadata
+          path: |
+            ${{ runner.temp }}/cpu-test-metadata/test-metadata.json
+            ${{ runner.temp }}/cpu-test-metadata/junit-metadata.xml
+          if-no-files-found: error
+          retention-days: 7
       - name: Ruff
         if: ${{ !cancelled() }}
         run: uv run --no-sync ruff check src tests scripts
