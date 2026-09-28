@@ -278,7 +278,11 @@ def test_frozen_refit_uses_only_folds_1_to_8_and_writes_distinct_artifacts(
 
 
 def test_refit_rejects_fold_8_normalization_before_dataset_creation(tmp_path: Path) -> None:
-    _write_inputs(tmp_path, normalization_folds=REFIT_FOLDS)
+    _write_inputs(tmp_path)
+    normalization_path = tmp_path / "normalization.json"
+    contaminated = json.loads(normalization_path.read_text(encoding="utf-8"))
+    contaminated["provenance"]["training_folds"] = list(REFIT_FOLDS)
+    normalization_path.write_text(json.dumps(contaminated), encoding="utf-8")
     config = FrozenRefitConfig.from_mapping(_payload(tmp_path), base_dir=tmp_path)
     dataset_called = False
 
@@ -295,7 +299,7 @@ def test_refit_rejects_fold_8_normalization_before_dataset_creation(tmp_path: Pa
         dataset_called = True
         return _synthetic_dataset()
 
-    with pytest.raises(FrozenRefitError, match="only on folds 1-7"):
+    with pytest.raises(FrozenRefitError, match="training folds 1-7"):
         run_frozen_refit(
             config,
             protocol=ExperimentProtocol.canonical(),
