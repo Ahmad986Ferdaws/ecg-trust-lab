@@ -528,7 +528,7 @@ class PTBXLDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         return position
 
     def record_path(self, index: int) -> Path:
-        """Return the WFDB stem after checking its canonical files stay under the root."""
+        """Return the WFDB stem after checking its header stays under the root."""
 
         position = self._position(index)
         path = Path(self._record_references[position])
@@ -536,18 +536,52 @@ class PTBXLDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             path = path.with_suffix("")
         try:
             resolved = resolve_relative_path(self.root_dir, path.as_posix())
-            # WFDB opens the header and signal files, not the suffix-free stem.
-            # Check these separately so a file symlink cannot escape the root.
-            for suffix in (".hea", ".dat"):
-                resolve_relative_path(self.root_dir, f"{path.as_posix()}{suffix}")
+            # The signal filenames are declared in the header and need not
+            # share the record stem. Validate those before decoding in load_signal.
+            resolve_relative_path(self.root_dir, f"{path.as_posix()}.hea")
         except ManifestError as error:
             raise RecordValidationError(f"invalid WFDB record path: {error}") from error
         return resolved
+
+    def _validate_header_files(self, path: Path) -> None:
+        try:
+            header = wfdb.rdheader(str(path), rd_segments=False)
+        except Exception as error:
+            raise RecordValidationError(f"could not read WFDB header {path!s}: {error}") from error
+        if (
+            isinstance(header, wfdb.MultiRecord)
+            or getattr(header, "n_seg", None) is not None
+            or getattr(header, "seg_name", None) is not None
+        ):
+            raise RecordValidationError(f"record {path!s} must be a single-segment WFDB record")
+        filenames = getattr(header, "file_name", None)
+        if (
+            not isinstance(filenames, Sequence)
+            or isinstance(filenames, (str, bytes))
+            or len(filenames) != len(LEADS)
+            or getattr(header, "n_sig", None) != len(LEADS)
+        ):
+            raise RecordValidationError(
+                f"record {path!s} header must declare one signal filename per canonical lead"
+            )
+        relative_directory = path.parent.relative_to(self.root_dir)
+        checked_files: set[str] = set()
+        for filename in filenames:
+            try:
+                canonical = validate_relative_path(filename)
+                if canonical in checked_files:
+                    continue
+                relative_file = (relative_directory / canonical).as_posix()
+                resolve_relative_path(self.root_dir, relative_file)
+                checked_files.add(canonical)
+            except ManifestError as error:
+                raise RecordValidationError(f"invalid WFDB signal file: {error}") from error
 
     def load_signal(self, index: int) -> torch.Tensor:
         """Load one signal as finite float32 ``[12, expected_samples]``."""
 
         path = self.record_path(index)
+        self._validate_header_files(path)
         try:
             record = wfdb.rdrecord(str(path))
         except Exception as error:
