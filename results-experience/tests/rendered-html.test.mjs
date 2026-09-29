@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
-async function render() {
+async function render(path = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("https://results.example.test/", {
+    new Request(`https://results.example.test${path}`, {
       headers: {
         accept: "text/html",
         host: "results.example.test",
@@ -54,6 +54,8 @@ test("server-renders the complete Signal Ledger evidence experience", async () =
   assert.match(html, /15,193/);
   assert.match(html, /12 leads × 10 seconds/);
   assert.match(html, /No SPH tuning/);
+  assert.match(html, /href="\/reported-results\.csv"[^>]*download/);
+  assert.match(html, /Download aggregate results \(CSV\)/);
   assert.match(html, /id="metric-panel-sph-broad"/);
   assert.match(html, /id="metric-panel-sph-no-ambiguous"/);
   assert.match(html, /Missing mappings are unknown, not verified negative diagnoses/);
@@ -99,6 +101,18 @@ test("server-renders the complete Signal Ledger evidence experience", async () =
     html,
     /codex-preview|Your site is taking shape|Building your site|signal universe|neon/i,
   );
+});
+
+test("serves the public aggregate CSV as a named download", async () => {
+  const response = await render("/reported-results.csv");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "text/csv; charset=utf-8");
+  assert.equal(response.headers.get("content-disposition"),
+    'attachment; filename="ecg-trust-reported-results-2026-08-29.csv"');
+  const csv = await response.text();
+  assert.equal(csv.trimEnd().split("\r\n").length, 33);
+  assert.match(csv, /0\.904714,0\.001118,3,2026-08-29/);
+  assert.match(csv, /0\.928405,0\.001382,3,2026-08-29/);
 });
 
 test("ships audited data and a matte, evidence-bearing visual system", async () => {
