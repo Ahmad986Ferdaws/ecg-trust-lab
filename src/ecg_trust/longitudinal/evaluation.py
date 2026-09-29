@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -361,14 +362,17 @@ def _calibration_bins(
     bin_count: int,
     minimum_bin_count: int,
 ) -> tuple[CalibrationBin, ...]:
+    edges = tuple(index / bin_count for index in range(bin_count + 1))
     grouped: dict[int, list[tuple[float, int]]] = defaultdict(list)
     for risk, outcome in zip(risks, outcomes, strict=True):
-        index = min(int(risk * bin_count), bin_count - 1)
+        # Search the exact declared edges. Multiplication can round an edge
+        # left (0.58 * 100 < 58) or round its lower neighbor onto the edge.
+        index = min(bisect_right(edges, risk) - 1, bin_count - 1)
         grouped[index].append((risk, outcome))
     bins: list[CalibrationBin] = []
     for index in range(bin_count):
-        lower = index / bin_count
-        upper = (index + 1) / bin_count
+        lower = edges[index]
+        upper = edges[index + 1]
         rows = grouped[index]
         if not rows:
             bins.append(
