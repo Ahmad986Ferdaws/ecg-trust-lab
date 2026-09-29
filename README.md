@@ -177,6 +177,9 @@ complete artifact flow.
 Use the [frozen monitoring replay guide](docs/TRUST_MONITORING_REPLAY.md) to seal
 aggregate references and detect configuration drift during an audited replay.
 
+The [longitudinal follow-up guide](docs/LONGITUDINAL_FOLLOW_UP.md) adds aggregate
+target-availability profiles alongside the existing observed-only risk metrics.
+
 ## Dataset attribution
 
 PTB-XL 1.0.3 is provided by Wagner et al. through PhysioNet under CC BY 4.0.
