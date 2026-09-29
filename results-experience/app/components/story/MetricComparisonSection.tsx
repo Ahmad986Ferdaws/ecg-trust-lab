@@ -271,6 +271,15 @@ export function MetricComparisonSection({
               Every value below is an audited mean ± sample standard deviation
               across three frozen seeds. Inferential claims are stated separately.
             </p>
+            <div className={styles.resultsDownload}>
+              <a href="/reported-results.csv" download aria-describedby="results-download-scope">
+                Download aggregate results (CSV) <span aria-hidden="true">↓</span>
+              </a>
+              <p id="results-download-scope">
+                Reported research estimates for all four cohorts and both models,
+                with sample standard deviations, seed counts and versioned sources.
+              </p>
+            </div>
           </div>
         </header>
 

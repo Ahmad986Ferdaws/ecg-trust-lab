@@ -11,11 +11,12 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "pnpm run test:evidence && pnpm run test:waveform && pnpm run test:schematic && pnpm run test:cohort-url && pnpm run build && node --test tests/rendered-html.test.mjs",
+    "test": "pnpm run test:evidence && pnpm run test:waveform && pnpm run test:schematic && pnpm run test:cohort-url && pnpm run test:csv && pnpm run build && node --test tests/rendered-html.test.mjs",
     "test:evidence": "node --experimental-strip-types --test tests/evidence-parity.test.mjs",
     "test:waveform": "node --experimental-strip-types --test tests/synthetic-waveform.test.mjs",
     "test:schematic": "node --experimental-strip-types --test tests/schematic-leads.test.mjs",
     "test:cohort-url": "node --experimental-strip-types --test tests/cohort-url.test.mjs",
+    "test:csv": "node --experimental-strip-types --test tests/aggregate-results-csv.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler",
     "typecheck": "tsc --noEmit"
   },
