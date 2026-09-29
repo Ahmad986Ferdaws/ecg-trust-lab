@@ -806,3 +806,13 @@ verify that it retains:
 - all code-quality command outputs;
 - a statement that fold 10 was opened only after freezing choices, or an
   explicit exploratory label if that condition was violated.
+
+## 14. Newly computed longitudinal calibration bins
+
+Fixed-width longitudinal calibration bins use their declared edges directly:
+each interval includes its lower edge and excludes its upper edge, except that
+the final bin includes risk 1. An exact edge belongs to the bin on its right.
+For example, risk 0.58 with 100 bins belongs to [0.58, 0.59), even though floating-point
+multiplication yields `0.58 * 100 < 58`. Adjacent representable values remain on
+their respective sides of the edge. This corrects newly computed bin assignments;
+it does not rewrite frozen study artifacts or imply that a study was rerun.
