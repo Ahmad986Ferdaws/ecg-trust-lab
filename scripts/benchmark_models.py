@@ -18,6 +18,7 @@ from ecg_trust.benchmark import (
     MODEL_SPECS,
     Precision,
     benchmark_train_steps,
+    build_seeded_model,
     environment_metadata,
     probe_safe_batch_size,
     selected_model_specs,
@@ -141,7 +142,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 raise RuntimeError(f"{spec.name} could not train even at batch size 1")
             effective_batch_size = min(batch_size, probe.maximum_successful_batch)
 
-        model = spec.build()
+        model = build_seeded_model(spec.build, seed=args.seed)
         try:
             result = benchmark_train_steps(
                 model,
