@@ -85,7 +85,7 @@ export default function Home() {
           <span>ECG Trust Lab</span>
           <small>Results notebook / 2026</small>
         </a>
-        <div className="nav-context" aria-label="Study path">
+        <div className="nav-context" role="group" aria-label="Study path">
           <span>PTB-XL</span>
           <i aria-hidden="true">→</i>
           <span>SPH</span>
