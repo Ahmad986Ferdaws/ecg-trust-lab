@@ -15,7 +15,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from threading import Event, RLock
+from threading import BoundedSemaphore, Event, RLock
 from typing import Annotated, Final, Literal, Protocol, TypedDict, cast
 
 from fastapi import FastAPI, Header, Path, Request
@@ -81,6 +81,7 @@ class ReasonCode(StrEnum):
     ALL_TRUST_GATES_PASSED = "ALL_TRUST_GATES_PASSED"
     RELEASE_NOT_READY = "RELEASE_NOT_READY"
     BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE"
+    SERVICE_BUSY = "SERVICE_BUSY"
 
 
 class CaseKind(StrEnum):
@@ -234,6 +235,7 @@ class SentinelServiceConfig:
 
     service_version: str = "sentinel-v1"
     max_idempotency_entries: int = 1024
+    max_concurrent_analyses: int | None = None
 
     def __post_init__(self) -> None:
         if SERVICE_VERSION_PATTERN.fullmatch(self.service_version) is None:
@@ -244,6 +246,12 @@ class SentinelServiceConfig:
             or not 1 <= self.max_idempotency_entries <= 100_000
         ):
             raise ValueError("max_idempotency_entries must be an integer between 1 and 100000")
+        if self.max_concurrent_analyses is not None and (
+            isinstance(self.max_concurrent_analyses, bool)
+            or not isinstance(self.max_concurrent_analyses, int)
+            or not 1 <= self.max_concurrent_analyses <= 64
+        ):
+            raise ValueError("max_concurrent_analyses must be None or an integer between 1 and 64")
 
 
 class _StrictModel(BaseModel):
@@ -315,6 +323,7 @@ class _ServiceResult:
     content: dict[str, object]
     status_code: int
     cacheable: bool = False
+    retry_after_seconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -497,6 +506,8 @@ def _fail_closed_result(
 
 def _json_response(result: _ServiceResult, *, replayed: bool | None = None) -> JSONResponse:
     headers: dict[str, str] = {}
+    if result.retry_after_seconds is not None:
+        headers["Retry-After"] = str(result.retry_after_seconds)
     if replayed is not None:
         headers["Idempotency-Replayed"] = "true" if replayed else "false"
     return JSONResponse(
@@ -650,6 +661,34 @@ def create_sentinel_app(
 
     effective_config = config or SentinelServiceConfig()
     idempotency_store = _InMemoryIdempotencyStore(effective_config.max_idempotency_entries)
+    analysis_slots = (
+        BoundedSemaphore(effective_config.max_concurrent_analyses)
+        if effective_config.max_concurrent_analyses is not None
+        else None
+    )
+
+    def limited_analysis(request_body: CaseRequest, *, inference: bool) -> _ServiceResult:
+        if analysis_slots is not None and not analysis_slots.acquire(blocking=False):
+            result = _fail_closed_result(
+                effective_config,
+                case_id=request_body.case_id,
+                release_id=request_body.release_id,
+                reason=ReasonCode.SERVICE_BUSY,
+            )
+            return _ServiceResult(result.content, result.status_code, retry_after_seconds=1)
+        try:
+            return _run_analysis(
+                effective_config,
+                resolver=case_resolver,
+                provider=release_provider,
+                engine=analysis_engine,
+                request_body=request_body,
+                inference=inference,
+            )
+        finally:
+            if analysis_slots is not None:
+                analysis_slots.release()
+
     app = FastAPI(
         title="ECG Sentinel Research Service",
         version=effective_config.service_version,
@@ -783,14 +822,7 @@ def create_sentinel_app(
         responses={404: {"model": ErrorResponse}, 503: {"model": CaseValidationResponse}},
     )
     def validate_case(request_body: CaseRequest) -> JSONResponse:
-        result = _run_analysis(
-            effective_config,
-            resolver=case_resolver,
-            provider=release_provider,
-            engine=analysis_engine,
-            request_body=request_body,
-            inference=False,
-        )
+        result = limited_analysis(request_body, inference=False)
         return _json_response(result)
 
     @app.post(
@@ -814,14 +846,7 @@ def create_sentinel_app(
             result, replayed = idempotency_store.execute(
                 key=idempotency_key,
                 fingerprint=fingerprint,
-                operation=lambda: _run_analysis(
-                    effective_config,
-                    resolver=case_resolver,
-                    provider=release_provider,
-                    engine=analysis_engine,
-                    request_body=request_body,
-                    inference=True,
-                ),
+                operation=lambda: limited_analysis(request_body, inference=True),
             )
         except _IdempotencyConflictError:
             result = _error_result(

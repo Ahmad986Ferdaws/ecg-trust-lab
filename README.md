@@ -48,6 +48,9 @@ it is not an OOD-validation or clinical-validation result.
 The [verified counterfactual evaluation guide](docs/COUNTERFACTUAL_VERIFIED_RELEASE.md)
 shows how to bind both proposal analyses to the same frozen Sentinel release.
 
+For service deployments, the [analysis capacity guide](docs/SENTINEL_ANALYSIS_CAPACITY.md)
+explains optional per-process limits and retry behavior under load.
+
 ## Demo walkthrough
 
 [![ECG Trust Lab demo poster](publication/media/ecg-trust-lab-demo-poster.png)](publication/media/ecg-trust-lab-research-demo.mp4)
