@@ -28,6 +28,12 @@ from ecg_trust.longitudinal.evaluation import (
     TimeDependentRiskEvaluation,
     evaluate_time_dependent_binary_risk,
 )
+from ecg_trust.longitudinal.follow_up import (
+    FollowUpBinStatus,
+    FollowUpCompletenessBin,
+    RiskEvaluationWithFollowUp,
+    evaluate_binary_risk_with_follow_up,
+)
 from ecg_trust.longitudinal.splits import (
     TemporalPartition,
     TemporalSplitAssignment,
@@ -56,6 +62,8 @@ __all__ = [
     "ECGEncounter",
     "EvaluationStatus",
     "FollowUpStatus",
+    "FollowUpBinStatus",
+    "FollowUpCompletenessBin",
     "FutureEventDefinition",
     "LongitudinalCohort",
     "LongitudinalCohortSummary",
@@ -66,6 +74,7 @@ __all__ = [
     "PatientFutureTargets",
     "PatientTimeline",
     "RiskEvaluationConfig",
+    "RiskEvaluationWithFollowUp",
     "RiskObservation",
     "RoleIsolationError",
     "SourceRole",
@@ -82,4 +91,5 @@ __all__ = [
     "build_temporal_split_manifest",
     "derive_future_event_targets",
     "evaluate_time_dependent_binary_risk",
+    "evaluate_binary_risk_with_follow_up",
 ]

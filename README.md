@@ -162,6 +162,9 @@ See the [verified environment record](docs/ENVIRONMENT.md) for exact versions
 and CUDA details, and [reproducibility guide](docs/REPRODUCIBILITY.md) for the
 complete artifact flow.
 
+The [longitudinal follow-up guide](docs/LONGITUDINAL_FOLLOW_UP.md) adds aggregate
+target-availability profiles alongside the existing observed-only risk metrics.
+
 ## Dataset attribution
 
 PTB-XL 1.0.3 is provided by Wagner et al. through PhysioNet under CC BY 4.0.
