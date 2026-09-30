@@ -20,6 +20,7 @@ They are descriptive and never used to change predictions here.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -110,7 +111,10 @@ def _logistic_slope(
     ) <= float(negative_logits.min()):
         return 0.0, 0.0, False
     design = np.column_stack((np.ones_like(logits), logits))
-    coefficients = np.array([0.0, 1.0])
+    # Start from the intercept-only fit (slope 0): it never saturates, whereas
+    # the identity start can saturate extreme logits and stall Newton's method.
+    rate = float(outcomes.mean())
+    coefficients = np.array([math.log(rate) - math.log1p(-rate), 0.0])
 
     def log_likelihood(beta: FloatArray) -> float:
         linear = design @ beta

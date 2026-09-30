@@ -68,6 +68,18 @@ def test_overlapping_classes_with_extreme_logits_still_converge() -> None:
     assert np.isfinite(item.calibration_slope)
 
 
+def test_reversed_association_with_saturated_logits_still_converges() -> None:
+    logits = np.array([27.631, -5.0, -5.0, 27.631, 0.0])
+    probabilities = np.tile((1.0 / (1.0 + np.exp(-logits)))[:, None], (1, 5))
+    outcomes = np.tile(np.array([[0], [1], [0], [0], [1]]), (1, 5))
+
+    item = weak_calibration(outcomes, probabilities)[0]
+
+    assert item.converged
+    assert item.calibration_slope is not None
+    assert item.calibration_slope < 0.0
+
+
 def test_quasi_separation_with_a_shared_boundary_value_has_no_finite_slope() -> None:
     probabilities = np.tile(np.array([0.2, 0.4, 0.5, 0.5, 0.7])[:, None], (1, 5))
     outcomes = np.tile(np.array([[0], [0], [0], [1], [1]]), (1, 5))
