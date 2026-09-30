@@ -22,7 +22,31 @@ def test_five_terms_reconstruct_the_brier_score_exactly(n_bins: int) -> None:
         assert item.brier == pytest.approx(
             float(np.mean((probabilities[:, index] - targets[:, index]) ** 2))
         )
-        assert item.bins == min(n_bins, 200)
+        assert item.bins <= min(n_bins, 200)
+
+
+def test_tied_forecasts_share_a_bin_regardless_of_row_order() -> None:
+    grouped = np.tile(np.array([[0]] * 5 + [[1]] * 5), (1, 5))
+    interleaved = np.tile(np.array([[0], [1]] * 5), (1, 5))
+    probabilities = np.full((10, 5), 0.5)
+
+    first = brier_decomposition(grouped, probabilities, n_bins=2)[0]
+    second = brier_decomposition(interleaved, probabilities, n_bins=2)[0]
+
+    assert first.bins == second.bins == 1
+    assert first.resolution == pytest.approx(0.0)
+    assert first.reliability == pytest.approx(second.reliability) == pytest.approx(0.0)
+
+
+def test_within_bin_covariance_is_the_population_covariance() -> None:
+    targets = np.tile(np.array([[0], [1], [0], [1]]), (1, 5))
+    probabilities = np.tile(np.array([[0.1], [0.3], [0.6], [0.8]]), (1, 5))
+
+    item = brier_decomposition(targets, probabilities, n_bins=1)[0]
+    expected = float(np.mean((targets[:, 0] - 0.5) * (probabilities[:, 0] - 0.45)))
+
+    assert item.within_bin_covariance == pytest.approx(expected)
+    assert item.reconstructed == pytest.approx(item.brier, abs=1e-12)
 
 
 def test_constant_forecast_at_the_base_rate_has_only_uncertainty() -> None:

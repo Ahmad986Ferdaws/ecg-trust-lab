@@ -8,10 +8,12 @@ the Brier Score Decomposition", Weather and Forecasting, 2008) make it exact
 for binned continuous forecasts:
 
 ``Brier = reliability - resolution + uncertainty + within_bin_variance
-- within_bin_covariance``
+- 2 * within_bin_covariance``
 
-Bins are equal-mass partitions of a stable probability sort. Everything is
-descriptive and read-only.
+where the within-bin terms are pooled (count-weighted) population variance of
+forecasts and covariance between forecasts and outcomes inside bins. Bins are
+nearly equal-mass, but tied probabilities always share a bin, so results never
+depend on row order. Everything is descriptive and read-only.
 """
 
 from __future__ import annotations
@@ -52,7 +54,7 @@ class BrierComponents:
             - self.resolution
             + self.uncertainty
             + self.within_bin_variance
-            - self.within_bin_covariance
+            - 2.0 * self.within_bin_covariance
         )
 
     def to_dict(self) -> dict[str, float | int | str]:
@@ -68,11 +70,26 @@ class BrierComponents:
         }
 
 
+def _tie_aware_partitions(scores: FloatArray, n_bins: int) -> list[NDArray[np.intp]]:
+    """Near equal-mass bins whose boundaries never split tied scores."""
+
+    order = np.argsort(scores, kind="stable")
+    ordered = scores[order]
+    count = ordered.shape[0]
+    cuts: list[int] = []
+    for part in np.array_split(np.arange(count), min(n_bins, count))[:-1]:
+        cut = int(part[-1]) + 1
+        while cut < count and ordered[cut] == ordered[cut - 1]:
+            cut += 1
+        if cut < count and (not cuts or cut > cuts[-1]):
+            cuts.append(cut)
+    return [part for part in np.split(order, cuts) if part.size]
+
+
 def _decompose(label: str, scores: FloatArray, targets: FloatArray, n_bins: int) -> BrierComponents:
     count = scores.shape[0]
     base_rate = float(targets.mean())
-    order = np.argsort(scores, kind="stable")
-    partitions = [part for part in np.array_split(order, min(n_bins, count)) if part.size]
+    partitions = _tie_aware_partitions(scores, n_bins)
     reliability = resolution = variance = covariance = 0.0
     for part in partitions:
         forecast = scores[part]
@@ -83,9 +100,7 @@ def _decompose(label: str, scores: FloatArray, targets: FloatArray, n_bins: int)
         reliability += weight * (mean_forecast - event_rate) ** 2
         resolution += weight * (event_rate - base_rate) ** 2
         variance += float(np.sum(np.square(forecast - mean_forecast))) / count
-        covariance += (
-            2.0 * float(np.sum((outcome - event_rate) * (forecast - mean_forecast))) / count
-        )
+        covariance += float(np.sum((outcome - event_rate) * (forecast - mean_forecast))) / count
     return BrierComponents(
         label=label,
         bins=len(partitions),
