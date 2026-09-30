@@ -102,6 +102,8 @@ class SignalQualityConfig:
     flat_reacquire_std_mv: float = 0.006
     flat_warn_fraction: float = 0.985
     flat_reacquire_fraction: float = 0.997
+    flat_run_warn_seconds: float | None = None
+    flat_run_reacquire_seconds: float | None = None
 
     clipping_equality_tolerance_mv: float = 1e-8
     clipping_warn_fraction: float = 0.05
@@ -231,6 +233,28 @@ class SignalQualityConfig:
             and self.flat_warn_fraction < self.flat_reacquire_fraction
         ):
             raise ValueError("flatline warning and reacquisition thresholds are incoherent")
+        if (self.flat_run_warn_seconds is None) != (self.flat_run_reacquire_seconds is None):
+            raise ValueError("flat-run thresholds must be enabled or disabled together")
+        if self.flat_run_warn_seconds is not None and self.flat_run_reacquire_seconds is not None:
+            for name, value in (
+                ("flat_run_warn_seconds", self.flat_run_warn_seconds),
+                ("flat_run_reacquire_seconds", self.flat_run_reacquire_seconds),
+            ):
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or value <= 0.0
+                ):
+                    raise ValueError(f"{name} must be finite and positive")
+            if not (
+                self.flat_run_warn_seconds
+                < self.flat_run_reacquire_seconds
+                <= self.expected_duration_seconds
+            ):
+                raise ValueError(
+                    "flat-run warning must precede reacquisition within the record duration"
+                )
         if not (
             self.clipping_warn_fraction < self.clipping_reacquire_fraction
             and self.clipping_warn_run_samples < self.clipping_reacquire_run_samples
@@ -261,6 +285,18 @@ class SignalQualityConfig:
 
 
 DEFAULT_SIGNAL_QUALITY_CONFIG = SignalQualityConfig()
+
+# The v1 default stays frozen because historical protocols bind its version and
+# behavior. v2 adds a duration rule for contiguous exactly-flat stretches, which
+# whole-record flatline statistics cannot see (for example, a lead that drops
+# out halfway through). Thresholds come from a development-fold check: on 400
+# PTB-XL folds 1-8 records without an electrode-problem flag, the longest flat
+# stretch was 0.28 s.
+SENTINEL_V2_SIGNAL_QUALITY_CONFIG = SignalQualityConfig(
+    version="canonical-12x1000-mv-v2",
+    flat_run_warn_seconds=0.5,
+    flat_run_reacquire_seconds=1.0,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -517,6 +553,9 @@ def _assess_lead(
     issues: list[QualityIssue] = []
 
     flat_status, flat_metric, flat_observed, flat_boundary = _flatline_status(metrics, config)
+    run_evidence = _flat_run_status(lead, config)
+    if run_evidence is not None and _status_rank(run_evidence[0]) > _status_rank(flat_status):
+        flat_status, flat_metric, flat_observed, flat_boundary = run_evidence
     if flat_status is not QualityStatus.PASS:
         issues.append(
             QualityIssue(
@@ -806,6 +845,27 @@ def _flatline_status(
         if triggered:
             return QualityStatus.LIMITED, metric, observed, boundary
     return QualityStatus.PASS, None, None, None
+
+
+def _flat_run_status(
+    lead: FloatArray,
+    config: SignalQualityConfig,
+) -> tuple[QualityStatus, str, float, float] | None:
+    """Grade the longest contiguous exactly-flat stretch, when the rule is enabled."""
+
+    warning = config.flat_run_warn_seconds
+    reacquire = config.flat_run_reacquire_seconds
+    if warning is None or reacquire is None:
+        return None
+    flat_steps = np.abs(np.diff(lead)) <= config.flat_step_tolerance_mv
+    longest_steps = _longest_true_run(flat_steps)
+    samples = longest_steps + 1 if longest_steps else 0
+    seconds = samples / config.expected_sample_rate_hz
+    status = _upper_threshold_status(seconds, warning, reacquire)
+    if status is QualityStatus.PASS:
+        return None
+    boundary = reacquire if status is QualityStatus.REACQUIRE else warning
+    return status, "longest_flat_run_seconds", seconds, boundary
 
 
 def _limb_lead_consistency_ratio(signal: FloatArray) -> float:
