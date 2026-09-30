@@ -4,12 +4,19 @@ A one-shot protocol often passes only if an upper confidence bound on an
 error proportion is at most a frozen maximum. Before freezing such a rule,
 ask how likely it is to pass if the system behaves exactly as designed.
 
+Two rate models are supported:
+
+* a known true error rate, where the count is binomial;
+* a split-conformal threshold set at the ``rank``-th smallest of ``n``
+  calibration scores. Every validation record shares that random threshold,
+  so with exchangeable scores the rejection count is beta-binomial with
+  parameters ``n + 1 - rank`` and ``rank`` (its mean rate is the familiar
+  ``(n + 1 - rank) / (n + 1)``).
+
 Example: the source-support completion protocol thresholded at the 794th of
-834 calibration scores. For exchangeable data that implies a design
-false-rejection rate of (834 + 1 - 794) / (834 + 1) = 4.91%. It then required
-a one-sided 95% upper bound of at most 5% on 465 validation records.
-``pass_probability`` shows that rule passes only a few percent of the time
-even when the detector works as designed (see ``docs`` for the note).
+834 calibration scores and required a one-sided 95% upper bound of at most 5%
+on 465 validation records. Under the conformal model that rule passes about
+10% of the time even when the detector behaves exactly as designed.
 
 Upper bounds are exact Clopper-Pearson (conservative) or Wilson score
 intervals for a binomial count. Clustered data such as several ECGs per
@@ -22,7 +29,7 @@ import math
 from dataclasses import dataclass
 from enum import StrEnum
 
-from scipy.stats import beta, binom, norm  # type: ignore[import-untyped]
+from scipy.stats import beta, betabinom, binom, norm  # type: ignore[import-untyped]
 
 
 class GatePowerError(ValueError):
@@ -35,6 +42,24 @@ class BoundMethod(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ConformalThreshold:
+    """A threshold at the ``rank``-th smallest of ``calibration_size`` scores."""
+
+    calibration_size: int
+    rank: int
+
+    def __post_init__(self) -> None:
+        _count(self.calibration_size, "calibration_size", minimum=1)
+        _count(self.rank, "rank", minimum=1)
+        if self.rank > self.calibration_size:
+            raise GatePowerError("rank cannot exceed calibration_size")
+
+    @property
+    def design_rate(self) -> float:
+        return (self.calibration_size + 1 - self.rank) / (self.calibration_size + 1)
+
+
+@dataclass(frozen=True, slots=True)
 class GatePlan:
     """Pass characteristics of an upper-bound proportion gate."""
 
@@ -44,10 +69,12 @@ class GatePlan:
     method: BoundMethod
     max_passing_count: int | None
     true_rate: float
+    rate_model: str
     pass_probability: float
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "rate_model": self.rate_model,
             "sample_size": self.sample_size,
             "maximum_rate": self.maximum_rate,
             "confidence": self.confidence,
@@ -89,11 +116,7 @@ def split_conformal_rejection_rate(calibration_size: int, rank: int) -> float:
     with probability ``(n + 1 - rank) / (n + 1)``.
     """
 
-    size = _count(calibration_size, "calibration_size", minimum=1)
-    order = _count(rank, "rank", minimum=1)
-    if order > size:
-        raise GatePowerError("rank cannot exceed calibration_size")
-    return (size + 1 - order) / (size + 1)
+    return ConformalThreshold(calibration_size, rank).design_rate
 
 
 def upper_bound(
@@ -155,25 +178,47 @@ def plan_gate(
     *,
     sample_size: int,
     maximum_rate: float,
-    true_rate: float,
+    true_rate: float | None = None,
+    conformal: ConformalThreshold | None = None,
     confidence: float = 0.95,
     method: BoundMethod = BoundMethod.CLOPPER_PEARSON,
 ) -> GatePlan:
-    """Probability that the gate passes when the true error rate is ``true_rate``."""
+    """Probability that the gate passes under exactly one rate model."""
 
-    rate = _closed_unit(true_rate, "true_rate")
+    if (true_rate is None) == (conformal is None):
+        raise GatePowerError("provide exactly one of true_rate or conformal")
+    size = _count(sample_size, "sample_size", minimum=1)
     bound_method = BoundMethod(method)
-    passing = max_passing_count(
-        sample_size, maximum_rate, confidence=confidence, method=bound_method
-    )
-    probability = 0.0 if passing is None else float(binom.cdf(passing, sample_size, rate))
+    passing = max_passing_count(size, maximum_rate, confidence=confidence, method=bound_method)
+    if conformal is not None:
+        if not isinstance(conformal, ConformalThreshold):
+            raise GatePowerError("conformal must be a ConformalThreshold")
+        rate = conformal.design_rate
+        model = "conformal_beta_binomial"
+        probability = (
+            0.0
+            if passing is None
+            else float(
+                betabinom.cdf(
+                    passing,
+                    size,
+                    conformal.calibration_size + 1 - conformal.rank,
+                    conformal.rank,
+                )
+            )
+        )
+    else:
+        rate = _closed_unit(true_rate, "true_rate")
+        model = "binomial"
+        probability = 0.0 if passing is None else float(binom.cdf(passing, size, rate))
     return GatePlan(
-        sample_size=sample_size,
+        sample_size=size,
         maximum_rate=float(maximum_rate),
         confidence=float(confidence),
         method=bound_method,
         max_passing_count=passing,
         true_rate=rate,
+        rate_model=model,
         pass_probability=probability,
     )
 
@@ -181,42 +226,45 @@ def plan_gate(
 def required_sample_size(
     *,
     maximum_rate: float,
-    true_rate: float,
+    true_rate: float | None = None,
+    conformal: ConformalThreshold | None = None,
     target_probability: float = 0.8,
     confidence: float = 0.95,
     method: BoundMethod = BoundMethod.CLOPPER_PEARSON,
-    limit: int = 100_000,
+    limit: int = 20_000,
 ) -> int | None:
     """Smallest sample size reaching ``target_probability``, or ``None`` within ``limit``.
 
-    Pass probability is not monotone in sample size (binomial sawtooth), so the
-    first qualifying size is returned. ``None`` also covers true rates at or
-    above the maximum, which no finite sample can pass reliably.
+    Pass probability is not monotone in sample size (binomial sawtooth), so every
+    size is checked in order. ``None`` also covers design rates at or above the
+    maximum, which no finite sample can pass reliably.
     """
 
     ceiling = _open_unit(maximum_rate, "maximum_rate")
-    rate = _closed_unit(true_rate, "true_rate")
     target = _open_unit(target_probability, "target_probability")
     cap = _count(limit, "limit", minimum=1)
+    if (true_rate is None) == (conformal is None):
+        raise GatePowerError("provide exactly one of true_rate or conformal")
+    rate = conformal.design_rate if conformal is not None else _closed_unit(true_rate, "true_rate")
     if rate >= ceiling:
         return None
-    size = 1
-    while size <= cap:
+    for size in range(1, cap + 1):
         plan = plan_gate(
             sample_size=size,
             maximum_rate=ceiling,
-            true_rate=rate,
+            true_rate=true_rate,
+            conformal=conformal,
             confidence=confidence,
             method=method,
         )
         if plan.pass_probability >= target:
             return size
-        size = size + 1 if size < 200 else int(size * 1.02) + 1
     return None
 
 
 __all__ = [
     "BoundMethod",
+    "ConformalThreshold",
     "GatePlan",
     "GatePowerError",
     "max_passing_count",

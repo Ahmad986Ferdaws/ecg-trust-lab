@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
 import pytest
-from scipy.stats import binom
+from scipy.stats import betabinom, binom
 
 from ecg_trust.gate_power import (
     BoundMethod,
+    ConformalThreshold,
     GatePowerError,
     max_passing_count,
     plan_gate,
@@ -36,21 +38,38 @@ def test_clopper_pearson_zero_count_has_the_closed_form_bound() -> None:
 
 
 def test_source_support_rule_was_unlikely_to_pass_as_designed() -> None:
-    design_rate = split_conformal_rejection_rate(834, 794)
+    threshold = ConformalThreshold(834, 794)
 
-    plan = plan_gate(sample_size=465, maximum_rate=0.05, true_rate=design_rate)
+    plan = plan_gate(sample_size=465, maximum_rate=0.05, conformal=threshold)
+    fixed_rate = plan_gate(sample_size=465, maximum_rate=0.05, true_rate=threshold.design_rate)
 
     assert plan.max_passing_count == 15
     assert upper_bound(15, 465) <= 0.05 < upper_bound(16, 465)
-    assert plan.pass_probability == pytest.approx(binom.cdf(15, 465, design_rate))
-    assert plan.pass_probability < 0.1
+    assert plan.rate_model == "conformal_beta_binomial"
+    assert plan.true_rate == pytest.approx(41 / 835)
+    assert plan.pass_probability == pytest.approx(betabinom.cdf(15, 465, 41, 794))
+    assert 0.09 < plan.pass_probability < 0.1
+    assert fixed_rate.pass_probability == pytest.approx(binom.cdf(15, 465, 41 / 835))
+    assert fixed_rate.pass_probability < plan.pass_probability
     assert upper_bound(25, 465) > 0.05
 
 
-def test_a_stricter_threshold_makes_the_same_gate_usually_pass() -> None:
-    design_rate = split_conformal_rejection_rate(834, 815)
+def test_conformal_count_distribution_matches_simulation() -> None:
+    rng = np.random.default_rng(0)
+    passes = 0
+    trials = 4000
+    for _ in range(trials):
+        threshold = np.sort(rng.uniform(size=40))[35]
+        passes += int((rng.uniform(size=60) > threshold).sum() <= 5)
+    plan = plan_gate(sample_size=60, maximum_rate=0.2, conformal=ConformalThreshold(40, 36))
+    expected = betabinom.cdf(5, 60, 5, 36)
 
-    plan = plan_gate(sample_size=465, maximum_rate=0.05, true_rate=design_rate)
+    assert plan.pass_probability == pytest.approx(betabinom.cdf(plan.max_passing_count, 60, 5, 36))
+    assert passes / trials == pytest.approx(expected, abs=0.03)
+
+
+def test_a_stricter_threshold_makes_the_same_gate_usually_pass() -> None:
+    plan = plan_gate(sample_size=465, maximum_rate=0.05, conformal=ConformalThreshold(834, 815))
 
     assert plan.pass_probability > 0.8
     assert plan.to_dict()["method"] == "clopper_pearson"
@@ -75,6 +94,14 @@ def test_binary_search_matches_a_linear_scan(method: BoundMethod) -> None:
         assert max_passing_count(size, 0.2, method=method) == linear
 
 
+def test_required_sample_size_checks_every_candidate() -> None:
+    size = required_sample_size(
+        maximum_rate=0.01, true_rate=0.001, target_probability=0.1, limit=300
+    )
+
+    assert size == 299
+
+
 def test_gate_that_no_count_can_pass_has_zero_probability() -> None:
     assert max_passing_count(5, 0.01) is None
     assert plan_gate(sample_size=5, maximum_rate=0.01, true_rate=0.0).pass_probability == 0.0
@@ -90,6 +117,11 @@ def test_gate_that_no_count_can_pass_has_zero_probability() -> None:
         lambda: plan_gate(sample_size=0, maximum_rate=0.05, true_rate=0.01),
         lambda: plan_gate(sample_size=10, maximum_rate=float("nan"), true_rate=0.01),
         lambda: plan_gate(sample_size=10, maximum_rate=0.05, true_rate=1.5),
+        lambda: plan_gate(sample_size=10, maximum_rate=0.05),
+        lambda: plan_gate(
+            sample_size=10, maximum_rate=0.05, true_rate=0.01, conformal=ConformalThreshold(9, 9)
+        ),
+        lambda: ConformalThreshold(10, 0),
     ],
 )
 def test_invalid_controls_are_rejected(call: object) -> None:
@@ -104,7 +136,8 @@ def test_cli_reports_json_and_rejects_bad_controls(capsys: pytest.CaptureFixture
     )
     report = json.loads(capsys.readouterr().out)
     assert report["max_passing_count"] == 15
-    assert report["pass_probability"] < 0.1
+    assert report["rate_model"] == "conformal_beta_binomial"
+    assert 0.09 < report["pass_probability"] < 0.1
 
     assert cli.main(["--sample-size", "465", "--maximum-rate", "2", "--true-rate", "0.01"]) == 2
     assert "maximum_rate" in capsys.readouterr().err

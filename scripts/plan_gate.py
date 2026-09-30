@@ -9,10 +9,10 @@ import sys
 
 from ecg_trust.gate_power import (
     BoundMethod,
+    ConformalThreshold,
     GatePowerError,
     plan_gate,
     required_sample_size,
-    split_conformal_rejection_rate,
 )
 
 
@@ -27,7 +27,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs=2,
         type=int,
         metavar=("CALIBRATION_SIZE", "RANK"),
-        help="derive the design rate from a split-conformal order-statistic threshold",
+        help=(
+            "model a split-conformal order-statistic threshold; the shared random "
+            "threshold makes the count beta-binomial"
+        ),
     )
     parser.add_argument("--confidence", type=float, default=0.95)
     parser.add_argument(
@@ -42,22 +45,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        true_rate = (
-            split_conformal_rejection_rate(*args.conformal)
-            if args.conformal is not None
-            else args.true_rate
-        )
+        conformal = ConformalThreshold(*args.conformal) if args.conformal is not None else None
+        true_rate = None if conformal is not None else args.true_rate
         method = BoundMethod(args.method)
         plan = plan_gate(
             sample_size=args.sample_size,
             maximum_rate=args.maximum_rate,
             true_rate=true_rate,
+            conformal=conformal,
             confidence=args.confidence,
             method=method,
         )
         needed = required_sample_size(
             maximum_rate=args.maximum_rate,
             true_rate=true_rate,
+            conformal=conformal,
             target_probability=args.target_probability,
             confidence=args.confidence,
             method=method,
