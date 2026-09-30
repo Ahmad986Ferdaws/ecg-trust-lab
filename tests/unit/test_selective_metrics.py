@@ -41,6 +41,12 @@ def test_ties_use_the_random_tie_break_expectation_and_ignore_input_order() -> N
     assert aurc([1.0, 0.0], [0.3, 0.3]) == pytest.approx(0.5)
 
 
+def test_exactly_representable_integer_uncertainty_keeps_its_order() -> None:
+    uncertainty = np.array([2**52 + 1, 2**52], dtype=np.int64)
+
+    assert aurc([0.0, 1.0], uncertainty) == pytest.approx(0.75)
+
+
 def test_constant_uncertainty_cannot_beat_the_oracle() -> None:
     rng = np.random.default_rng(7)
     losses = rng.uniform(size=50)
@@ -85,6 +91,8 @@ def test_matches_existing_dense_risk_coverage_without_ties() -> None:
         ([0.0, 1.0], [0.1 + 1j, 0.2], "real-valued"),
         (["a", "b"], [0.1, 0.2], "real-valued"),
         (np.array([0.0, 1.0], dtype=object), [0.1, 0.2], "real numeric"),
+        ([0.0, 1.0], np.array([2**53 + 1, 2**53], dtype=np.int64), "exactly"),
+        ([0.0, 1.0], np.array([2**63 + 1, 1], dtype=np.uint64), "exactly"),
     ],
 )
 def test_malformed_inputs_are_rejected(losses: object, uncertainty: object, message: str) -> None:

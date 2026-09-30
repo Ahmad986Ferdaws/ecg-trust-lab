@@ -62,6 +62,10 @@ def _vector(values: ArrayLike, *, name: str, count: int | None = None) -> FloatA
         raise SelectiveMetricError(f"{name} overflows float64") from error
     if not np.isfinite(vector).all():
         raise SelectiveMetricError(f"{name} must be finite")
+    if np.issubdtype(raw.dtype, np.integer) and not np.array_equal(
+        vector.astype(raw.dtype), raw
+    ):
+        raise SelectiveMetricError(f"{name} cannot be represented exactly as float64")
     if count is not None and vector.shape[0] != count:
         raise SelectiveMetricError(f"{name} must have {count} entries")
     return vector
