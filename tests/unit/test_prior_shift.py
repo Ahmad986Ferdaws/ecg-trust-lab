@@ -73,6 +73,15 @@ def test_subnormal_priors_do_not_produce_nans() -> None:
     assert np.isfinite(estimated.labels[0].target_prior)
 
 
+def test_tiny_probabilities_survive_an_identity_adjustment() -> None:
+    probabilities = np.array([[1e-20], [1e-300], [0.3]])
+
+    adjusted = adjust_to_priors(probabilities, source_priors=(0.4,), target_priors=(0.4,))
+
+    np.testing.assert_allclose(adjusted, probabilities, rtol=1e-12)
+    assert adjusted[1, 0] > 0.0
+
+
 def test_iteration_budget_is_reported() -> None:
     scores = _calibrated_scores(0.3, 0.05, 2_000, 4)[:, None]
 

@@ -102,8 +102,18 @@ def _reweight(probabilities: FloatArray, source: float, target: float) -> FloatA
     shift = _logit(target) - _logit(source)
     with np.errstate(divide="ignore"):
         logits = np.log(probabilities) - np.log1p(-probabilities)
-    adjusted = 0.5 * (1.0 + np.tanh(0.5 * (logits + shift)))
-    return np.asarray(adjusted, dtype=np.float64)
+    return _stable_sigmoid(logits + shift)
+
+
+def _stable_sigmoid(values: FloatArray) -> FloatArray:
+    # Branch on sign so neither side cancels: tiny probabilities such as 1e-20
+    # survive, and +/-inf map exactly to 1/0.
+    result = np.empty_like(values)
+    positive = values >= 0.0
+    result[positive] = 1.0 / (1.0 + np.exp(-values[positive]))
+    exponential = np.exp(values[~positive])
+    result[~positive] = exponential / (1.0 + exponential)
+    return result
 
 
 def adjust_to_priors(
