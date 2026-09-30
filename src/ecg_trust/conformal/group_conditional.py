@@ -52,11 +52,14 @@ def _groups(values: Sequence[str], count: int) -> tuple[str, ...]:
     return groups
 
 
-def _row_count(probabilities: ArrayLike) -> int:
+def _array(values: ArrayLike, name: str) -> np.ndarray:
     try:
-        matrix = np.asarray(probabilities)
+        return np.asarray(values)
     except (TypeError, ValueError, OverflowError) as error:
-        raise ConformalValidationError("probabilities must be a numeric matrix") from error
+        raise ConformalValidationError(f"{name} must be a rectangular numeric array") from error
+
+
+def _row_count(matrix: np.ndarray) -> int:
     if matrix.ndim != 2:
         raise ConformalValidationError("probabilities must be a two-dimensional matrix")
     return int(matrix.shape[0])
@@ -109,8 +112,8 @@ class GroupConditionalConformal:
     ) -> GroupConditionalConformal:
         """Fit a separate label-wise conformal model inside each group."""
 
-        matrix = np.asarray(probabilities)
-        target_matrix = np.asarray(targets)
+        matrix = _array(probabilities, "probabilities")
+        target_matrix = _array(targets, "targets")
         names = _groups(groups, _row_count(matrix))
         if target_matrix.ndim < 1 or target_matrix.shape[0] != len(names):
             raise ConformalValidationError("targets must provide one row per group name")
@@ -128,7 +131,7 @@ class GroupConditionalConformal:
     def predict(self, probabilities: ArrayLike, groups: Sequence[str]) -> BinaryPredictionSets:
         """Apply each row's own group thresholds; unknown groups are refused."""
 
-        matrix = np.asarray(probabilities)
+        matrix = _array(probabilities, "probabilities")
         names = _groups(groups, _row_count(matrix))
         unknown = sorted(set(names) - set(self.models))
         if unknown:

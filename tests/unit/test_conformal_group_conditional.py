@@ -91,6 +91,21 @@ def test_unknown_groups_and_malformed_inputs_are_refused() -> None:
         GroupConditionalConformal.fit(probabilities, targets[:10], ["a"] * 50, label_names=LABELS)
 
 
+def test_ragged_inputs_raise_the_package_validation_error() -> None:
+    probabilities, targets = _cohort(20, noise=1.0, seed=8)
+    model = GroupConditionalConformal.fit(probabilities, targets, ["a"] * 20, label_names=LABELS)
+    ragged = [[0.1, 0.2, 0.3, 0.4, 0.5], [0.1, 0.2]]
+
+    with pytest.raises(ConformalValidationError, match="rectangular"):
+        GroupConditionalConformal.fit(ragged, targets[:2], ["a", "a"], label_names=LABELS)
+    with pytest.raises(ConformalValidationError, match="rectangular"):
+        GroupConditionalConformal.fit(
+            probabilities[:2], [[0, 1, 0, 0, 0], [1]], ["a", "a"], label_names=LABELS
+        )
+    with pytest.raises(ConformalValidationError, match="rectangular"):
+        model.predict(ragged, ["a", "a"])
+
+
 def test_models_are_validated_and_read_only() -> None:
     probabilities, targets = _cohort(50, noise=1.0, seed=5)
     first = LabelwiseBinaryConformal.fit(probabilities, targets, label_names=LABELS, alpha=0.1)
