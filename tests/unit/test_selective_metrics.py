@@ -1,0 +1,151 @@
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from ecg_trust.post_analysis import dense_risk_coverage
+from ecg_trust.selective_metrics import (
+    SelectiveMetricError,
+    aurc,
+    excess_aurc,
+    oracle_aurc,
+    selective_risk_curve,
+)
+
+
+def test_perfect_and_inverted_rankings_have_known_areas() -> None:
+    losses = [0.0, 1.0]
+
+    perfect = excess_aurc(losses, [0.1, 0.9])
+    inverted = excess_aurc(losses, [0.9, 0.1])
+
+    assert perfect.aurc == pytest.approx(0.25)
+    assert perfect.oracle_aurc == pytest.approx(0.25)
+    assert perfect.excess_aurc == pytest.approx(0.0)
+    assert inverted.aurc == pytest.approx(0.75)
+    assert inverted.excess_aurc == pytest.approx(0.5)
+    assert inverted.to_dict()["count"] == 2
+
+
+def test_ties_use_the_random_tie_break_expectation_and_ignore_input_order() -> None:
+    losses = np.array([1.0, 0.0, 0.0, 1.0])
+    uncertainty = np.array([0.5, 0.5, 0.2, 0.9])
+    permutation = np.array([3, 1, 0, 2])
+
+    curve = selective_risk_curve(losses, uncertainty)
+
+    np.testing.assert_allclose(curve, [0.0, 0.25, 1.0 / 3.0, 0.5])
+    assert aurc(losses[permutation], uncertainty[permutation]) == pytest.approx(
+        aurc(losses, uncertainty)
+    )
+    assert aurc([1.0, 0.0], [0.3, 0.3]) == pytest.approx(0.5)
+
+
+def test_exactly_representable_integer_uncertainty_keeps_its_order() -> None:
+    uncertainty = np.array([2**52 + 1, 2**52], dtype=np.int64)
+
+    assert aurc([0.0, 1.0], uncertainty) == pytest.approx(0.75)
+
+
+def test_extreme_finite_losses_do_not_overflow() -> None:
+    curve = selective_risk_curve([1e308, 9e307], [0.0, 1.0])
+    result = excess_aurc([1e308, 9e307], [0.0, 1.0])
+
+    np.testing.assert_allclose(curve, [1e308, 9.5e307])
+    assert np.isfinite(result.aurc)
+    assert np.isfinite(result.excess_aurc)
+    assert result.oracle_aurc == pytest.approx(9e307 / 2 + 9.5e307 / 2)
+    assert np.isfinite(aurc([1e308, 1e308], [0.0, 0.0]))
+
+
+def test_wide_dynamic_range_keeps_small_prefixes_and_extreme_scores() -> None:
+    curve = selective_risk_curve([1e-300, 1e100], [0.0, 1.0])
+
+    with np.errstate(over="raise", invalid="raise"):
+        extreme = aurc([0.0, 1.0], [-1e308, 1e308])
+
+    assert curve[0] == 1e-300
+    assert curve[1] == pytest.approx(5e99)
+    assert extreme == pytest.approx(0.25)
+
+
+@pytest.mark.skipif(
+    np.finfo(np.longdouble).eps >= np.finfo(np.float64).eps,
+    reason="platform long double is not wider than float64",
+)
+def test_extended_floats_that_collapse_are_rejected() -> None:
+    wide = np.array([1 + np.finfo(np.longdouble).eps, 1], dtype=np.longdouble)
+
+    with pytest.raises(SelectiveMetricError, match="exactly"):
+        aurc([0.0, 1.0], wide)
+
+
+def test_tie_group_mean_is_permutation_invariant_for_mixed_magnitudes() -> None:
+    forward = selective_risk_curve([1e16, 1.0, 1.0], [0.0, 0.0, 0.0])
+    backward = selective_risk_curve([1.0, 1.0, 1e16], [0.0, 0.0, 0.0])
+
+    np.testing.assert_array_equal(forward, backward)
+
+
+def test_exactly_representable_large_python_integers_are_accepted() -> None:
+    assert aurc([0.0, 1.0], [2**54, 0]) == pytest.approx(
+        aurc([0.0, 1.0], np.array([2**54, 0], dtype=np.int64))
+    )
+
+
+def test_constant_uncertainty_cannot_beat_the_oracle() -> None:
+    rng = np.random.default_rng(7)
+    losses = rng.uniform(size=50)
+
+    result = excess_aurc(losses, np.zeros(50))
+
+    assert result.aurc == pytest.approx(float(losses.mean()))
+    assert result.oracle_aurc == pytest.approx(oracle_aurc(losses))
+    assert result.excess_aurc > 0.0
+
+
+def test_matches_existing_dense_risk_coverage_without_ties() -> None:
+    rng = np.random.default_rng(11)
+    targets = rng.integers(0, 2, size=(40, 5))
+    probabilities = rng.uniform(size=(40, 5))
+    uncertainty = rng.permutation(40).astype(np.float64)
+    thresholds = [0.5] * 5
+    exact_error = np.any((probabilities >= 0.5) != targets.astype(bool), axis=1)
+
+    reference = dense_risk_coverage(
+        targets,
+        probabilities,
+        thresholds=thresholds,
+        uncertainty=uncertainty,
+    )
+
+    assert aurc(exact_error.astype(np.float64), uncertainty) == pytest.approx(
+        reference.aurc_exact_match_error
+    )
+
+
+@pytest.mark.parametrize(
+    ("losses", "uncertainty", "message"),
+    [
+        ([], [], "non-empty"),
+        ([[0.0]], [[0.0]], "one-dimensional"),
+        ([0.0, 1.0], [0.1], "2 entries"),
+        ([0.0, -1.0], [0.1, 0.2], "non-negative"),
+        ([0.0, np.nan], [0.1, 0.2], "finite"),
+        ([0.0, 1.0], [0.1, np.inf], "finite"),
+        ([True, False], [0.1, 0.2], "real numeric"),
+        ([0.0, 1.0], [0.1 + 1j, 0.2], "real-valued"),
+        (["a", "b"], [0.1, 0.2], "real-valued"),
+        (np.array([0.0, 1.0], dtype=object), [0.1, 0.2], "real numeric"),
+        ([0.0, 1.0], np.array([2**53 + 1, 2**53], dtype=np.int64), "exactly"),
+        ([0.0, 1.0], np.array([2**63 + 1, 1], dtype=np.uint64), "exactly"),
+        ([0.0, 1.0], [2**53 + 1, float(2**53)], "exactly"),
+        ([0.0, 1.0], [np.int64(2**53 + 1), 0.5], "exactly"),
+        ([True, 0.0], [0.1, 0.2], "real numeric"),
+        ([0.0, 1.0], [True, 0.5], "real numeric"),
+        ([0.0, 1.0], [10**400, 0.5], "exactly"),
+    ],
+)
+def test_malformed_inputs_are_rejected(losses: object, uncertainty: object, message: str) -> None:
+    with pytest.raises(SelectiveMetricError, match=message):
+        excess_aurc(losses, uncertainty)  # type: ignore[arg-type]
