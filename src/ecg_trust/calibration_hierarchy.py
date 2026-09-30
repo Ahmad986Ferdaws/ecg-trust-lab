@@ -78,6 +78,15 @@ def _intercept_with_offset(logits: FloatArray, outcomes: FloatArray) -> float:
 def _logistic_slope(
     logits: FloatArray, outcomes: FloatArray, max_iterations: int
 ) -> tuple[float, float, bool]:
+    positive_logits = logits[outcomes == 1.0]
+    negative_logits = logits[outcomes == 0.0]
+    # With one covariate, a finite maximum-likelihood slope exists only when the
+    # two outcome classes overlap; (quasi-)complete separation drives it to
+    # infinity, and saturated fits would otherwise look converged.
+    if float(negative_logits.max()) <= float(positive_logits.min()) or float(
+        positive_logits.max()
+    ) <= float(negative_logits.min()):
+        return 0.0, 0.0, False
     design = np.column_stack((np.ones_like(logits), logits))
     coefficients = np.array([0.0, 1.0])
 
@@ -90,24 +99,35 @@ def _logistic_slope(
         fitted = _sigmoid(design @ coefficients)
         weights = fitted * (1.0 - fitted)
         gradient = design.T @ (outcomes - fitted)
+        if float(np.max(np.abs(gradient))) < 1e-9 * max(1.0, float(outcomes.shape[0])):
+            return float(coefficients[0]), float(coefficients[1]), True
         hessian = design.T @ (design * weights[:, None])
         try:
             step = np.linalg.solve(hessian, gradient)
         except np.linalg.LinAlgError:
             return float(coefficients[0]), float(coefficients[1]), False
+        if not np.isfinite(step).all():
+            return float(coefficients[0]), float(coefficients[1]), False
+        # Backtrack until the likelihood does not decrease; never apply a
+        # rejected step. Newton directions are ascent directions here, so a
+        # small enough scale is always accepted unless we are at the optimum.
         scale = 1.0
-        while scale > 1e-8:
+        accepted = False
+        while scale >= 1e-16:
             candidate = coefficients + scale * step
             value = log_likelihood(candidate)
-            if value >= current - 1e-12:
+            if np.isfinite(value) and value >= current:
+                accepted = True
                 break
             scale *= 0.5
-        coefficients = coefficients + scale * step
-        improvement = log_likelihood(coefficients) - current
-        current += improvement
-        if not np.isfinite(coefficients).all() or abs(float(coefficients[1])) > 1e6:
+        if not accepted:
             return float(coefficients[0]), float(coefficients[1]), False
-        if float(np.max(np.abs(scale * step))) < 1e-9:
+        movement = float(np.max(np.abs(candidate - coefficients)))
+        coefficients = candidate
+        current = value
+        if abs(float(coefficients[1])) > 1e6:
+            return float(coefficients[0]), float(coefficients[1]), False
+        if movement < 1e-9:
             return float(coefficients[0]), float(coefficients[1]), True
     return float(coefficients[0]), float(coefficients[1]), False
 

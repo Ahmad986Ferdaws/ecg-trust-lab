@@ -56,6 +56,25 @@ def test_separable_outcomes_report_no_finite_slope() -> None:
     assert np.isfinite(item.calibration_in_the_large)
 
 
+def test_overlapping_classes_with_extreme_logits_still_converge() -> None:
+    logits = np.array([5.0, 5.0, 27.63, 1.0])
+    probabilities = np.tile((1.0 / (1.0 + np.exp(-logits)))[:, None], (1, 5))
+    outcomes = np.tile(np.array([[1], [0], [0], [0]]), (1, 5))
+
+    item = weak_calibration(outcomes, probabilities)[0]
+
+    assert item.converged
+    assert item.calibration_slope is not None
+    assert np.isfinite(item.calibration_slope)
+
+
+def test_quasi_separation_with_a_shared_boundary_value_has_no_finite_slope() -> None:
+    probabilities = np.tile(np.array([0.2, 0.4, 0.5, 0.5, 0.7])[:, None], (1, 5))
+    outcomes = np.tile(np.array([[0], [0], [0], [1], [1]]), (1, 5))
+
+    assert not weak_calibration(outcomes, probabilities)[0].converged
+
+
 def test_extreme_probabilities_stay_finite() -> None:
     outcomes, probabilities = _simulate(2_000, scale=1.0, shift=0.0, seed=3)
     probabilities[:10] = 0.0
