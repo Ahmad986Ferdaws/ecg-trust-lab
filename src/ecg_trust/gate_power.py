@@ -236,8 +236,9 @@ def required_sample_size(
     """Smallest sample size reaching ``target_probability``, or ``None`` within ``limit``.
 
     Pass probability is not monotone in sample size (binomial sawtooth), so every
-    size is checked in order. ``None`` also covers design rates at or above the
-    maximum, which no finite sample can pass reliably.
+    size is checked in order, even when the design rate is at or above the
+    maximum (a low target can still be met by sampling luck). ``None`` means no
+    size up to ``limit`` qualified.
     """
 
     ceiling = _open_unit(maximum_rate, "maximum_rate")
@@ -245,9 +246,8 @@ def required_sample_size(
     cap = _count(limit, "limit", minimum=1)
     if (true_rate is None) == (conformal is None):
         raise GatePowerError("provide exactly one of true_rate or conformal")
-    rate = conformal.design_rate if conformal is not None else _closed_unit(true_rate, "true_rate")
-    if rate >= ceiling:
-        return None
+    if conformal is None:
+        _closed_unit(true_rate, "true_rate")
     for size in range(1, cap + 1):
         plan = plan_gate(
             sample_size=size,

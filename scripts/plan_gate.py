@@ -39,6 +39,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=BoundMethod.CLOPPER_PEARSON.value,
     )
     parser.add_argument("--target-probability", type=float, default=0.8)
+    parser.add_argument(
+        "--search-limit",
+        type=int,
+        default=20_000,
+        help="largest sample size examined when searching for the target probability",
+    )
     return parser.parse_args(argv)
 
 
@@ -63,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             target_probability=args.target_probability,
             confidence=args.confidence,
             method=method,
+            limit=args.search_limit,
         )
     except GatePowerError as error:
         print(f"error: {error}", file=sys.stderr)
@@ -70,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     report = plan.to_dict()
     report["target_probability"] = args.target_probability
     report["sample_size_for_target"] = needed
+    report["sample_size_search_limit"] = args.search_limit
+    report["sample_size_search_exhausted"] = needed is None
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0
 

@@ -80,7 +80,8 @@ def test_required_sample_size_reaches_the_target_or_reports_infeasible() -> None
 
     assert size is not None
     assert plan_gate(sample_size=size, maximum_rate=0.05, true_rate=0.025).pass_probability >= 0.8
-    assert required_sample_size(maximum_rate=0.05, true_rate=0.05) is None
+    assert required_sample_size(maximum_rate=0.05, true_rate=0.05, limit=58) is None
+    assert required_sample_size(maximum_rate=0.05, true_rate=0.05, target_probability=0.01) == 59
 
 
 @pytest.mark.parametrize("method", list(BoundMethod))
@@ -138,6 +139,28 @@ def test_cli_reports_json_and_rejects_bad_controls(capsys: pytest.CaptureFixture
     assert report["max_passing_count"] == 15
     assert report["rate_model"] == "conformal_beta_binomial"
     assert 0.09 < report["pass_probability"] < 0.1
+
+    assert report["sample_size_search_exhausted"] is (report["sample_size_for_target"] is None)
+
+    assert (
+        cli.main(
+            [
+                "--sample-size",
+                "10",
+                "--maximum-rate",
+                "0.05",
+                "--true-rate",
+                "0.2",
+                "--search-limit",
+                "50",
+            ]
+        )
+        == 0
+    )
+    capped = json.loads(capsys.readouterr().out)
+    assert capped["sample_size_for_target"] is None
+    assert capped["sample_size_search_limit"] == 50
+    assert capped["sample_size_search_exhausted"] is True
 
     assert cli.main(["--sample-size", "465", "--maximum-rate", "2", "--true-rate", "0.01"]) == 2
     assert "maximum_rate" in capsys.readouterr().err
