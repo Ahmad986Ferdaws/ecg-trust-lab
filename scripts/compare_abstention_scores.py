@@ -6,14 +6,15 @@ Reads an ``.npz`` with:
 * ``probabilities``: ``[records, 5]`` calibrated probabilities (canonical order);
 * ``targets``: ``[records, 5]`` binary labels;
 * optional ``member_probabilities``: ``[members, records, 5]`` for ensemble scores;
-* optional ``thresholds``: ``[5]`` decision thresholds (default 0.5);
-* optional ``fold_ids``: ``[records]``; any fold-10 row is refused.
+* ``fold_ids``: ``[records]`` PTB-XL folds; every row must be a development
+  fold (1-9), so sealed fold-10 predictions are refused;
+* optional ``thresholds``: ``[5]`` decision thresholds (default 0.5).
 
-Each record's loss is exact-match error at the thresholds. Every score is ranked
-from least to most uncertain and summarized with AURC, oracle AURC, E-AURC, and
-AUGRC (lower is better), so the frozen mean-entropy gate score can be compared
-with alternatives without fitting anything. Use development predictions (for
-example fold 9) only.
+Following the research blueprint (section 9.3), the primary per-record loss is
+mean per-label binary log loss and the secondary loss is thresholded Hamming
+loss; a record-level correct/incorrect flag is too coarse. Every score is
+ranked from least to most uncertain and summarized with AURC, oracle AURC,
+E-AURC, and AUGRC per loss (lower is better), without fitting anything.
 
     uv run --no-sync python scripts/compare_abstention_scores.py --predictions fold9.npz
     uv run --no-sync python scripts/compare_abstention_scores.py --synthetic-demo
@@ -36,7 +37,7 @@ from ecg_trust.ensemble_uncertainty import (
 )
 from ecg_trust.evaluation import EvaluationValidationError, validate_multilabel_arrays
 from ecg_trust.post_analysis import mean_normalized_binary_entropy
-from ecg_trust.protocol import FINAL_TEST_FOLDS
+from ecg_trust.protocol import ALL_FOLDS, FINAL_TEST_FOLDS
 from ecg_trust.selective_metrics import SelectiveMetricError, augrc, excess_aurc
 
 FloatArray = NDArray[np.float64]
@@ -54,7 +55,7 @@ def _binary_entropy_bits(probabilities: FloatArray) -> FloatArray:
 
 
 def scores_for(
-    probabilities: FloatArray, member_probabilities: FloatArray | None
+    probabilities: FloatArray, member_probabilities: object | None
 ) -> dict[str, FloatArray]:
     """Named per-record uncertainty scores; higher means more uncertain."""
 
@@ -63,11 +64,29 @@ def scores_for(
         "worst_label_entropy": _binary_entropy_bits(probabilities).max(axis=1),
     }
     if member_probabilities is not None:
-        ensemble = decompose_ensemble_uncertainty(member_probabilities)
+        ensemble = decompose_ensemble_uncertainty(member_probabilities)  # type: ignore[arg-type]
+        if ensemble.total.shape != probabilities.shape:
+            raise ComparisonError("member_probabilities must be [members, records, 5]")
         scores["ensemble_total_mean"] = ensemble.per_record("total")
         scores["ensemble_epistemic_mean"] = ensemble.per_record("epistemic")
         scores["ensemble_epistemic_max"] = ensemble.per_record("epistemic", reduction="max")
     return scores
+
+
+def record_losses(
+    probabilities: FloatArray, targets: NDArray[np.int64], thresholds: FloatArray
+) -> dict[str, FloatArray]:
+    """Planned per-record losses: mean binary log loss (primary) and Hamming loss."""
+
+    epsilon = np.finfo(np.float64).eps
+    clipped = np.clip(probabilities, epsilon, 1.0 - epsilon)
+    outcome = targets.astype(np.float64)
+    log_loss = -(outcome * np.log(clipped) + (1.0 - outcome) * np.log1p(-clipped)).mean(axis=1)
+    hamming = ((probabilities >= thresholds[None, :]) != targets.astype(bool)).mean(axis=1)
+    return {
+        "mean_binary_log_loss": np.asarray(log_loss, dtype=np.float64),
+        "thresholded_hamming_loss": np.asarray(hamming, dtype=np.float64),
+    }
 
 
 def compare(
@@ -75,44 +94,47 @@ def compare(
     targets: NDArray[np.int64],
     *,
     thresholds: FloatArray,
-    member_probabilities: FloatArray | None = None,
+    member_probabilities: object | None = None,
 ) -> dict[str, object]:
-    predictions = probabilities >= thresholds[None, :]
-    losses = np.any(predictions != targets.astype(bool), axis=1).astype(np.float64)
-    rows = []
-    for name, score in scores_for(probabilities, member_probabilities).items():
-        summary = excess_aurc(losses, score)
-        rows.append(
-            {
-                "score": name,
-                "aurc": summary.aurc,
-                "oracle_aurc": summary.oracle_aurc,
-                "excess_aurc": summary.excess_aurc,
-                "augrc": augrc(losses, score),
-            }
-        )
-    rows.sort(key=lambda row: float(row["excess_aurc"]))  # type: ignore[arg-type]
+    losses = record_losses(probabilities, targets, thresholds)
+    scores = scores_for(probabilities, member_probabilities)
+    results: dict[str, object] = {}
+    for loss_name, loss in losses.items():
+        rows = []
+        for name, score in scores.items():
+            summary = excess_aurc(loss, score)
+            rows.append(
+                {
+                    "score": name,
+                    "aurc": summary.aurc,
+                    "oracle_aurc": summary.oracle_aurc,
+                    "excess_aurc": summary.excess_aurc,
+                    "augrc": augrc(loss, score),
+                }
+            )
+        rows.sort(key=lambda row: float(row["excess_aurc"]))  # type: ignore[arg-type]
+        results[loss_name] = {"mean_loss": float(loss.mean()), "scores": rows}
     return {
-        "records": int(losses.shape[0]),
-        "exact_match_error_rate": float(losses.mean()),
-        "loss": "exact_match_error",
-        "scores": rows,
+        "records": int(probabilities.shape[0]),
+        "primary_loss": "mean_binary_log_loss",
+        "losses": results,
     }
 
 
-def load(path: Path) -> tuple[FloatArray, NDArray[np.int64], FloatArray, FloatArray | None]:
+def load(path: Path) -> tuple[FloatArray, NDArray[np.int64], FloatArray, object | None]:
     with np.load(path, allow_pickle=False) as payload:
         arrays = {name: payload[name] for name in payload.files}
-    missing = {"probabilities", "targets"} - set(arrays)
+    missing = {"probabilities", "targets", "fold_ids"} - set(arrays)
     if missing:
         raise ComparisonError(f"prediction file is missing {sorted(missing)}")
     targets, probabilities = validate_multilabel_arrays(arrays["targets"], arrays["probabilities"])
-    if "fold_ids" in arrays:
-        folds = np.asarray(arrays["fold_ids"])
-        if folds.shape != (probabilities.shape[0],):
-            raise ComparisonError("fold_ids must have one entry per record")
-        if np.isin(folds, FINAL_TEST_FOLDS).any():
-            raise ComparisonError("fold-10 rows are sealed; compare development predictions only")
+    folds = arrays["fold_ids"]
+    if folds.shape != (probabilities.shape[0],) or not np.issubdtype(folds.dtype, np.integer):
+        raise ComparisonError("fold_ids must be integers with one entry per record")
+    if np.isin(folds, FINAL_TEST_FOLDS).any():
+        raise ComparisonError("fold-10 rows are sealed; compare development predictions only")
+    if not np.isin(folds, ALL_FOLDS).all():
+        raise ComparisonError("fold_ids must be PTB-XL development folds")
     thresholds = np.asarray(arrays.get("thresholds", np.full(5, 0.5)), dtype=np.float64)
     if (
         thresholds.shape != (5,)
@@ -120,11 +142,8 @@ def load(path: Path) -> tuple[FloatArray, NDArray[np.int64], FloatArray, FloatAr
         or np.any((thresholds < 0.0) | (thresholds > 1.0))
     ):
         raise ComparisonError("thresholds must be five finite values in [0, 1]")
-    members = arrays.get("member_probabilities")
-    member_array = None if members is None else np.asarray(members, dtype=np.float64)
-    if member_array is not None and member_array.shape[1:] != probabilities.shape:
-        raise ComparisonError("member_probabilities must be [members, records, 5]")
-    return probabilities, targets.astype(np.int64), thresholds, member_array
+    # Leave member arrays unconverted so the ensemble validator sees their dtype.
+    return probabilities, targets.astype(np.int64), thresholds, arrays.get("member_probabilities")
 
 
 def synthetic_demo(seed: int = 0) -> tuple[FloatArray, NDArray[np.int64], FloatArray]:
