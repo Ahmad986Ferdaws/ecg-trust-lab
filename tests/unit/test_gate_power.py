@@ -64,6 +64,17 @@ def test_required_sample_size_reaches_the_target_or_reports_infeasible() -> None
     assert required_sample_size(maximum_rate=0.05, true_rate=0.05) is None
 
 
+@pytest.mark.parametrize("method", list(BoundMethod))
+def test_binary_search_matches_a_linear_scan(method: BoundMethod) -> None:
+    for size in (1, 7, 50, 333):
+        linear = None
+        for events in range(size + 1):
+            if upper_bound(events, size, method=method) > 0.2:
+                break
+            linear = events
+        assert max_passing_count(size, 0.2, method=method) == linear
+
+
 def test_gate_that_no_count_can_pass_has_zero_probability() -> None:
     assert max_passing_count(5, 0.01) is None
     assert plan_gate(sample_size=5, maximum_rate=0.01, true_rate=0.0).pass_probability == 0.0

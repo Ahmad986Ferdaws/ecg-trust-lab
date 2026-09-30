@@ -132,12 +132,23 @@ def max_passing_count(
 
     size = _count(sample_size, "sample_size", minimum=1)
     ceiling = _open_unit(maximum_rate, "maximum_rate")
-    best: int | None = None
-    for events in range(size + 1):
-        if upper_bound(events, size, confidence=confidence, method=method) > ceiling:
-            break
-        best = events
-    return best
+    level = _open_unit(confidence, "confidence")
+    bound_method = BoundMethod(method)
+
+    def passes(events: int) -> bool:
+        return upper_bound(events, size, confidence=level, method=bound_method) <= ceiling
+
+    # Upper bounds increase with the event count, so binary search the boundary.
+    if not passes(0):
+        return None
+    low, high = 0, size
+    while low < high:
+        middle = (low + high + 1) // 2
+        if passes(middle):
+            low = middle
+        else:
+            high = middle - 1
+    return low
 
 
 def plan_gate(
