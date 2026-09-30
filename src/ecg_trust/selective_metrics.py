@@ -45,25 +45,32 @@ class ExcessAurc:
         }
 
 
-_EXACT_FLOAT_INTEGER_LIMIT = 2**53
+def _python_scalar_problem(values: ArrayLike) -> str | None:
+    """Inspect sequence elements before NumPy promotion can hide them."""
 
-
-def _has_inexact_python_integer(values: ArrayLike) -> bool:
     try:
         elements = np.asarray(values, dtype=object).ravel()
     except (TypeError, ValueError):
-        return False
-    return any(
-        isinstance(element, (int, np.integer))
-        and not isinstance(element, (bool, np.bool_))
-        and abs(int(element)) > _EXACT_FLOAT_INTEGER_LIMIT
-        for element in elements
-    )
+        return None
+    for element in elements:
+        if isinstance(element, (bool, np.bool_)):
+            return "must use a real numeric dtype"
+        if isinstance(element, (int, np.integer)):
+            integer = int(element)
+            try:
+                exact = int(float(integer)) == integer
+            except OverflowError:
+                exact = False
+            if not exact:
+                return "cannot be represented exactly as float64"
+    return None
 
 
 def _vector(values: ArrayLike, *, name: str, count: int | None = None) -> FloatArray:
-    if not isinstance(values, np.ndarray) and _has_inexact_python_integer(values):
-        raise SelectiveMetricError(f"{name} cannot be represented exactly as float64")
+    if not isinstance(values, np.ndarray):
+        problem = _python_scalar_problem(values)
+        if problem is not None:
+            raise SelectiveMetricError(f"{name} {problem}")
     try:
         raw = np.asarray(values)
     except (TypeError, ValueError, OverflowError) as error:

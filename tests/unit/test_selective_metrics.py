@@ -87,6 +87,12 @@ def test_tie_group_mean_is_permutation_invariant_for_mixed_magnitudes() -> None:
     np.testing.assert_array_equal(forward, backward)
 
 
+def test_exactly_representable_large_python_integers_are_accepted() -> None:
+    assert aurc([0.0, 1.0], [2**54, 0]) == pytest.approx(
+        aurc([0.0, 1.0], np.array([2**54, 0], dtype=np.int64))
+    )
+
+
 def test_constant_uncertainty_cannot_beat_the_oracle() -> None:
     rng = np.random.default_rng(7)
     losses = rng.uniform(size=50)
@@ -135,6 +141,9 @@ def test_matches_existing_dense_risk_coverage_without_ties() -> None:
         ([0.0, 1.0], np.array([2**63 + 1, 1], dtype=np.uint64), "exactly"),
         ([0.0, 1.0], [2**53 + 1, float(2**53)], "exactly"),
         ([0.0, 1.0], [np.int64(2**53 + 1), 0.5], "exactly"),
+        ([True, 0.0], [0.1, 0.2], "real numeric"),
+        ([0.0, 1.0], [True, 0.5], "real numeric"),
+        ([0.0, 1.0], [10**400, 0.5], "exactly"),
     ],
 )
 def test_malformed_inputs_are_rejected(losses: object, uncertainty: object, message: str) -> None:
