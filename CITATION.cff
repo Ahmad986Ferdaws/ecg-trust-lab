@@ -1,0 +1,87 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it as below, and cite the datasets
+  it evaluates. Research use only; not for clinical decision-making.
+type: software
+title: "ECG Trust Lab: trustworthy 12-lead ECG classification on PTB-XL"
+abstract: >-
+  Multi-label classification of the five PTB-XL diagnostic superclasses with
+  a sealed fold-10 evaluation, calibration, selective abstention, subgroup,
+  robustness, and explanation audits, an external SPH transport stress test,
+  and a fail-closed Trust Sentinel research line.
+authors:
+  - name: "PTB-XL ECG Research Project"
+repository-code: "https://github.com/Ahmad986Ferdaws/ecg-trust-lab"
+version: 0.1.0
+keywords:
+  - electrocardiogram
+  - PTB-XL
+  - calibration
+  - selective classification
+  - uncertainty
+  - conformal prediction
+references:
+  - type: article
+    title: "PTB-XL, a large publicly available electrocardiography dataset"
+    authors:
+      - family-names: Wagner
+        given-names: Patrick
+      - family-names: Strodthoff
+        given-names: Nils
+      - family-names: Bousseljot
+        given-names: Ralf-Dieter
+      - family-names: Kreiseler
+        given-names: Dieter
+      - family-names: Lunze
+        given-names: Fatima I.
+      - family-names: Samek
+        given-names: Wojciech
+      - family-names: Schaeffter
+        given-names: Tobias
+    journal: "Scientific Data"
+    volume: 7
+    start: 154
+    year: 2020
+    doi: 10.1038/s41597-020-0495-6
+  - type: data
+    title: "PTB-XL, a large publicly available electrocardiography dataset (version 1.0.3)"
+    authors:
+      - family-names: Wagner
+        given-names: Patrick
+      - family-names: Strodthoff
+        given-names: Nils
+      - family-names: Bousseljot
+        given-names: Ralf-Dieter
+      - family-names: Samek
+        given-names: Wojciech
+      - family-names: Schaeffter
+        given-names: Tobias
+    publisher:
+      name: PhysioNet
+    doi: 10.13026/kfzx-aw45
+  - type: article
+    title: >-
+      A large-scale multi-label 12-lead electrocardiogram database with
+      standardized diagnostic statements
+    authors:
+      - family-names: Liu
+        given-names: Hui
+      - family-names: Chen
+        given-names: Dan
+      - family-names: Chen
+        given-names: Da
+      - family-names: Zhang
+        given-names: Xiyu
+      - family-names: Li
+        given-names: Huijie
+      - family-names: Bian
+        given-names: Lipan
+      - family-names: Shu
+        given-names: Minglei
+      - family-names: Wang
+        given-names: Yinglong
+    journal: "Scientific Data"
+    volume: 9
+    start: 272
+    year: 2022
+    doi: 10.1038/s41597-022-01403-5
