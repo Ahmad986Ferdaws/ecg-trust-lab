@@ -55,6 +55,7 @@ class QualityReasonCode(StrEnum):
     HIGH_FREQUENCY_NOISE = "high_frequency_noise"
     LIMB_LEAD_INCONSISTENCY = "limb_lead_inconsistency"
     PROBABLE_LIMB_LEAD_REVERSAL = "probable_limb_lead_reversal"
+    DUPLICATED_LEAD_WAVEFORM = "duplicated_lead_waveform"
 
 
 class EvidenceStatus(StrEnum):

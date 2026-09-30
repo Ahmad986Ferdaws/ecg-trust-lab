@@ -61,6 +61,9 @@ _QUALITY_MESSAGES: dict[ReasonCode, str] = {
     ReasonCode.PROBABLE_LIMB_LEAD_REVERSAL: (
         "The recording contains evidence of a probable limb-electrode reversal."
     ),
+    ReasonCode.DUPLICATED_LEAD_WAVEFORM: (
+        "Two different leads carry the same waveform; the recording may be miswired or misexported."
+    ),
 }
 
 _COVERAGE_SCOPE_TEXT: Final[

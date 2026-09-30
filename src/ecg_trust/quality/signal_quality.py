@@ -56,6 +56,7 @@ class ReasonCode(StrEnum):
     HIGH_FREQUENCY_NOISE = "high_frequency_noise"
     LIMB_LEAD_INCONSISTENCY = "limb_lead_inconsistency"
     PROBABLE_LIMB_LEAD_REVERSAL = "probable_limb_lead_reversal"
+    DUPLICATED_LEAD_WAVEFORM = "duplicated_lead_waveform"
 
 
 class LimbLeadReversalKind(StrEnum):
@@ -104,6 +105,7 @@ class SignalQualityConfig:
     flat_reacquire_fraction: float = 0.997
     flat_run_warn_seconds: float | None = None
     flat_run_reacquire_seconds: float | None = None
+    duplicate_lead_tolerance_mv: float | None = None
 
     clipping_equality_tolerance_mv: float = 1e-8
     clipping_warn_fraction: float = 0.05
@@ -255,6 +257,14 @@ class SignalQualityConfig:
                 raise ValueError(
                     "flat-run warning must precede reacquisition within the record duration"
                 )
+        tolerance = self.duplicate_lead_tolerance_mv
+        if tolerance is not None and (
+            isinstance(tolerance, bool)
+            or not isinstance(tolerance, (int, float))
+            or not math.isfinite(tolerance)
+            or tolerance < 0.0
+        ):
+            raise ValueError("duplicate_lead_tolerance_mv must be finite and non-negative")
         if not (
             self.clipping_warn_fraction < self.clipping_reacquire_fraction
             and self.clipping_warn_run_samples < self.clipping_reacquire_run_samples
@@ -285,17 +295,21 @@ class SignalQualityConfig:
 
 
 DEFAULT_SIGNAL_QUALITY_CONFIG = SignalQualityConfig()
+_LIMB_LEAD_COUNT = 6
 
 # The v1 default stays frozen because historical protocols bind its version and
 # behavior. v2 adds a duration rule for contiguous exactly-flat stretches, which
 # whole-record flatline statistics cannot see (for example, a lead that drops
 # out halfway through). Thresholds come from a development-fold check: on 400
 # PTB-XL folds 1-8 records without an electrode-problem flag, the longest flat
-# stretch was 0.28 s.
+# stretch was 0.28 s. v2 also rejects two canonical leads that carry the same
+# waveform (an export or wiring fault); in the same sample the closest pair of
+# distinct leads still differed by at least 0.035 mV somewhere in the record.
 SENTINEL_V2_SIGNAL_QUALITY_CONFIG = SignalQualityConfig(
     version="canonical-12x1000-mv-v2",
     flat_run_warn_seconds=0.5,
     flat_run_reacquire_seconds=1.0,
+    duplicate_lead_tolerance_mv=5e-4,
 )
 
 
@@ -461,6 +475,8 @@ def assess_signal_quality(
                 boundary_value=config.limb_consistency_warn_ratio,
             )
         )
+
+    global_issues.extend(_duplicated_lead_issues(signal, lead_findings, config))
 
     reversal = _probable_limb_lead_reversal(signal, config)
     if reversal is not None:
@@ -866,6 +882,59 @@ def _flat_run_status(
         return None
     boundary = reacquire if status is QualityStatus.REACQUIRE else warning
     return status, "longest_flat_run_seconds", seconds, boundary
+
+
+def _duplicated_lead_issues(
+    signal: FloatArray,
+    lead_findings: tuple[LeadQualityFinding, ...],
+    config: SignalQualityConfig,
+) -> list[QualityIssue]:
+    """Report later leads whose waveform duplicates an earlier canonical lead.
+
+    A pair is skipped when a member already needs reacquisition for a flatline,
+    or when both are limb leads and some limb lead does: a flat lead I
+    legitimately makes II, III, and aVF identical through Einthoven's
+    identities, and the flatline finding is the actionable reason. Other pairs,
+    including all precordial pairs, are checked.
+    """
+
+    tolerance = config.duplicate_lead_tolerance_mv
+    if tolerance is None:
+        return []
+    flat = [
+        any(
+            issue.code is ReasonCode.FLATLINE and issue.status is QualityStatus.REACQUIRE
+            for issue in finding.issues
+        )
+        for finding in lead_findings
+    ]
+    limb_flat = any(flat[:_LIMB_LEAD_COUNT])
+    issues: list[QualityIssue] = []
+    for later in range(1, signal.shape[0]):
+        if flat[later]:
+            continue
+        candidates = [
+            earlier
+            for earlier in range(later)
+            if not flat[earlier]
+            and not (limb_flat and later < _LIMB_LEAD_COUNT and earlier < _LIMB_LEAD_COUNT)
+        ]
+        if not candidates:
+            continue
+        differences = np.max(np.abs(signal[candidates] - signal[later]), axis=1)
+        closest = int(np.argmin(differences))
+        if float(differences[closest]) <= tolerance:
+            issues.append(
+                QualityIssue(
+                    code=ReasonCode.DUPLICATED_LEAD_WAVEFORM,
+                    status=QualityStatus.REACQUIRE,
+                    lead_name=config.expected_leads[later],
+                    metric_name="max_abs_difference_to_earlier_lead_mv",
+                    observed_value=float(differences[closest]),
+                    boundary_value=tolerance,
+                )
+            )
+    return issues
 
 
 def _limb_lead_consistency_ratio(signal: FloatArray) -> float:
