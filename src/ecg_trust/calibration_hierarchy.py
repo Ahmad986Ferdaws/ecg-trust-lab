@@ -8,7 +8,8 @@ interpretable quantities per outcome instead:
 
 * calibration-in-the-large: the intercept ``a`` in ``logit P(y) = a + logit(p)``
   (0 means the average risk is right; negative means risks are too high), with
-  the observed/expected ratio as a companion;
+  the observed/expected ratio as a companion (``None`` when every prediction
+  is exactly zero, because the ratio is then undefined);
 * calibration slope: ``b`` in ``logit P(y) = a + b logit(p)`` (1 is ideal; below
   1 means predictions are too extreme, above 1 too modest).
 
@@ -39,7 +40,7 @@ class CalibrationHierarchyError(ValueError):
 @dataclass(frozen=True, slots=True)
 class WeakCalibration:
     label: str
-    observed_expected_ratio: float
+    observed_expected_ratio: float | None
     calibration_in_the_large: float
     calibration_slope: float | None
     slope_intercept: float | None
@@ -177,12 +178,14 @@ def weak_calibration(
             raise CalibrationHierarchyError(f"label {label!r} needs both outcomes")
         clipped = np.clip(scores[:, index], _CLIP, 1.0 - _CLIP)
         logits = np.log(clipped) - np.log1p(-clipped)
-        expected = float(clipped.mean())
+        expected = float(scores[:, index].mean())
         intercept, slope, converged = _logistic_slope(logits, outcomes, max_iterations)
         results.append(
             WeakCalibration(
                 label=label,
-                observed_expected_ratio=float(outcomes.mean()) / expected,
+                observed_expected_ratio=(
+                    float(outcomes.mean()) / expected if expected > 0.0 else None
+                ),
                 calibration_in_the_large=_intercept_with_offset(logits, outcomes),
                 calibration_slope=slope if converged else None,
                 slope_intercept=intercept if converged else None,

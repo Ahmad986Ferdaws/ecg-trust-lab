@@ -99,6 +99,15 @@ def test_extreme_probabilities_stay_finite() -> None:
         assert np.isfinite(item.observed_expected_ratio)
 
 
+def test_all_zero_predictions_leave_the_ratio_undefined() -> None:
+    outcomes = np.tile(np.array([[1], [0], [1], [0]]), (1, 5))
+
+    item = weak_calibration(outcomes, np.zeros((4, 5)))[0]
+
+    assert item.observed_expected_ratio is None
+    assert item.to_dict()["observed_expected_ratio"] is None
+
+
 def test_degenerate_labels_and_bad_controls_are_rejected() -> None:
     with pytest.raises(CalibrationHierarchyError, match="both outcomes"):
         weak_calibration(np.zeros((5, 5), dtype=np.int64), np.full((5, 5), 0.2))
