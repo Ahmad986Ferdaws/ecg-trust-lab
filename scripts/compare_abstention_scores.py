@@ -7,7 +7,9 @@ Reads an ``.npz`` with:
 * ``targets``: ``[records, 5]`` binary labels;
 * optional ``member_probabilities``: ``[members, records, 5]`` for ensemble scores;
 * ``fold_ids``: ``[records]`` PTB-XL folds; every row must be a development
-  fold (1-9), so sealed fold-10 predictions are refused;
+  fold (1-9), so sealed fold-10 predictions are refused. Fold IDs can't identify
+  spent one-shot cohorts inside fold 9, so never pass rows from one (such as the
+  source-support cohort C);
 * optional ``thresholds``: ``[5]`` decision thresholds (default 0.5).
 
 Following the research blueprint (section 9.3), the primary per-record loss is
