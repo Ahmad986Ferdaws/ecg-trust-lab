@@ -12,6 +12,12 @@ sets for small groups.
 Groups must be known before calibration and assigned without looking at
 outcomes (for example age band or sex from metadata). A group unseen during
 calibration is refused at prediction time rather than silently pooled.
+
+Nothing in the Sentinel engine, case contracts, or frozen configurations
+selects this artifact. ``predict`` returns plain ``BinaryPredictionSets``, which
+carry no provenance, and ``conformal_prediction_sets_to_contracts`` stamps
+whatever sets it receives with the pooled artifact type and coverage scope. It
+cannot detect these sets, so it must not be used to convert them.
 """
 
 from __future__ import annotations
@@ -28,6 +34,10 @@ from ecg_trust.conformal.multilabel import (
     ConformalValidationError,
     LabelwiseBinaryConformal,
 )
+
+_ARTIFACT_TYPE = "ecg_trust.group_conditional_conformal"
+_SCHEMA_VERSION = 1
+_COVERAGE_SCOPE = "labelwise_marginal_within_each_group_under_exchangeability"
 
 
 def _groups(values: Sequence[str], count: int) -> tuple[str, ...]:
@@ -140,10 +150,39 @@ class GroupConditionalConformal:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "artifact_type": "ecg_trust.group_conditional_conformal",
-            "schema_version": 1,
+            "schema_version": _SCHEMA_VERSION,
+            "artifact_type": _ARTIFACT_TYPE,
+            "coverage_scope": _COVERAGE_SCOPE,
             "groups": {group: model.to_dict() for group, model in self.models.items()},
         }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> GroupConditionalConformal:
+        """Validate and restore a serialized group-conditional artifact."""
+
+        if not isinstance(payload, Mapping) or set(payload) != {
+            "schema_version",
+            "artifact_type",
+            "coverage_scope",
+            "groups",
+        }:
+            raise ConformalValidationError("group-conditional conformal artifact keys are invalid")
+        version = payload["schema_version"]
+        if type(version) is not int or version != _SCHEMA_VERSION:
+            raise ConformalValidationError("unsupported schema_version")
+        if payload["artifact_type"] != _ARTIFACT_TYPE:
+            raise ConformalValidationError("unexpected artifact_type")
+        if payload["coverage_scope"] != _COVERAGE_SCOPE:
+            raise ConformalValidationError("unsupported conformal coverage_scope")
+        groups = payload["groups"]
+        if not isinstance(groups, Mapping):
+            raise ConformalValidationError("groups must map group names to artifacts")
+        models: dict[str, LabelwiseBinaryConformal] = {}
+        for group, artifact in groups.items():
+            if not isinstance(artifact, Mapping):
+                raise ConformalValidationError("each group artifact must be a mapping")
+            models[group] = LabelwiseBinaryConformal.from_dict(artifact)
+        return cls(models=models)
 
 
 __all__ = ["GroupConditionalConformal"]
