@@ -8,6 +8,7 @@ import pytest
 from numpy.typing import NDArray
 
 from ecg_trust.contract_adapters import quality_report_to_contract
+from ecg_trust.monitoring.trust_monitoring import QualityReasonCode
 from ecg_trust.quality.signal_quality import (
     DEFAULT_SIGNAL_QUALITY_CONFIG,
     SENTINEL_V2_SIGNAL_QUALITY_CONFIG,
@@ -84,7 +85,9 @@ def test_copied_precordial_lead_is_sent_for_reacquisition_only_under_v2() -> Non
     assert legacy.status is QualityStatus.PASS
     assert current.status is QualityStatus.REACQUIRE
     duplicated = [
-        issue for issue in current.global_issues if issue.code is ReasonCode.DUPLICATE_LEADS
+        issue
+        for issue in current.global_issues
+        if issue.code is ReasonCode.DUPLICATED_LEAD_WAVEFORM
     ]
     assert len(duplicated) == 1
     assert duplicated[0].lead_name == "V5"
@@ -117,7 +120,28 @@ def test_flat_lead_suppresses_the_derived_limb_identity_duplicates() -> None:
 
     assert report.status is QualityStatus.REACQUIRE
     assert ReasonCode.FLATLINE in report.reason_codes
+    assert ReasonCode.DUPLICATED_LEAD_WAVEFORM not in report.reason_codes
+
+
+def test_limited_precordial_flatline_does_not_hide_an_unrelated_duplicate() -> None:
+    signal = _copy_lead(source=8, target=10)
+    signal[6] *= 0.05
+
+    report = _assess(signal, SENTINEL_V2_SIGNAL_QUALITY_CONFIG)
+
+    assert ReasonCode.FLATLINE in report.reason_codes
+    assert ReasonCode.DUPLICATED_LEAD_WAVEFORM in report.reason_codes
+    assert report.status is QualityStatus.REACQUIRE
+
+
+def test_new_reason_is_distinct_from_metadata_duplicates_and_has_a_public_message() -> None:
+    report = _assess(_copy_lead(source=8, target=10), SENTINEL_V2_SIGNAL_QUALITY_CONFIG)
+    contract = quality_report_to_contract(report, evaluated_at=datetime(2026, 1, 1, tzinfo=UTC))
+
     assert ReasonCode.DUPLICATE_LEADS not in report.reason_codes
+    assert [finding.code for finding in contract.findings] == ["DUPLICATED_LEAD_WAVEFORM"]
+    assert "same waveform" in contract.findings[0].message
+    assert QualityReasonCode("duplicated_lead_waveform").value == "duplicated_lead_waveform"
 
 
 @pytest.mark.parametrize("tolerance", [-1e-6, float("nan"), float("inf"), True])
