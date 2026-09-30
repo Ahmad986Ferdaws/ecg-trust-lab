@@ -134,6 +134,18 @@ def test_limited_precordial_flatline_does_not_hide_an_unrelated_duplicate() -> N
     assert report.status is QualityStatus.REACQUIRE
 
 
+def test_warning_level_flat_run_in_duplicated_leads_still_requires_reacquisition() -> None:
+    signal = _copy_lead(source=8, target=10)
+    signal[8, 300:360] = 0.0
+    signal[10, 300:360] = 0.0
+
+    report = _assess(signal, SENTINEL_V2_SIGNAL_QUALITY_CONFIG)
+
+    assert report.leads[10].status is QualityStatus.LIMITED
+    assert ReasonCode.DUPLICATED_LEAD_WAVEFORM in report.reason_codes
+    assert report.status is QualityStatus.REACQUIRE
+
+
 def test_new_reason_is_distinct_from_metadata_duplicates_and_has_a_public_message() -> None:
     report = _assess(_copy_lead(source=8, target=10), SENTINEL_V2_SIGNAL_QUALITY_CONFIG)
     contract = quality_report_to_contract(report, evaluated_at=datetime(2026, 1, 1, tzinfo=UTC))

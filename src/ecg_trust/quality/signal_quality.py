@@ -891,8 +891,8 @@ def _duplicated_lead_issues(
 ) -> list[QualityIssue]:
     """Report later leads whose waveform duplicates an earlier canonical lead.
 
-    A pair is skipped when a member is itself flat, or when both are limb leads
-    and some limb lead is flat: a flat lead I legitimately makes II, III, and aVF
+    A pair is skipped when a member already needs reacquisition for a flatline,
+    or when both are limb leads and some limb lead does: a flat lead I legitimately makes II, III, and aVF
     identical through Einthoven's identities, and the flatline finding is the
     actionable reason. Other pairs, including all precordial pairs, are checked.
     """
@@ -900,7 +900,13 @@ def _duplicated_lead_issues(
     tolerance = config.duplicate_lead_tolerance_mv
     if tolerance is None:
         return []
-    flat = [ReasonCode.FLATLINE in finding.reason_codes for finding in lead_findings]
+    flat = [
+        any(
+            issue.code is ReasonCode.FLATLINE and issue.status is QualityStatus.REACQUIRE
+            for issue in finding.issues
+        )
+        for finding in lead_findings
+    ]
     limb_flat = any(flat[:_LIMB_LEAD_COUNT])
     issues: list[QualityIssue] = []
     for later in range(1, signal.shape[0]):
