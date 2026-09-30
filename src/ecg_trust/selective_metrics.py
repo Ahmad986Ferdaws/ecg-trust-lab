@@ -8,6 +8,12 @@ here separate them without fitting anything:
 * ``oracle_aurc`` is the AURC of a perfect ranking of the same per-sample losses.
 * ``excess_aurc`` (E-AURC; Geifman, Uziel and El-Yaniv, ICLR 2019) subtracts
   that oracle, so it is zero for a perfect ranking regardless of accuracy.
+* ``augrc`` (Traub et al., "Overcoming Common Flaws in the Evaluation of
+  Selective Classification Systems", NeurIPS 2024) averages the *generalized*
+  risk: the loss of accepted cases divided by all cases, not by accepted cases.
+  For 0/1 losses it is the average rate of undetected failures across coverage
+  levels, and it does not over-weight the tiny low-coverage prefixes that
+  dominate AURC.
 
 Tied uncertainty values are handled by their expected value under a random
 tie-break, so the result never depends on input order.
@@ -159,6 +165,24 @@ def oracle_aurc(losses: ArrayLike) -> float:
     return _area(_running_means(np.sort(_losses(losses))))
 
 
+def generalized_risk_curve(losses: ArrayLike, uncertainty: ArrayLike) -> FloatArray:
+    """Accepted loss divided by the full sample size after each accepted prefix.
+
+    Entry ``k - 1`` equals ``(k / n) * selective risk``, which for 0/1 losses is
+    the joint probability of being accepted and failing.
+    """
+
+    curve = selective_risk_curve(losses, uncertainty)
+    coverage = np.arange(1, curve.shape[0] + 1, dtype=np.float64) / curve.shape[0]
+    return np.asarray(curve * coverage, dtype=np.float64)
+
+
+def augrc(losses: ArrayLike, uncertainty: ArrayLike) -> float:
+    """Area under the generalized risk-coverage curve (average over coverage steps)."""
+
+    return _area(generalized_risk_curve(losses, uncertainty))
+
+
 def excess_aurc(losses: ArrayLike, uncertainty: ArrayLike) -> ExcessAurc:
     """Return raw AURC, the oracle AURC for the same losses, and their difference."""
 
@@ -177,7 +201,9 @@ __all__ = [
     "ExcessAurc",
     "SelectiveMetricError",
     "aurc",
+    "augrc",
     "excess_aurc",
+    "generalized_risk_curve",
     "oracle_aurc",
     "selective_risk_curve",
 ]
