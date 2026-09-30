@@ -49,6 +49,28 @@ def test_large_tie_block_keeps_the_distinct_scores_on_both_sides() -> None:
     assert item.reconstructed == pytest.approx(item.brier, abs=1e-12)
 
 
+@pytest.mark.parametrize(
+    ("group_sizes", "n_bins", "expected_bins"),
+    [((1, 1, 6, 1, 1), 4, 4), ((1, 4, 1), 3, 3), ((2, 2), 5, 2), ((3,), 4, 1)],
+)
+def test_distinct_score_groups_fill_the_requested_bins(
+    group_sizes: tuple[int, ...], n_bins: int, expected_bins: int
+) -> None:
+    column = np.concatenate(
+        [
+            np.full(size, (index + 1) / (len(group_sizes) + 1))
+            for index, size in enumerate(group_sizes)
+        ]
+    )
+    probabilities = np.tile(column[:, None], (1, 5))
+    targets = np.tile((np.arange(column.size) % 2)[:, None], (1, 5))
+
+    item = brier_decomposition(targets, probabilities, n_bins=n_bins)[0]
+
+    assert item.bins == expected_bins
+    assert item.reconstructed == pytest.approx(item.brier, abs=1e-12)
+
+
 def test_within_bin_covariance_is_the_population_covariance() -> None:
     targets = np.tile(np.array([[0], [1], [0], [1]]), (1, 5))
     probabilities = np.tile(np.array([[0.1], [0.3], [0.6], [0.8]]), (1, 5))

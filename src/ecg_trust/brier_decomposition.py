@@ -73,23 +73,30 @@ class BrierComponents:
 def _tie_aware_partitions(scores: FloatArray, n_bins: int) -> list[NDArray[np.intp]]:
     """Near equal-mass bins whose boundaries never split tied scores.
 
-    Each ideal equal-mass cut snaps to the nearest position where the sorted
-    score changes (forward or backward), so distinct scores are kept in
-    separate bins whenever the ties allow it.
+    Cuts may only fall where the sorted score changes. When there are at most
+    ``n_bins`` distinct scores every one gets its own bin; otherwise exactly
+    ``n_bins - 1`` distinct cuts are chosen in order, each as close as possible
+    to its ideal equal-mass position while leaving room for the later cuts.
     """
 
     order = np.argsort(scores, kind="stable")
     ordered = scores[order]
     count = ordered.shape[0]
     boundaries = np.flatnonzero(ordered[1:] != ordered[:-1]) + 1
-    bins = min(n_bins, count)
-    cuts: set[int] = set()
-    if boundaries.size:
-        for index in range(1, bins):
-            ideal = index * count / bins
-            nearest = int(boundaries[np.argmin(np.abs(boundaries - ideal))])
-            cuts.add(nearest)
-    return [part for part in np.split(order, sorted(cuts)) if part.size]
+    wanted = min(n_bins, count) - 1
+    if boundaries.size <= wanted:
+        cuts = boundaries.tolist()
+    else:
+        cuts = []
+        lowest = 0
+        for index in range(1, wanted + 1):
+            highest = boundaries.size - (wanted - index) - 1
+            window = boundaries[lowest : highest + 1]
+            ideal = index * count / (wanted + 1)
+            choice = lowest + int(np.argmin(np.abs(window - ideal)))
+            cuts.append(int(boundaries[choice]))
+            lowest = choice + 1
+    return [part for part in np.split(order, cuts) if part.size]
 
 
 def _decompose(label: str, scores: FloatArray, targets: FloatArray, n_bins: int) -> BrierComponents:
