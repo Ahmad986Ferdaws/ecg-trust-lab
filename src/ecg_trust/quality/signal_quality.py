@@ -894,7 +894,8 @@ def _duplicated_lead_issues(
     A pair is skipped when a member already needs reacquisition for a flatline,
     or when both are limb leads and some limb lead does: a flat lead I
     legitimately makes II, III, and aVF identical through Einthoven's
-    identities, and the flatline finding is the actionable reason. Other pairs, including all precordial pairs, are checked.
+    identities, and the flatline finding is the actionable reason. Other pairs,
+    including all precordial pairs, are checked.
     """
 
     tolerance = config.duplicate_lead_tolerance_mv
