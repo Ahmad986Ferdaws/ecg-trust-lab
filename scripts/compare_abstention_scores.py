@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Compare abstention (uncertainty) scores on one development prediction file.
+
+Reads an ``.npz`` with:
+
+* ``probabilities``: ``[records, 5]`` calibrated probabilities (canonical order);
+* ``targets``: ``[records, 5]`` binary labels;
+* optional ``member_probabilities``: ``[members, records, 5]`` for ensemble scores;
+* optional ``thresholds``: ``[5]`` decision thresholds (default 0.5);
+* optional ``fold_ids``: ``[records]``; any fold-10 row is refused.
+
+Each record's loss is exact-match error at the thresholds. Every score is ranked
+from least to most uncertain and summarized with AURC, oracle AURC, E-AURC, and
+AUGRC (lower is better), so the frozen mean-entropy gate score can be compared
+with alternatives without fitting anything. Use development predictions (for
+example fold 9) only.
+
+    uv run --no-sync python scripts/compare_abstention_scores.py --predictions fold9.npz
+    uv run --no-sync python scripts/compare_abstention_scores.py --synthetic-demo
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+from pathlib import Path
+
+import numpy as np
+from numpy.typing import NDArray
+
+from ecg_trust.ensemble_uncertainty import (
+    EnsembleUncertaintyError,
+    decompose_ensemble_uncertainty,
+)
+from ecg_trust.evaluation import EvaluationValidationError, validate_multilabel_arrays
+from ecg_trust.post_analysis import mean_normalized_binary_entropy
+from ecg_trust.protocol import FINAL_TEST_FOLDS
+from ecg_trust.selective_metrics import SelectiveMetricError, augrc, excess_aurc
+
+FloatArray = NDArray[np.float64]
+
+
+class ComparisonError(ValueError):
+    """Raised when the prediction file cannot be compared safely."""
+
+
+def _binary_entropy_bits(probabilities: FloatArray) -> FloatArray:
+    epsilon = np.finfo(np.float64).eps
+    clipped = np.clip(probabilities, epsilon, 1.0 - epsilon)
+    entropy = -(clipped * np.log(clipped) + (1.0 - clipped) * np.log(1.0 - clipped))
+    return np.asarray(entropy / math.log(2.0), dtype=np.float64)
+
+
+def scores_for(
+    probabilities: FloatArray, member_probabilities: FloatArray | None
+) -> dict[str, FloatArray]:
+    """Named per-record uncertainty scores; higher means more uncertain."""
+
+    scores: dict[str, FloatArray] = {
+        "mean_label_entropy (frozen gate score)": mean_normalized_binary_entropy(probabilities),
+        "worst_label_entropy": _binary_entropy_bits(probabilities).max(axis=1),
+    }
+    if member_probabilities is not None:
+        ensemble = decompose_ensemble_uncertainty(member_probabilities)
+        scores["ensemble_total_mean"] = ensemble.per_record("total")
+        scores["ensemble_epistemic_mean"] = ensemble.per_record("epistemic")
+        scores["ensemble_epistemic_max"] = ensemble.per_record("epistemic", reduction="max")
+    return scores
+
+
+def compare(
+    probabilities: FloatArray,
+    targets: NDArray[np.int64],
+    *,
+    thresholds: FloatArray,
+    member_probabilities: FloatArray | None = None,
+) -> dict[str, object]:
+    predictions = probabilities >= thresholds[None, :]
+    losses = np.any(predictions != targets.astype(bool), axis=1).astype(np.float64)
+    rows = []
+    for name, score in scores_for(probabilities, member_probabilities).items():
+        summary = excess_aurc(losses, score)
+        rows.append(
+            {
+                "score": name,
+                "aurc": summary.aurc,
+                "oracle_aurc": summary.oracle_aurc,
+                "excess_aurc": summary.excess_aurc,
+                "augrc": augrc(losses, score),
+            }
+        )
+    rows.sort(key=lambda row: float(row["excess_aurc"]))  # type: ignore[arg-type]
+    return {
+        "records": int(losses.shape[0]),
+        "exact_match_error_rate": float(losses.mean()),
+        "loss": "exact_match_error",
+        "scores": rows,
+    }
+
+
+def load(path: Path) -> tuple[FloatArray, NDArray[np.int64], FloatArray, FloatArray | None]:
+    with np.load(path, allow_pickle=False) as payload:
+        arrays = {name: payload[name] for name in payload.files}
+    missing = {"probabilities", "targets"} - set(arrays)
+    if missing:
+        raise ComparisonError(f"prediction file is missing {sorted(missing)}")
+    targets, probabilities = validate_multilabel_arrays(arrays["targets"], arrays["probabilities"])
+    if "fold_ids" in arrays:
+        folds = np.asarray(arrays["fold_ids"])
+        if folds.shape != (probabilities.shape[0],):
+            raise ComparisonError("fold_ids must have one entry per record")
+        if np.isin(folds, FINAL_TEST_FOLDS).any():
+            raise ComparisonError("fold-10 rows are sealed; compare development predictions only")
+    thresholds = np.asarray(arrays.get("thresholds", np.full(5, 0.5)), dtype=np.float64)
+    if (
+        thresholds.shape != (5,)
+        or not np.isfinite(thresholds).all()
+        or np.any((thresholds < 0.0) | (thresholds > 1.0))
+    ):
+        raise ComparisonError("thresholds must be five finite values in [0, 1]")
+    members = arrays.get("member_probabilities")
+    member_array = None if members is None else np.asarray(members, dtype=np.float64)
+    if member_array is not None and member_array.shape[1:] != probabilities.shape:
+        raise ComparisonError("member_probabilities must be [members, records, 5]")
+    return probabilities, targets.astype(np.int64), thresholds, member_array
+
+
+def synthetic_demo(seed: int = 0) -> tuple[FloatArray, NDArray[np.int64], FloatArray]:
+    """Clearly synthetic records: three members that disagree more on hard cases."""
+
+    rng = np.random.default_rng(seed)
+    count = 2_000
+    targets = (rng.uniform(size=(count, 5)) < 0.25).astype(np.int64)
+    hardness = rng.uniform(0.2, 2.5, size=(count, 1))
+    base = np.where(targets == 1, 2.0, -2.0) / hardness
+    members = np.stack(
+        [
+            1.0 / (1.0 + np.exp(-(base + rng.normal(0.0, 0.8, size=base.shape) * hardness)))
+            for _ in range(3)
+        ]
+    )
+    return members.mean(axis=0), targets, members
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--predictions", type=Path)
+    source.add_argument("--synthetic-demo", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        if args.synthetic_demo:
+            probabilities, targets, members = synthetic_demo()
+            report = compare(
+                probabilities, targets, thresholds=np.full(5, 0.5), member_probabilities=members
+            )
+            report["source"] = "synthetic demo (not model output)"
+        else:
+            probabilities, targets, thresholds, member_array = load(args.predictions)
+            report = compare(
+                probabilities, targets, thresholds=thresholds, member_probabilities=member_array
+            )
+            report["source"] = args.predictions.name
+    except (
+        ComparisonError,
+        EnsembleUncertaintyError,
+        EvaluationValidationError,
+        SelectiveMetricError,
+        OSError,
+        ValueError,
+    ) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
