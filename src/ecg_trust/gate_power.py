@@ -13,14 +13,22 @@ Two rate models are supported:
   parameters ``n + 1 - rank`` and ``rank`` (its mean rate is the familiar
   ``(n + 1 - rank) / (n + 1)``).
 
+The gate itself is approximated by an exact count cutoff: the largest number
+of events whose Clopper-Pearson or Wilson upper bound stays at or below the
+maximum. Protocols that instead use a resampling rule (for example a
+patient-cluster percentile bootstrap) can pass or fail at slightly different
+counts depending on how events fall across patients, so treat results as a
+planning approximation of such rules, not their exact pass probability.
+
 Example: the source-support completion protocol thresholded at the 794th of
 834 calibration scores and required a one-sided 95% upper bound of at most 5%
-on 465 validation records. Under the conformal model that rule passes about
-10% of the time even when the detector behaves exactly as designed.
+on 465 validation records (via a patient-cluster bootstrap). The count
+approximation gives a pass probability of about 10% even when the detector
+behaves exactly as designed, so the rule was very unlikely to pass.
 
 Upper bounds are exact Clopper-Pearson (conservative) or Wilson score
-intervals for a binomial count. Clustered data such as several ECGs per
-patient widens real intervals, so treat these numbers as optimistic.
+intervals for a record-level count; they ignore clustering such as several
+ECGs per patient.
 """
 
 from __future__ import annotations
