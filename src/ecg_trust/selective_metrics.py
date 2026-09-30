@@ -45,7 +45,25 @@ class ExcessAurc:
         }
 
 
+_EXACT_FLOAT_INTEGER_LIMIT = 2**53
+
+
+def _has_inexact_python_integer(values: ArrayLike) -> bool:
+    try:
+        elements = np.asarray(values, dtype=object).ravel()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        isinstance(element, (int, np.integer))
+        and not isinstance(element, (bool, np.bool_))
+        and abs(int(element)) > _EXACT_FLOAT_INTEGER_LIMIT
+        for element in elements
+    )
+
+
 def _vector(values: ArrayLike, *, name: str, count: int | None = None) -> FloatArray:
+    if not isinstance(values, np.ndarray) and _has_inexact_python_integer(values):
+        raise SelectiveMetricError(f"{name} cannot be represented exactly as float64")
     try:
         raw = np.asarray(values)
     except (TypeError, ValueError, OverflowError) as error:
@@ -62,9 +80,7 @@ def _vector(values: ArrayLike, *, name: str, count: int | None = None) -> FloatA
         raise SelectiveMetricError(f"{name} overflows float64") from error
     if not np.isfinite(vector).all():
         raise SelectiveMetricError(f"{name} must be finite")
-    if np.issubdtype(raw.dtype, np.integer) and not np.array_equal(
-        vector.astype(raw.dtype), raw
-    ):
+    if np.issubdtype(raw.dtype, np.integer) and not np.array_equal(vector.astype(raw.dtype), raw):
         raise SelectiveMetricError(f"{name} cannot be represented exactly as float64")
     if count is not None and vector.shape[0] != count:
         raise SelectiveMetricError(f"{name} must have {count} entries")
@@ -96,24 +112,37 @@ def selective_risk_curve(losses: ArrayLike, uncertainty: ArrayLike) -> FloatArra
     ends = np.concatenate((boundaries, [loss.shape[0]]))
     expected = np.empty_like(sorted_loss)
     for start, end in zip(starts, ends, strict=True):
-        expected[start:end] = sorted_loss[start:end].mean()
-    accepted = np.arange(1, loss.shape[0] + 1, dtype=np.float64)
-    return np.asarray(np.cumsum(expected) / accepted, dtype=np.float64)
+        group = sorted_loss[start:end]
+        peak = float(group.max())
+        expected[start:end] = 0.0 if peak == 0.0 else float((group / peak).mean() * peak)
+    return _prefix_means(expected)
+
+
+def _prefix_means(ordered_losses: FloatArray) -> FloatArray:
+    # Scale by the largest loss so cumulative sums cannot overflow; every
+    # prefix mean is at most that maximum and therefore representable.
+    scale = float(ordered_losses.max())
+    if scale == 0.0:
+        return np.zeros_like(ordered_losses)
+    accepted = np.arange(1, ordered_losses.shape[0] + 1, dtype=np.float64)
+    return np.asarray(np.cumsum(ordered_losses / scale) / accepted * scale, dtype=np.float64)
+
+
+def _area(curve: FloatArray) -> float:
+    scale = float(curve.max())
+    return 0.0 if scale == 0.0 else float((curve / scale).mean() * scale)
 
 
 def aurc(losses: ArrayLike, uncertainty: ArrayLike) -> float:
     """Area under the risk-coverage curve, averaged over every coverage step."""
 
-    return float(selective_risk_curve(losses, uncertainty).mean())
+    return _area(selective_risk_curve(losses, uncertainty))
 
 
 def oracle_aurc(losses: ArrayLike) -> float:
     """AURC of the ideal ranking that accepts the lowest-loss cases first."""
 
-    loss = _losses(losses)
-    ordered = np.sort(loss)
-    accepted = np.arange(1, loss.shape[0] + 1, dtype=np.float64)
-    return float((np.cumsum(ordered) / accepted).mean())
+    return _area(_prefix_means(np.sort(_losses(losses))))
 
 
 def excess_aurc(losses: ArrayLike, uncertainty: ArrayLike) -> ExcessAurc:

@@ -47,6 +47,17 @@ def test_exactly_representable_integer_uncertainty_keeps_its_order() -> None:
     assert aurc([0.0, 1.0], uncertainty) == pytest.approx(0.75)
 
 
+def test_extreme_finite_losses_do_not_overflow() -> None:
+    curve = selective_risk_curve([1e308, 9e307], [0.0, 1.0])
+    result = excess_aurc([1e308, 9e307], [0.0, 1.0])
+
+    np.testing.assert_allclose(curve, [1e308, 9.5e307])
+    assert np.isfinite(result.aurc)
+    assert np.isfinite(result.excess_aurc)
+    assert result.oracle_aurc == pytest.approx(9e307 / 2 + 9.5e307 / 2)
+    assert np.isfinite(aurc([1e308, 1e308], [0.0, 0.0]))
+
+
 def test_constant_uncertainty_cannot_beat_the_oracle() -> None:
     rng = np.random.default_rng(7)
     losses = rng.uniform(size=50)
@@ -93,6 +104,8 @@ def test_matches_existing_dense_risk_coverage_without_ties() -> None:
         (np.array([0.0, 1.0], dtype=object), [0.1, 0.2], "real numeric"),
         ([0.0, 1.0], np.array([2**53 + 1, 2**53], dtype=np.int64), "exactly"),
         ([0.0, 1.0], np.array([2**63 + 1, 1], dtype=np.uint64), "exactly"),
+        ([0.0, 1.0], [2**53 + 1, float(2**53)], "exactly"),
+        ([0.0, 1.0], [np.int64(2**53 + 1), 0.5], "exactly"),
     ],
 )
 def test_malformed_inputs_are_rejected(losses: object, uncertainty: object, message: str) -> None:
