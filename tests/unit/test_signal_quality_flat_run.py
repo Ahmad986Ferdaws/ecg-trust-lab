@@ -21,21 +21,25 @@ FloatArray = NDArray[np.float64]
 V2_LEAD = 7
 
 
-def _clean_signal() -> FloatArray:
-    time = np.arange(1_000, dtype=np.float64) / 100.0
+def _beat(time: FloatArray) -> FloatArray:
     phase = np.mod(time, 1.0)
 
     def pulse(center: float, width: float, amplitude: float) -> FloatArray:
         return amplitude * np.exp(-0.5 * np.square((phase - center) / width))
 
-    beat = (
+    return (
         pulse(0.18, 0.035, 0.10)
         + pulse(0.375, 0.014, -0.12)
         + pulse(0.400, 0.016, 1.10)
         + pulse(0.430, 0.018, -0.24)
         + pulse(0.660, 0.075, 0.28)
     )
-    lead_i = 0.75 * beat
+
+
+def _clean_signal() -> FloatArray:
+    time = np.arange(1_000, dtype=np.float64) / 100.0
+    beat = _beat(time)
+    lead_i = 0.75 * _beat(time + 0.02)
     lead_ii = 1.00 * beat
     return np.stack(
         (
