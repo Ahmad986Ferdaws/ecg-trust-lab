@@ -75,6 +75,20 @@ def test_quasi_separation_with_a_shared_boundary_value_has_no_finite_slope() -> 
     assert not weak_calibration(outcomes, probabilities)[0].converged
 
 
+def test_polarized_predictions_get_the_exact_intercept_root() -> None:
+    column = np.array([0.001, 0.001] + [0.999] * 8)
+    outcomes_column = np.array([1, 0, 1, 0, 0, 0, 0, 0, 0, 0])
+    probabilities = np.tile(column[:, None], (1, 5))
+    outcomes = np.tile(outcomes_column[:, None], (1, 5))
+
+    item = weak_calibration(outcomes, probabilities)[0]
+    logits = np.log(column) - np.log1p(-column)
+    fitted = 1.0 / (1.0 + np.exp(-(item.calibration_in_the_large + logits)))
+
+    assert item.calibration_in_the_large == pytest.approx(-8.005, abs=0.01)
+    assert fitted.mean() == pytest.approx(0.2, abs=1e-9)
+
+
 def test_extreme_probabilities_stay_finite() -> None:
     outcomes, probabilities = _simulate(2_000, scale=1.0, shift=0.0, seed=3)
     probabilities[:10] = 0.0

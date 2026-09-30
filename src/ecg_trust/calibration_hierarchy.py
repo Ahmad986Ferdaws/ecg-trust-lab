@@ -57,22 +57,43 @@ class WeakCalibration:
 
 
 def _sigmoid(values: FloatArray) -> FloatArray:
-    return np.asarray(0.5 * (1.0 + np.tanh(0.5 * values)), dtype=np.float64)
+    # Sign-branched so neither tail cancels to exactly 0 or 1 prematurely.
+    result = np.empty_like(values, dtype=np.float64)
+    positive = values >= 0.0
+    result[positive] = 1.0 / (1.0 + np.exp(-values[positive]))
+    exponential = np.exp(values[~positive])
+    result[~positive] = exponential / (1.0 + exponential)
+    return result
 
 
 def _intercept_with_offset(logits: FloatArray, outcomes: FloatArray) -> float:
-    intercept = 0.0
-    for _ in range(100):
-        fitted = _sigmoid(intercept + logits)
-        gradient = float(np.sum(outcomes - fitted))
-        curvature = float(np.sum(fitted * (1.0 - fitted)))
-        if curvature <= 0.0:
+    """Root of ``sum(y - sigmoid(a + logit))`` in ``a`` by bracketed bisection.
+
+    The score is strictly decreasing in ``a``, so a sign change brackets the
+    unique root whenever both outcomes occur; bisection cannot cycle.
+    """
+
+    def score(intercept: float) -> float:
+        return float(np.sum(outcomes - _sigmoid(intercept + logits)))
+
+    low, high = -1.0, 1.0
+    while score(low) <= 0.0:
+        low *= 2.0
+        if low < -1e6:
+            raise CalibrationHierarchyError("calibration intercept could not be bracketed")
+    while score(high) >= 0.0:
+        high *= 2.0
+        if high > 1e6:
+            raise CalibrationHierarchyError("calibration intercept could not be bracketed")
+    for _ in range(200):
+        middle = 0.5 * (low + high)
+        if middle in (low, high):
             break
-        step = gradient / curvature
-        intercept += max(min(step, 5.0), -5.0)
-        if abs(step) < 1e-10:
-            break
-    return intercept
+        if score(middle) > 0.0:
+            low = middle
+        else:
+            high = middle
+    return 0.5 * (low + high)
 
 
 def _logistic_slope(
