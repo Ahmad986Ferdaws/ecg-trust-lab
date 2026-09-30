@@ -58,6 +58,28 @@ def test_extreme_finite_losses_do_not_overflow() -> None:
     assert np.isfinite(aurc([1e308, 1e308], [0.0, 0.0]))
 
 
+def test_wide_dynamic_range_keeps_small_prefixes_and_extreme_scores() -> None:
+    curve = selective_risk_curve([1e-300, 1e100], [0.0, 1.0])
+
+    with np.errstate(over="raise", invalid="raise"):
+        extreme = aurc([0.0, 1.0], [-1e308, 1e308])
+
+    assert curve[0] == 1e-300
+    assert curve[1] == pytest.approx(5e99)
+    assert extreme == pytest.approx(0.25)
+
+
+@pytest.mark.skipif(
+    np.finfo(np.longdouble).eps >= np.finfo(np.float64).eps,
+    reason="platform long double is not wider than float64",
+)
+def test_extended_floats_that_collapse_are_rejected() -> None:
+    wide = np.array([1 + np.finfo(np.longdouble).eps, 1], dtype=np.longdouble)
+
+    with pytest.raises(SelectiveMetricError, match="exactly"):
+        aurc([0.0, 1.0], wide)
+
+
 def test_constant_uncertainty_cannot_beat_the_oracle() -> None:
     rng = np.random.default_rng(7)
     losses = rng.uniform(size=50)

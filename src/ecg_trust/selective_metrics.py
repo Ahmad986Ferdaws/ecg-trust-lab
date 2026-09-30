@@ -107,30 +107,33 @@ def selective_risk_curve(losses: ArrayLike, uncertainty: ArrayLike) -> FloatArra
     order = np.argsort(score, kind="stable")
     sorted_score = score[order]
     sorted_loss = loss[order]
-    boundaries = np.flatnonzero(np.diff(sorted_score)) + 1
+    # Compare neighbours instead of subtracting them, which can overflow.
+    boundaries = np.flatnonzero(sorted_score[1:] != sorted_score[:-1]) + 1
     starts = np.concatenate(([0], boundaries))
     ends = np.concatenate((boundaries, [loss.shape[0]]))
     expected = np.empty_like(sorted_loss)
     for start, end in zip(starts, ends, strict=True):
-        group = sorted_loss[start:end]
-        peak = float(group.max())
-        expected[start:end] = 0.0 if peak == 0.0 else float((group / peak).mean() * peak)
-    return _prefix_means(expected)
+        expected[start:end] = _running_means(sorted_loss[start:end])[-1]
+    return _running_means(expected)
 
 
-def _prefix_means(ordered_losses: FloatArray) -> FloatArray:
-    # Scale by the largest loss so cumulative sums cannot overflow; every
-    # prefix mean is at most that maximum and therefore representable.
-    scale = float(ordered_losses.max())
-    if scale == 0.0:
-        return np.zeros_like(ordered_losses)
-    accepted = np.arange(1, ordered_losses.shape[0] + 1, dtype=np.float64)
-    return np.asarray(np.cumsum(ordered_losses / scale) / accepted * scale, dtype=np.float64)
+def _running_means(values: FloatArray) -> FloatArray:
+    """Prefix means via the incremental update ``m += (x - m) / k``.
+
+    Values are non-negative, so ``x - m`` never exceeds ``max(x)`` and cannot
+    overflow, and nothing is rescaled, so small leading values do not underflow.
+    """
+
+    means = np.empty(values.shape[0], dtype=np.float64)
+    mean = 0.0
+    for index, value in enumerate(values.tolist(), start=1):
+        mean += (value - mean) / index
+        means[index - 1] = mean
+    return means
 
 
 def _area(curve: FloatArray) -> float:
-    scale = float(curve.max())
-    return 0.0 if scale == 0.0 else float((curve / scale).mean() * scale)
+    return float(_running_means(curve)[-1])
 
 
 def aurc(losses: ArrayLike, uncertainty: ArrayLike) -> float:
@@ -142,7 +145,7 @@ def aurc(losses: ArrayLike, uncertainty: ArrayLike) -> float:
 def oracle_aurc(losses: ArrayLike) -> float:
     """AURC of the ideal ranking that accepts the lowest-loss cases first."""
 
-    return _area(_prefix_means(np.sort(_losses(losses))))
+    return _area(_running_means(np.sort(_losses(losses))))
 
 
 def excess_aurc(losses: ArrayLike, uncertainty: ArrayLike) -> ExcessAurc:
