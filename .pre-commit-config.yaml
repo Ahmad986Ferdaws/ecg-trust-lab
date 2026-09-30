@@ -1,4 +1,6 @@
 # Optional local hooks that mirror the CPU quality workflow before a push.
+# The ruff and mypy hooks always run on the whole tree, exactly like CI, so
+# configuration-only edits and file deletions are checked too.
 # Install once with `uvx pre-commit install`. The ruff and mypy hooks run the
 # project's own environment (`uv run --no-sync`) so they use the same tool
 # versions as CI; create that environment first as described in CONTRIBUTING.md.
@@ -16,14 +18,14 @@ repos:
   - repo: local
     hooks:
       - id: ruff
-        name: ruff (project environment)
-        entry: uv run --no-sync ruff check
+        name: ruff check src tests scripts (project environment)
+        entry: uv run --no-sync ruff check src tests scripts
         language: system
-        types: [python]
-        files: ^(src|tests|scripts)/
+        pass_filenames: false
+        always_run: true
       - id: mypy
         name: mypy --platform win32 (project environment)
         entry: uv run --no-sync mypy --platform win32
         language: system
         pass_filenames: false
-        files: ^(src/.*\.py|pyproject\.toml)$
+        always_run: true
