@@ -9,7 +9,7 @@ put the same number of predictions in each bin:
   probability|`` over equal-mass bins (the adaptive scheme of Nixon et al.,
   "Measuring Calibration in Deep Learning", CVPR Workshops 2019).
 * ``monotonic_sweep_calibration_error``: the equal-mass estimate at the largest
-  bin count whose bin event rates are still monotone (ECE-sweep; Roelofs et al.,
+  candidate bin count whose bin event rates are monotone (ECE-sweep; Roelofs et al.,
   "Mitigating Bias in Calibration Error Estimation", AISTATS 2022).
 
 Both are descriptive, read-only statistics that fit nothing.
@@ -87,12 +87,13 @@ def _binary_ace(scores: FloatArray, targets: FloatArray, n_bins: int) -> float:
 
 
 def _binary_sweep(scores: FloatArray, targets: FloatArray, max_bins: int) -> tuple[int, float]:
+    # Equal-mass partitions for different bin counts are not nested, so a
+    # non-monotone count does not rule out a larger monotone one: search them all.
     chosen = 1
     for bins in range(2, min(max_bins, scores.size) + 1):
         _, _, event_rate = _equal_mass_bins(scores, targets, bins)
-        if np.any(np.diff(event_rate) < 0.0):
-            break
-        chosen = bins
+        if not np.any(np.diff(event_rate) < 0.0):
+            chosen = bins
     return chosen, _binary_ace(scores, targets, chosen)
 
 

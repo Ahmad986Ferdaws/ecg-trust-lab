@@ -61,17 +61,19 @@ def test_bin_count_is_capped_by_sample_count() -> None:
     assert result.macro == pytest.approx(0.5)
 
 
-def test_sweep_stops_at_the_first_non_monotone_bin_count() -> None:
-    probabilities = _matrix(np.linspace(0.05, 0.95, 40))
-    monotone = _matrix((np.arange(40) >= 20).astype(np.int64))
-    wiggly_column = np.zeros(40, dtype=np.int64)
-    wiggly_column[[10, 11, 35, 36, 37, 38]] = 1
+def test_sweep_chooses_the_largest_monotone_count_across_all_candidates() -> None:
+    probabilities = _matrix(np.linspace(0.1, 0.9, 5))
+    nonnested = _matrix(np.array([0, 1, 1, 0, 1]))
+    monotone = _matrix(np.array([0, 0, 1, 1, 1]))
+    never = _matrix(np.array([1, 1, 0, 0, 0]))
 
-    monotone_result = monotonic_sweep_calibration_error(monotone, probabilities, max_bins=8)
-    wiggly_result = monotonic_sweep_calibration_error(_matrix(wiggly_column), probabilities)
+    nonnested_result = monotonic_sweep_calibration_error(nonnested, probabilities, max_bins=3)
+    monotone_result = monotonic_sweep_calibration_error(monotone, probabilities)
+    never_result = monotonic_sweep_calibration_error(never, probabilities)
 
-    assert {item.bins for item in monotone_result.labels} == {8}
-    assert {item.bins for item in wiggly_result.labels} == {2}
+    assert {item.bins for item in nonnested_result.labels} == {3}
+    assert {item.bins for item in monotone_result.labels} == {5}
+    assert {item.bins for item in never_result.labels} == {1}
     assert monotone_result.to_dict()["method"] == "equal_mass_monotonic_sweep"
 
 
