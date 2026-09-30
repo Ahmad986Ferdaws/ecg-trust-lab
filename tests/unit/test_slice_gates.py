@@ -83,6 +83,33 @@ def test_small_groups_block_by_default_and_can_be_reported_only() -> None:
     assert reported.to_dict()["slices"][2]["status"] == "insufficient"  # type: ignore[index]
 
 
+def test_report_only_small_groups_do_not_drive_the_overall_result() -> None:
+    reference = _obs(("large", 500, 0.80), ("tiny", 5, 0.80))
+    candidate = _obs(("large", 500, 0.80), ("tiny", 0, 0.0))
+
+    result = evaluate_slice_gate(
+        reference, candidate, insufficient_policy=InsufficientPolicy.REPORT
+    )
+
+    assert result.overall_degradation == pytest.approx(0.0)
+    assert result.overall_status is SliceStatus.PASS
+    assert result.insufficient_groups == ("tiny",)
+    assert result.passed
+
+
+def test_no_sufficient_group_makes_the_overall_result_insufficient() -> None:
+    result = evaluate_slice_gate(
+        _obs(("a", 0, 0.5)),
+        _obs(("a", 40, 0.5)),
+        insufficient_policy=InsufficientPolicy.REPORT,
+    )
+
+    assert result.overall_degradation is None
+    assert result.overall_status is SliceStatus.INSUFFICIENT
+    assert not result.passed
+    assert result.to_dict()["overall_degradation"] is None
+
+
 def test_drop_exactly_at_the_limit_passes() -> None:
     candidate = _obs(("a", 100, 0.75))
 
@@ -95,7 +122,6 @@ def test_drop_exactly_at_the_limit_passes() -> None:
         (REFERENCE, REFERENCE[:2], {}, "same groups"),
         ([], [], {}, "at least one group"),
         (REFERENCE + REFERENCE[:1], REFERENCE, {}, "repeats"),
-        (_obs(("a", 0, 0.5)), _obs(("a", 40, 0.5)), {}, "counted reference record"),
         (REFERENCE, REFERENCE, {"max_slice_drop": -0.1}, "non-negative"),
         (REFERENCE, REFERENCE, {"max_overall_drop": float("nan")}, "finite"),
         (REFERENCE, REFERENCE, {"min_count": 0}, "positive integer"),

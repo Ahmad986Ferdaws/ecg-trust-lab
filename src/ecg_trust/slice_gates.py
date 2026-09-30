@@ -67,7 +67,7 @@ class SliceVerdict:
 @dataclass(frozen=True, slots=True)
 class SliceGateResult:
     passed: bool
-    overall_degradation: float
+    overall_degradation: float | None
     overall_status: SliceStatus
     slices: tuple[SliceVerdict, ...]
 
@@ -125,14 +125,12 @@ def _by_group(observations: Sequence[SliceObservation], name: str) -> dict[str, 
 
 
 def _weighted(
-    observations: dict[str, SliceObservation], weights: dict[str, SliceObservation]
+    observations: dict[str, SliceObservation],
+    weights: dict[str, SliceObservation],
+    groups: Sequence[str],
 ) -> float:
-    total = sum(item.count for item in weights.values())
-    if total == 0:
-        raise SliceGateError("overall metrics need at least one counted reference record")
-    return math.fsum(
-        observations[group].value * (weights[group].count / total) for group in weights
-    )
+    total = sum(weights[group].count for group in groups)
+    return math.fsum(observations[group].value * (weights[group].count / total) for group in groups)
 
 
 def evaluate_slice_gate(
@@ -147,8 +145,10 @@ def evaluate_slice_gate(
 ) -> SliceGateResult:
     """Compare candidate to reference overall and per group.
 
-    The overall comparison weights both sides by the reference group counts,
-    so it reflects metric changes at a fixed group composition.
+    The overall comparison covers only sufficiently large groups and weights
+    both sides by their reference counts, so it reflects metric changes at a
+    fixed group composition. With no sufficient group it is ``insufficient``
+    and the gate fails regardless of ``insufficient_policy``.
 
     ``degradation`` is the move in the worse direction (positive = worse). A
     group is insufficient when either side has fewer than ``min_count`` records.
@@ -187,10 +187,18 @@ def evaluate_slice_gate(
                 status=status,
             )
         )
-    # Weight both sides by the reference composition so a shift in group mix
-    # is not mistaken for (or allowed to hide) a change in the metric.
-    overall = sign * (_weighted(before, before) - _weighted(after, before))
-    overall_status = SliceStatus.FAIL if _exceeds(overall, overall_limit) else SliceStatus.PASS
+    # The overall comparison uses only groups large enough to judge, and weights
+    # both sides by the reference composition so a shift in group mix is not
+    # mistaken for (or allowed to hide) a change in the metric.
+    supported = [item.group for item in verdicts if item.status is not SliceStatus.INSUFFICIENT]
+    overall: float | None = None
+    if supported:
+        overall = sign * (
+            _weighted(before, before, supported) - _weighted(after, before, supported)
+        )
+        overall_status = SliceStatus.FAIL if _exceeds(overall, overall_limit) else SliceStatus.PASS
+    else:
+        overall_status = SliceStatus.INSUFFICIENT
     blocked = {SliceStatus.FAIL}
     if policy is InsufficientPolicy.BLOCK:
         blocked.add(SliceStatus.INSUFFICIENT)
