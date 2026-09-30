@@ -23,7 +23,7 @@ Last reviewed against `main` on 2026-09-30.
 
 | Limitation | Evidence | What would resolve it |
 |---|---|---|
-| Public fold-10 tables are macro-only; per-label sealed results aren't published. | `publication/results/tables/` | Publish per-label tables with patient-cluster intervals from the existing sealed artifacts |
+| Public fold-10 discrimination results (AUROC, average precision, paired deltas) are published only as macro summaries; per-label calibration curves exist (`reliability_seed2026.csv`), but there are no per-label discrimination summaries with patient-cluster intervals. | `publication/results/tables/` | Publish per-label discrimination tables with patient-cluster intervals from the existing sealed artifacts |
 | Class imbalance was not addressed in the frozen models (unweighted BCE). | Frozen training configs; `ecg_trust.class_balance` now computes train-fold weights | A scoped weighted-training experiment on folds 1–8, recalibrated on fold 9 |
 | One global temperature calibrates all five labels. | [Model card](MODEL_CARD_PTBXL_SUPERCLASS_R3.md) | Compare per-label calibrators on fold 9 before any new release |
 | Global abstention gates under-covered patients aged 80+. | README "Current status" (r3 package) | Per-group release gates (`ecg_trust.slice_gates`) in a new protocol |
