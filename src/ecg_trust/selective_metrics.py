@@ -116,7 +116,8 @@ def selective_risk_curve(losses: ArrayLike, uncertainty: ArrayLike) -> FloatArra
     ends = np.concatenate((boundaries, [loss.shape[0]]))
     expected = np.empty_like(sorted_loss)
     for start, end in zip(starts, ends, strict=True):
-        expected[start:end] = _running_means(sorted_loss[start:end])[-1]
+        # Sort each tie group so its mean does not depend on input order.
+        expected[start:end] = _running_means(np.sort(sorted_loss[start:end]))[-1]
     return _running_means(expected)
 
 

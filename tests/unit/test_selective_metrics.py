@@ -80,6 +80,13 @@ def test_extended_floats_that_collapse_are_rejected() -> None:
         aurc([0.0, 1.0], wide)
 
 
+def test_tie_group_mean_is_permutation_invariant_for_mixed_magnitudes() -> None:
+    forward = selective_risk_curve([1e16, 1.0, 1.0], [0.0, 0.0, 0.0])
+    backward = selective_risk_curve([1.0, 1.0, 1e16], [0.0, 0.0, 0.0])
+
+    np.testing.assert_array_equal(forward, backward)
+
+
 def test_constant_uncertainty_cannot_beat_the_oracle() -> None:
     rng = np.random.default_rng(7)
     losses = rng.uniform(size=50)
