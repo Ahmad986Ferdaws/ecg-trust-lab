@@ -11,8 +11,6 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: detect-private-key
-        # This test asserts that a PEM header string is redacted; it holds no key.
-        exclude: ^tests/unit/test_model_passport\.py$
       - id: check-added-large-files
         args: ["--maxkb=1024"]
   - repo: local
@@ -28,4 +26,4 @@ repos:
         entry: uv run --no-sync mypy --platform win32
         language: system
         pass_filenames: false
-        files: ^src/.*\.py$
+        files: ^(src/.*\.py|pyproject\.toml)$

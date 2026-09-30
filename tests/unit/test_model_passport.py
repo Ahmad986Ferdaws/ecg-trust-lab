@@ -391,7 +391,8 @@ def test_privacy_boundary_rejects_identifiers_and_row_arrays(
         ("Evidence was read from C:\\private\\cohort.csv", "absolute path"),
         ("Evidence was read from /srv/private/cohort.csv", "absolute path"),
         ("Bearer abcdefghijklmnopqrstuvwxyz", "secret-like"),
-        ("-----BEGIN PRIVATE KEY-----", "secret-like"),
+        # Built from fragments so repository key scanners stay enabled for this file.
+        ("-----BEGIN " + "PRIVATE KEY-----", "secret-like"),
     ],
 )
 def test_privacy_boundary_rejects_paths_and_secret_material(limitation: str, match: str) -> None:
