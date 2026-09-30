@@ -92,12 +92,18 @@ def _priors(values: Sequence[float], labels: int, name: str) -> tuple[float, ...
     return tuple(float(prior) for prior in priors)
 
 
+def _logit(value: float) -> float:
+    return math.log(value) - math.log1p(-value)
+
+
 def _reweight(probabilities: FloatArray, source: float, target: float) -> FloatArray:
-    positive = probabilities * (target / source)
-    negative = (1.0 - probabilities) * ((1.0 - target) / (1.0 - source))
-    denominator = positive + negative
-    safe = np.where(denominator > 0.0, denominator, 1.0)
-    return np.asarray(np.where(denominator > 0.0, positive / safe, probabilities), dtype=np.float64)
+    # Shift in log-odds space: logit(p') = logit(p) + logit(target) - logit(source).
+    # Ratios such as target / source would overflow for subnormal priors.
+    shift = _logit(target) - _logit(source)
+    with np.errstate(divide="ignore"):
+        logits = np.log(probabilities) - np.log1p(-probabilities)
+    adjusted = 0.5 * (1.0 + np.tanh(0.5 * (logits + shift)))
+    return np.asarray(adjusted, dtype=np.float64)
 
 
 def adjust_to_priors(

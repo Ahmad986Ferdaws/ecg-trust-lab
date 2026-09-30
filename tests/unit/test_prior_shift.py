@@ -60,6 +60,19 @@ def test_known_prior_adjustment_matches_bayes_rule() -> None:
     )
 
 
+def test_subnormal_priors_do_not_produce_nans() -> None:
+    probabilities = np.array([[0.0], [0.2], [0.9], [1.0]])
+
+    adjusted = adjust_to_priors(probabilities, source_priors=(1e-310,), target_priors=(0.5,))
+    estimated = estimate_label_shift(probabilities, source_priors=(1e-310,))
+
+    assert np.isfinite(adjusted).all()
+    assert adjusted[0, 0] == 0.0
+    assert adjusted[3, 0] == 1.0
+    assert np.isfinite(estimated.adjusted_probabilities).all()
+    assert np.isfinite(estimated.labels[0].target_prior)
+
+
 def test_iteration_budget_is_reported() -> None:
     scores = _calibrated_scores(0.3, 0.05, 2_000, 4)[:, None]
 
