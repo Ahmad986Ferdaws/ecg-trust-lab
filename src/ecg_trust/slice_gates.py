@@ -124,11 +124,15 @@ def _by_group(observations: Sequence[SliceObservation], name: str) -> dict[str, 
     return result
 
 
-def _weighted(observations: dict[str, SliceObservation]) -> float:
-    total = sum(item.count for item in observations.values())
+def _weighted(
+    observations: dict[str, SliceObservation], weights: dict[str, SliceObservation]
+) -> float:
+    total = sum(item.count for item in weights.values())
     if total == 0:
-        raise SliceGateError("overall metrics need at least one counted record")
-    return math.fsum(item.value * (item.count / total) for item in observations.values())
+        raise SliceGateError("overall metrics need at least one counted reference record")
+    return math.fsum(
+        observations[group].value * (weights[group].count / total) for group in weights
+    )
 
 
 def evaluate_slice_gate(
@@ -141,7 +145,10 @@ def evaluate_slice_gate(
     higher_is_better: bool = True,
     insufficient_policy: InsufficientPolicy = InsufficientPolicy.BLOCK,
 ) -> SliceGateResult:
-    """Compare candidate to reference overall (count-weighted) and per group.
+    """Compare candidate to reference overall and per group.
+
+    The overall comparison weights both sides by the reference group counts,
+    so it reflects metric changes at a fixed group composition.
 
     ``degradation`` is the move in the worse direction (positive = worse). A
     group is insufficient when either side has fewer than ``min_count`` records.
@@ -180,7 +187,9 @@ def evaluate_slice_gate(
                 status=status,
             )
         )
-    overall = sign * (_weighted(before) - _weighted(after))
+    # Weight both sides by the reference composition so a shift in group mix
+    # is not mistaken for (or allowed to hide) a change in the metric.
+    overall = sign * (_weighted(before, before) - _weighted(after, before))
     overall_status = SliceStatus.FAIL if _exceeds(overall, overall_limit) else SliceStatus.PASS
     blocked = {SliceStatus.FAIL}
     if policy is InsufficientPolicy.BLOCK:

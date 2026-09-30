@@ -47,6 +47,20 @@ def test_overall_drop_fails_without_any_single_group_failing() -> None:
     assert not result.passed
 
 
+def test_group_mix_shift_alone_is_not_a_regression() -> None:
+    reference = _obs(("high", 900, 0.9), ("low", 100, 0.5))
+    shifted = _obs(("high", 100, 0.9), ("low", 900, 0.5))
+    hidden = _obs(("high", 100, 0.87), ("low", 900, 0.47))
+
+    unchanged = evaluate_slice_gate(reference, shifted)
+    degraded = evaluate_slice_gate(reference, hidden, max_slice_drop=0.05, max_overall_drop=0.02)
+
+    assert unchanged.overall_degradation == pytest.approx(0.0)
+    assert unchanged.passed
+    assert degraded.overall_degradation == pytest.approx(0.03)
+    assert degraded.overall_status is SliceStatus.FAIL
+
+
 def test_lower_is_better_metrics_flip_the_direction() -> None:
     risk = _obs(("a", 100, 0.10), ("b", 100, 0.12))
     worse = _obs(("a", 100, 0.10), ("b", 100, 0.20))
@@ -81,7 +95,7 @@ def test_drop_exactly_at_the_limit_passes() -> None:
         (REFERENCE, REFERENCE[:2], {}, "same groups"),
         ([], [], {}, "at least one group"),
         (REFERENCE + REFERENCE[:1], REFERENCE, {}, "repeats"),
-        (_obs(("a", 0, 0.5)), _obs(("a", 0, 0.5)), {}, "counted record"),
+        (_obs(("a", 0, 0.5)), _obs(("a", 40, 0.5)), {}, "counted reference record"),
         (REFERENCE, REFERENCE, {"max_slice_drop": -0.1}, "non-negative"),
         (REFERENCE, REFERENCE, {"max_overall_drop": float("nan")}, "finite"),
         (REFERENCE, REFERENCE, {"min_count": 0}, "positive integer"),
