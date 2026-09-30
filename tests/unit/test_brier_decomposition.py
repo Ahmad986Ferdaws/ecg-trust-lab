@@ -38,6 +38,17 @@ def test_tied_forecasts_share_a_bin_regardless_of_row_order() -> None:
     assert first.reliability == pytest.approx(second.reliability) == pytest.approx(0.0)
 
 
+def test_large_tie_block_keeps_the_distinct_scores_on_both_sides() -> None:
+    column = np.array([0.1, 0.5, 0.5, 0.5, 0.5, 0.9])
+    probabilities = np.tile(column[:, None], (1, 5))
+    targets = np.tile(np.array([[0], [0], [1], [0], [1], [1]]), (1, 5))
+
+    item = brier_decomposition(targets, probabilities, n_bins=3)[0]
+
+    assert item.bins == 3
+    assert item.reconstructed == pytest.approx(item.brier, abs=1e-12)
+
+
 def test_within_bin_covariance_is_the_population_covariance() -> None:
     targets = np.tile(np.array([[0], [1], [0], [1]]), (1, 5))
     probabilities = np.tile(np.array([[0.1], [0.3], [0.6], [0.8]]), (1, 5))
