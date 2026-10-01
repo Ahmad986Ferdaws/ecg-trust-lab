@@ -1,8 +1,16 @@
+import type { CSSProperties } from "react";
 import { SOURCE_SUPPORT_COMPLETION } from "../../../lib/results";
 import styles from "./story.module.css";
 
 const result = SOURCE_SUPPORT_COMPLETION;
 const roles = Object.values(result.roles);
+const rejectionAxisMaximum = 0.1;
+
+const rejectionPlotStyle = {
+  "--observed-rejection": `${result.validation.recordFalseRejection / rejectionAxisMaximum * 100}%`,
+  "--maximum-rejection": `${result.validation.targetMaximum / rejectionAxisMaximum * 100}%`,
+  "--upper-rejection": `${result.validation.oneSidedUpper95 / rejectionAxisMaximum * 100}%`,
+} as CSSProperties;
 
 function percent(value: number, digits = 2) {
   return `${(value * 100).toFixed(digits)}%`;
@@ -17,7 +25,7 @@ export function SourceSupportSection() {
     >
       <div className={styles.sectionInner}>
         <div className={styles.supportStatus}>
-          <span>One-shot completion / 2026-08-29</span>
+          <span>One-shot completion / {result.completed}</span>
           <strong>Source-support target missed</strong>
           <span>No tuning · no retry</span>
         </div>
@@ -52,27 +60,30 @@ export function SourceSupportSection() {
             <strong>{result.researchBundleEligible ? "Eligible" : "Not eligible"}</strong>
             <p>
               The preregistered rule required the one-sided 95% false-rejection
-              upper bound to stay at or below 5.00%.
+              upper bound to stay at or below {percent(result.validation.targetMaximum)}.
             </p>
           </div>
 
           <div
             className={styles.supportPlot}
             role="img"
-            aria-label={`Observed source-support coverage ${percent(
-              result.validation.supportCoverage,
-            )}; target coverage 95 percent.`}
+            style={rejectionPlotStyle}
+            aria-label={`False rejection on a 0 to ${percent(rejectionAxisMaximum, 0)} axis. Observed ${percent(result.validation.recordFalseRejection)}; one-sided 95% upper bound ${percent(result.validation.oneSidedUpper95)}; frozen maximum ${percent(result.validation.targetMaximum)}. The upper bound exceeds the maximum.`}
           >
+            <p className={styles.supportPlotTitle} aria-hidden="true">False rejection · lower is better</p>
             <div className={styles.supportPlotLabels} aria-hidden="true">
               <span>0%</span>
-              <span>Observed {percent(result.validation.supportCoverage)}</span>
-              <span>100%</span>
+              <span>Observed {percent(result.validation.recordFalseRejection)}</span>
+              <span>{percent(rejectionAxisMaximum, 0)}</span>
             </div>
             <div className={styles.supportTrack} aria-hidden="true">
               <span className={styles.observedSupport} />
-              <span className={styles.targetMarker}>
-                <i>95% target</i>
-              </span>
+              <span className={styles.targetMarker} />
+              <span className={styles.upperBoundMarker} />
+            </div>
+            <div className={styles.supportPlotKey} aria-hidden="true">
+              <span>Solid line: {percent(result.validation.targetMaximum)} maximum</span>
+              <span>Dashed line: {percent(result.validation.oneSidedUpper95)} upper bound</span>
             </div>
           </div>
         </div>
@@ -82,9 +93,10 @@ export function SourceSupportSection() {
             <p className={styles.ledgerLabel}>Why the gate stayed closed</p>
             <h3>Confidence matters more than a near miss.</h3>
             <p>
-              The observed false-rejection rate was 5.38%. Across 10,000
+              The observed false-rejection rate was {percent(result.validation.recordFalseRejection)}. Across {result.bootstrapReplicates.toLocaleString("en-US")}
+              {" "}
               patient-cluster bootstrap samples, the one-sided upper bound was
-              7.30%—above the frozen 5.00% ceiling.
+              {" "}{percent(result.validation.oneSidedUpper95)}—above the frozen {percent(result.validation.targetMaximum)} ceiling.
             </p>
           </div>
 

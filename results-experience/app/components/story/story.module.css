@@ -852,31 +852,47 @@
 .observedSupport {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 94.6236559139785%;
+  width: var(--observed-rejection);
   background: var(--resnet);
 }
 
 .targetMarker {
   position: absolute;
-  top: -1rem;
+  top: 0;
   bottom: -1rem;
-  left: 95%;
+  left: var(--maximum-rejection);
   border-left: 4px solid var(--warning);
 }
 
-.targetMarker i {
-  position: absolute;
-  right: 0.55rem;
-  bottom: calc(100% + 0.5rem);
-  width: max-content;
-  color: var(--warning);
+.supportPlotTitle {
+  margin: 0 0 1.5rem;
+  color: var(--ink);
   font-family: var(--mono);
   font-size: 0.75rem;
-  font-style: normal;
   font-weight: 700;
-  line-height: 1.4;
-  text-transform: uppercase;
 }
+
+.upperBoundMarker {
+  position: absolute;
+  top: 0;
+  bottom: -1rem;
+  left: var(--upper-rejection);
+  border-left: 3px dashed var(--transformer);
+}
+
+.supportPlotKey {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  margin-top: 1.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.supportPlotKey span:first-child { color: var(--warning); }
+.supportPlotKey span:last-child { color: var(--transformer); }
 
 .uncertaintyLedger {
   display: grid;
