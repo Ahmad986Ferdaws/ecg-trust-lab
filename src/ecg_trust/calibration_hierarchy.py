@@ -101,13 +101,18 @@ def _intercept_with_offset(logits: FloatArray, outcomes: FloatArray) -> float:
 def _logistic_slope(
     logits: FloatArray, outcomes: FloatArray, max_iterations: int
 ) -> tuple[float, float, bool]:
-    # Fit on centred logits so the design is well conditioned when predictions
-    # cluster far from 0.5, then map the intercept back to the raw scale.
+    # Fit on standardized logits so conditioning and convergence tolerances do
+    # not depend on where or how tightly predictions cluster, then map the
+    # coefficients back to the raw logit scale.
     centre = float(logits.mean())
+    spread = float(logits.std())
+    if spread == 0.0:
+        return 0.0, 0.0, False
     intercept, slope, converged = _logistic_slope_centered(
-        logits - centre, outcomes, max_iterations
+        (logits - centre) / spread, outcomes, max_iterations
     )
-    return intercept - slope * centre, slope, converged
+    raw_slope = slope / spread
+    return intercept - raw_slope * centre, raw_slope, converged
 
 
 def _logistic_slope_centered(
@@ -163,7 +168,7 @@ def _logistic_slope_centered(
         movement = float(np.max(np.abs(candidate - coefficients)))
         coefficients = candidate
         current = value
-        if abs(float(coefficients[1])) > 1e6:
+        if abs(float(coefficients[1])) > 1e6:  # standardized scale
             return float(coefficients[0]), float(coefficients[1]), False
         if movement < 1e-9:
             return float(coefficients[0]), float(coefficients[1]), True

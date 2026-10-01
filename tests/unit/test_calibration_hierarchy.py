@@ -95,6 +95,22 @@ def test_clustered_logits_far_from_one_half_still_converge() -> None:
     assert item.calibration_slope > 0.0
 
 
+def test_tiny_logit_spread_is_not_mistaken_for_a_zero_slope() -> None:
+    from ecg_trust.calibration_hierarchy import _logistic_slope
+
+    logits = np.array([-2e-10, -1e-10, 0.0, 0.0, 1e-10, 2e-10])
+    outcomes = np.array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0])
+
+    intercept, slope, converged = _logistic_slope(logits, outcomes, 100)
+    standardized = (logits - logits.mean()) / logits.std()
+    _, reference, reference_converged = _logistic_slope(standardized, outcomes, 100)
+
+    assert converged and reference_converged
+    assert slope == pytest.approx(reference / logits.std(), rel=1e-6)
+    assert abs(slope) > 1e8
+    assert np.isfinite(intercept)
+
+
 def test_quasi_separation_with_a_shared_boundary_value_has_no_finite_slope() -> None:
     probabilities = np.tile(np.array([0.2, 0.4, 0.5, 0.5, 0.7])[:, None], (1, 5))
     outcomes = np.tile(np.array([[0], [0], [0], [1], [1]]), (1, 5))
