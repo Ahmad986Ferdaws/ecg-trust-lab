@@ -13,7 +13,8 @@ Reads an ``.npz`` with:
   selection. Training (1-7), model-selection (8), and sealed (10) rows are
   refused. Fold IDs can't identify spent one-shot cohorts inside fold 9, so
   never pass rows from one (such as the source-support cohort C);
-* optional ``thresholds``: ``[5]`` decision thresholds (default 0.5).
+* ``thresholds``: ``[5]`` the fold-9-selected decision thresholds (required, so
+  Hamming losses and threshold proximity describe the real decision rule).
 
 Following the research blueprint (section 9.3), the primary per-record loss is
 mean per-label binary log loss and the secondary loss is thresholded Hamming
@@ -136,7 +137,7 @@ def compare(
 def load(path: Path) -> tuple[FloatArray, NDArray[np.int64], FloatArray, object | None]:
     with np.load(path, allow_pickle=False) as payload:
         arrays = {name: payload[name] for name in payload.files}
-    missing = {"probabilities", "targets", "fold_ids"} - set(arrays)
+    missing = {"probabilities", "targets", "fold_ids", "thresholds"} - set(arrays)
     if missing:
         raise ComparisonError(f"prediction file is missing {sorted(missing)}")
     targets, probabilities = validate_multilabel_arrays(arrays["targets"], arrays["probabilities"])
@@ -147,7 +148,7 @@ def load(path: Path) -> tuple[FloatArray, NDArray[np.int64], FloatArray, object 
         raise ComparisonError("fold-10 rows are sealed; compare development predictions only")
     if not np.isin(folds, CALIBRATION_FOLDS).all():
         raise ComparisonError("fold_ids must all be fold 9, the abstention-selection fold")
-    raw_thresholds = np.asarray(arrays.get("thresholds", np.full(5, 0.5)))
+    raw_thresholds = np.asarray(arrays["thresholds"])
     if (
         raw_thresholds.dtype == np.object_
         or np.issubdtype(raw_thresholds.dtype, np.bool_)

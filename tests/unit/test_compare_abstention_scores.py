@@ -56,6 +56,7 @@ def test_prediction_file_round_trip_without_members(
         probabilities=probabilities,
         targets=targets,
         fold_ids=np.full(2000, 9),
+        thresholds=np.array([0.4, 0.3, 0.5, 0.35, 0.2]),
     )
 
     assert tool.main(["--predictions", str(path)]) == 0
@@ -74,6 +75,7 @@ def test_missing_file_is_reported(tmp_path: Path, capsys: pytest.CaptureFixture[
     ("extra", "message"),
     [
         ({"fold_ids": None}, "missing"),
+        ({"thresholds": None}, "missing"),
         ({"fold_ids": np.array([9, 9])}, "one entry per record"),
         ({"fold_ids": np.array([9.0, 9.0, 9.0, 9.0])}, "integers"),
         ({"fold_ids": np.array([9, 9, 10, 9])}, "fold-10"),
@@ -105,6 +107,7 @@ def test_unsafe_or_malformed_files_exit_with_an_error(
         "probabilities": np.full((4, 5), 0.5),
         "targets": np.zeros((4, 5), dtype=np.int64),
         "fold_ids": np.full(4, 9),
+        "thresholds": np.full(5, 0.5),
         **extra,
     }
     path = _save(
