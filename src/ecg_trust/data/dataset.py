@@ -28,6 +28,7 @@ from torch.utils.data import Dataset
 from ecg_trust.constants import LEADS, PTBXL_VERSION, SUPERCLASSES, TARGET_COLUMNS
 from ecg_trust.data.manifest import ManifestError, validate_relative_path
 from ecg_trust.protocol import (
+    TRAIN_FOLDS,
     ExperimentProtocol,
     FinalTestAccessToken,
 )
@@ -142,6 +143,10 @@ class NormalizationProvenance:
             raise NormalizationValidationError("training_folds must be unique and sorted")
         for fold in self.training_folds:
             _require_int(fold, "training_folds item")
+        if not set(self.training_folds).issubset(TRAIN_FOLDS):
+            raise NormalizationValidationError(
+                "normalization must be fitted exclusively on training folds 1-7"
+            )
         _require_int(self.record_count, "record_count")
         _require_int(self.sample_count, "sample_count")
         _require_float(self.sampling_frequency_hz, "sampling_frequency_hz", positive=True)
@@ -670,6 +675,10 @@ def compute_normalization_stats(
     normalized_folds = _normalize_requested_folds(training_folds)
     if normalized_folds is None:  # pragma: no cover - excluded by the public type contract
         raise ManifestValidationError("training_folds must not be None")
+    if not set(normalized_folds).issubset(TRAIN_FOLDS):
+        raise NormalizationValidationError(
+            "normalization must be fitted exclusively on training folds 1-7"
+        )
     dataset = PTBXLDataset(
         manifest,
         root_dir,
