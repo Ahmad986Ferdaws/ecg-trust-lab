@@ -56,6 +56,17 @@ def _record(
     )
 
 
+@pytest.fixture(autouse=True)
+def _synthetic_record_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        dataset_module.wfdb,
+        "rdheader",
+        lambda record_name, **kwargs: SimpleNamespace(
+            n_sig=len(LEADS), file_name=[f"{Path(record_name).name}.dat"] * len(LEADS)
+        ),
+    )
+
+
 def test_loads_reorders_and_filters_manifest_rows(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
