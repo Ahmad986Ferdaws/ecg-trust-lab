@@ -157,11 +157,12 @@ def _logistic_slope_centered(
         return float(np.sum(outcomes * linear - np.logaddexp(0.0, linear)))
 
     current = log_likelihood(coefficients)
+    tolerance = 1e-9 * max(1.0, float(outcomes.shape[0]))
     for _ in range(max_iterations):
         fitted = _sigmoid(design @ coefficients)
         weights = fitted * (1.0 - fitted)
         gradient = design.T @ (outcomes - fitted)
-        if float(np.max(np.abs(gradient))) < 1e-9 * max(1.0, float(outcomes.shape[0])):
+        if float(np.max(np.abs(gradient))) < tolerance:
             return float(coefficients[0]), float(coefficients[1]), True
         hessian = design.T @ (design * weights[:, None])
         try:
@@ -192,7 +193,11 @@ def _logistic_slope_centered(
         current = value
         if not np.isfinite(coefficients).all():
             return float(coefficients[0]), float(coefficients[1]), False
-    return float(coefficients[0]), float(coefficients[1]), False
+    # The last permitted update may itself satisfy the score equations.
+    fitted = _sigmoid(design @ coefficients)
+    final_gradient = design.T @ (outcomes - fitted)
+    converged = float(np.max(np.abs(final_gradient))) < tolerance
+    return float(coefficients[0]), float(coefficients[1]), converged
 
 
 def weak_calibration(
@@ -218,13 +223,16 @@ def weak_calibration(
         if positives == 0.0 or positives == outcomes.shape[0]:
             raise CalibrationHierarchyError(f"label {label!r} needs both outcomes")
         logits = _finite_logits(scores[:, index])
-        expected = float(scores[:, index].mean())
+        # Ratio of sums: a mean of subnormal probabilities can underflow to zero
+        # even when some prediction is nonzero.
+        expected_total = float(np.sum(scores[:, index]))
+        all_zero = not bool(np.any(scores[:, index] > 0.0))
         intercept, slope, converged = _logistic_slope(logits, outcomes, max_iterations)
         results.append(
             WeakCalibration(
                 label=label,
                 observed_expected_ratio=(
-                    float(outcomes.mean()) / expected if expected > 0.0 else None
+                    None if all_zero else float(outcomes.sum()) / expected_total
                 ),
                 calibration_in_the_large=_intercept_with_offset(logits, outcomes),
                 calibration_slope=slope if converged else None,

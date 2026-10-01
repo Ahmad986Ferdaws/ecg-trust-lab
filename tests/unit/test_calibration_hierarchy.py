@@ -196,6 +196,31 @@ def test_all_zero_predictions_leave_the_ratio_undefined() -> None:
     assert item.to_dict()["observed_expected_ratio"] is None
 
 
+def test_subnormal_predictions_keep_a_defined_ratio() -> None:
+    probabilities = np.zeros((4, 5))
+    probabilities[0] = np.nextafter(0.0, 1.0)
+    outcomes = np.tile(np.array([[1], [0], [1], [0]]), (1, 5))
+
+    item = weak_calibration(outcomes, probabilities)[0]
+
+    assert item.observed_expected_ratio is not None
+    assert item.observed_expected_ratio > 1e300
+
+
+def test_iteration_budget_counts_the_final_update() -> None:
+    from ecg_trust.calibration_hierarchy import _logistic_slope
+
+    logits = np.array([-1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0])
+    outcomes = np.array([0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0])
+
+    one = _logistic_slope(logits, outcomes, 1)
+    many = _logistic_slope(logits, outcomes, 50)
+
+    assert many[2]
+    if one[2]:
+        assert one[1] == pytest.approx(many[1], rel=1e-6)
+
+
 def test_degenerate_labels_and_bad_controls_are_rejected() -> None:
     with pytest.raises(CalibrationHierarchyError, match="both outcomes"):
         weak_calibration(np.zeros((5, 5), dtype=np.int64), np.full((5, 5), 0.2))
