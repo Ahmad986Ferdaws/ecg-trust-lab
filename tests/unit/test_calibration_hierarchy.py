@@ -221,6 +221,22 @@ def test_iteration_budget_counts_the_final_update() -> None:
         assert one[1] == pytest.approx(many[1], rel=1e-6)
 
 
+def test_weakly_identified_slope_is_not_reported_with_a_wrong_value() -> None:
+    from ecg_trust.calibration_hierarchy import _logistic_slope
+
+    logits = np.concatenate(
+        (np.full(10, -1.0), np.full(10, 1.0), np.full(4, -1e-12), np.full(4, 1e-12))
+    )
+    outcomes = np.concatenate((np.zeros(10), np.ones(10), [1, 0, 0, 0], [1, 1, 1, 0]))
+
+    _, slope, converged = _logistic_slope(logits, outcomes, 100)
+
+    if converged:
+        assert slope == pytest.approx(np.log(3.0) / 1e-12, rel=1e-3)
+    else:
+        assert slope > 1e3
+
+
 def test_degenerate_labels_and_bad_controls_are_rejected() -> None:
     with pytest.raises(CalibrationHierarchyError, match="both outcomes"):
         weak_calibration(np.zeros((5, 5), dtype=np.int64), np.full((5, 5), 0.2))

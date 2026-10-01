@@ -32,6 +32,7 @@ from ecg_trust.protocol import LABEL_ORDER
 
 FloatArray = NDArray[np.float64]
 _CLIP = 1e-12
+_DECREMENT_TOLERANCE = 1e-18
 
 
 class CalibrationHierarchyError(ValueError):
@@ -157,20 +158,32 @@ def _logistic_slope_centered(
         return float(np.sum(outcomes * linear - np.logaddexp(0.0, linear)))
 
     current = log_likelihood(coefficients)
-    tolerance = 1e-9 * max(1.0, float(outcomes.shape[0]))
-    for _ in range(max_iterations):
-        fitted = _sigmoid(design @ coefficients)
+
+    def newton_step(beta: FloatArray) -> tuple[FloatArray, float] | None:
+        """Newton direction and squared Newton decrement, or None if singular."""
+
+        fitted = _sigmoid(design @ beta)
         weights = fitted * (1.0 - fitted)
         gradient = design.T @ (outcomes - fitted)
-        if float(np.max(np.abs(gradient))) < tolerance:
-            return float(coefficients[0]), float(coefficients[1]), True
         hessian = design.T @ (design * weights[:, None])
         try:
-            step = np.linalg.solve(hessian, gradient)
+            direction = np.linalg.solve(hessian, gradient)
         except np.linalg.LinAlgError:
+            return None
+        if not np.isfinite(direction).all():
+            return None
+        return direction, float(gradient @ direction)
+
+    # Converge on the Newton decrement, which scales the gradient by the inverse
+    # curvature: a weakly identified slope (tiny curvature) is not declared
+    # converged just because its raw score is small.
+    for _ in range(max_iterations):
+        newton = newton_step(coefficients)
+        if newton is None:
             return float(coefficients[0]), float(coefficients[1]), False
-        if not np.isfinite(step).all():
-            return float(coefficients[0]), float(coefficients[1]), False
+        step, decrement = newton
+        if decrement < _DECREMENT_TOLERANCE:
+            return float(coefficients[0]), float(coefficients[1]), True
         # Backtrack until the likelihood does not decrease; never apply a
         # rejected step. Newton directions are ascent directions here, so a
         # small enough scale is always accepted unless we are at the optimum.
@@ -183,20 +196,16 @@ def _logistic_slope_centered(
                 accepted = True
                 break
             scale *= 0.5
-        if not accepted:
-            return float(coefficients[0]), float(coefficients[1]), False
-        if np.array_equal(candidate, coefficients):
-            # A floating-point no-op step: no progress and the gradient test at
-            # the top of the loop already failed, so this is not convergence.
+        if not accepted or np.array_equal(candidate, coefficients):
+            # No acceptable progress while the decrement is still large.
             return float(coefficients[0]), float(coefficients[1]), False
         coefficients = candidate
         current = value
         if not np.isfinite(coefficients).all():
             return float(coefficients[0]), float(coefficients[1]), False
-    # The last permitted update may itself satisfy the score equations.
-    fitted = _sigmoid(design @ coefficients)
-    final_gradient = design.T @ (outcomes - fitted)
-    converged = float(np.max(np.abs(final_gradient))) < tolerance
+    # The last permitted update may itself reach the optimum.
+    final = newton_step(coefficients)
+    converged = final is not None and final[1] < _DECREMENT_TOLERANCE
     return float(coefficients[0]), float(coefficients[1]), converged
 
 
