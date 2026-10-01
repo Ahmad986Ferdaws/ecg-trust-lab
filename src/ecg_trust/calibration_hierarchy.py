@@ -184,13 +184,14 @@ def _logistic_slope_centered(
             scale *= 0.5
         if not accepted:
             return float(coefficients[0]), float(coefficients[1]), False
-        movement = float(np.max(np.abs(candidate - coefficients)))
+        if np.array_equal(candidate, coefficients):
+            # A floating-point no-op step: no progress and the gradient test at
+            # the top of the loop already failed, so this is not convergence.
+            return float(coefficients[0]), float(coefficients[1]), False
         coefficients = candidate
         current = value
         if not np.isfinite(coefficients).all():
             return float(coefficients[0]), float(coefficients[1]), False
-        if movement < 1e-9:
-            return float(coefficients[0]), float(coefficients[1]), True
     return float(coefficients[0]), float(coefficients[1]), False
 
 

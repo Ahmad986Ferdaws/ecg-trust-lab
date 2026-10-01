@@ -138,6 +138,24 @@ def test_large_but_finite_standardized_slope_is_reported() -> None:
     assert item.calibration_slope > 1e5
 
 
+def test_reported_convergence_always_satisfies_the_score_equations() -> None:
+    logits = np.array([7.590326, 7.590118, 7.590254, -700.0, 7.590194])
+    outcomes_column = np.array([1, 0, 0, 0, 1])
+    probabilities = np.tile((1.0 / (1.0 + np.exp(-logits)))[:, None], (1, 5))
+    outcomes = np.tile(outcomes_column[:, None], (1, 5))
+
+    item = weak_calibration(outcomes, probabilities)[0]
+
+    if item.converged:
+        assert item.calibration_slope is not None
+        assert item.slope_intercept is not None
+        with np.errstate(over="ignore"):
+            fitted = 1.0 / (1.0 + np.exp(-(item.slope_intercept + item.calibration_slope * logits)))
+        assert fitted.mean() == pytest.approx(outcomes_column.mean(), abs=1e-6)
+    else:
+        assert item.calibration_slope is None
+
+
 def test_quasi_separation_with_a_shared_boundary_value_has_no_finite_slope() -> None:
     probabilities = np.tile(np.array([0.2, 0.4, 0.5, 0.5, 0.7])[:, None], (1, 5))
     outcomes = np.tile(np.array([[0], [0], [0], [1], [1]]), (1, 5))
