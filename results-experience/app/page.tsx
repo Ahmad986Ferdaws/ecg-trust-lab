@@ -78,6 +78,7 @@ const verdictDeltas = [
 export default function Home() {
   return (
     <>
+      <a className="skip-link" href="#main-content">Skip to the research results</a>
       <nav className="site-nav" aria-label="Primary navigation">
         <a className="wordmark" href="#top" aria-label="ECG Trust Lab home">
           <span>ECG Trust Lab</span>
@@ -95,11 +96,13 @@ export default function Home() {
           <a href="#evidence">Results</a>
           <a href="#source-support">Support gate</a>
           <a href="#failure-lab">Failure lab</a>
+        </div>
+        <div className="nav-motion">
           <MotionControl />
         </div>
       </nav>
 
-      <main className="experience-shell">
+      <main className="experience-shell" id="main-content" tabIndex={-1}>
 
       <section className="hero" id="top" aria-labelledby="hero-title">
         <div className="hero-copy">
