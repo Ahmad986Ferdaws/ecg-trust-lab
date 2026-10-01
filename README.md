@@ -133,6 +133,12 @@ weights. Use the [reproducibility guide](docs/REPRODUCIBILITY.md) to reconstruct
 the pipeline from the official dataset; do not treat the repository as a
 downloadable clinical model.
 
+Open limitations, with their evidence and what would resolve them, are tracked
+in [known limitations](docs/KNOWN_LIMITATIONS.md). The development evaluation
+and trust tools (selective metrics, calibration diagnostics, shift and subgroup
+analyses, and gate planning) are mapped in the
+[evaluation toolkit](docs/EVALUATION_TOOLKIT.md).
+
 ## Development commands
 
 Run these commands from the project directory:
