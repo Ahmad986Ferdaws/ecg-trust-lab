@@ -111,6 +111,33 @@ def test_tiny_logit_spread_is_not_mistaken_for_a_zero_slope() -> None:
     assert np.isfinite(intercept)
 
 
+def test_tiny_interior_probabilities_keep_their_spread() -> None:
+    probabilities = np.tile(np.array([1e-15, 2e-15, 3e-15, 4e-15])[:, None], (1, 5))
+    outcomes = np.tile(np.array([[0], [1], [0], [1]]), (1, 5))
+
+    item = weak_calibration(outcomes, probabilities)[0]
+
+    assert item.converged
+    assert item.calibration_slope is not None
+
+
+def test_large_but_finite_standardized_slope_is_reported() -> None:
+    logits = np.concatenate(
+        (np.full(10, -1.0), np.full(10, 1.0), np.full(4, -5e-7), np.full(4, 5e-7))
+    )
+    outcomes_column = np.concatenate(
+        (np.zeros(10), np.ones(10), [1, 0, 0, 0], [1, 1, 1, 0])
+    ).astype(np.int64)
+    probabilities = np.tile((1.0 / (1.0 + np.exp(-logits)))[:, None], (1, 5))
+    outcomes = np.tile(outcomes_column[:, None], (1, 5))
+
+    item = weak_calibration(outcomes, probabilities)[0]
+
+    assert item.converged
+    assert item.calibration_slope is not None
+    assert item.calibration_slope > 1e5
+
+
 def test_quasi_separation_with_a_shared_boundary_value_has_no_finite_slope() -> None:
     probabilities = np.tile(np.array([0.2, 0.4, 0.5, 0.5, 0.7])[:, None], (1, 5))
     outcomes = np.tile(np.array([[0], [0], [0], [1], [1]]), (1, 5))

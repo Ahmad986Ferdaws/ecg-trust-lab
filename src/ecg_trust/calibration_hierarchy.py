@@ -68,6 +68,25 @@ def _sigmoid(values: FloatArray) -> FloatArray:
     return result
 
 
+def _finite_logits(probabilities: FloatArray) -> FloatArray:
+    """Exact logits for interior probabilities; finite stand-ins only for 0 and 1.
+
+    Exact endpoints map just beyond the most extreme interior logit (and at
+    least to ``logit(1e-12)``), so representable small probabilities such as
+    1e-15 keep their real ordering and spacing.
+    """
+
+    interior = (probabilities > 0.0) & (probabilities < 1.0)
+    logits = np.empty_like(probabilities, dtype=np.float64)
+    logits[interior] = np.log(probabilities[interior]) - np.log1p(-probabilities[interior])
+    floor = math.log(_CLIP) - math.log1p(-_CLIP)
+    lowest = min(floor, float(logits[interior].min()) - 1.0) if interior.any() else floor
+    highest = max(-floor, float(logits[interior].max()) + 1.0) if interior.any() else -floor
+    logits[probabilities <= 0.0] = lowest
+    logits[probabilities >= 1.0] = highest
+    return logits
+
+
 def _intercept_with_offset(logits: FloatArray, outcomes: FloatArray) -> float:
     """Root of ``sum(y - sigmoid(a + logit))`` in ``a`` by bracketed bisection.
 
@@ -168,7 +187,7 @@ def _logistic_slope_centered(
         movement = float(np.max(np.abs(candidate - coefficients)))
         coefficients = candidate
         current = value
-        if abs(float(coefficients[1])) > 1e6:  # standardized scale
+        if not np.isfinite(coefficients).all():
             return float(coefficients[0]), float(coefficients[1]), False
         if movement < 1e-9:
             return float(coefficients[0]), float(coefficients[1]), True
@@ -197,8 +216,7 @@ def weak_calibration(
         positives = float(outcomes.sum())
         if positives == 0.0 or positives == outcomes.shape[0]:
             raise CalibrationHierarchyError(f"label {label!r} needs both outcomes")
-        clipped = np.clip(scores[:, index], _CLIP, 1.0 - _CLIP)
-        logits = np.log(clipped) - np.log1p(-clipped)
+        logits = _finite_logits(scores[:, index])
         expected = float(scores[:, index].mean())
         intercept, slope, converged = _logistic_slope(logits, outcomes, max_iterations)
         results.append(
