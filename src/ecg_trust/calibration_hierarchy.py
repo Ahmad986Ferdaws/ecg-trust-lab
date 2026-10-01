@@ -101,6 +101,18 @@ def _intercept_with_offset(logits: FloatArray, outcomes: FloatArray) -> float:
 def _logistic_slope(
     logits: FloatArray, outcomes: FloatArray, max_iterations: int
 ) -> tuple[float, float, bool]:
+    # Fit on centred logits so the design is well conditioned when predictions
+    # cluster far from 0.5, then map the intercept back to the raw scale.
+    centre = float(logits.mean())
+    intercept, slope, converged = _logistic_slope_centered(
+        logits - centre, outcomes, max_iterations
+    )
+    return intercept - slope * centre, slope, converged
+
+
+def _logistic_slope_centered(
+    logits: FloatArray, outcomes: FloatArray, max_iterations: int
+) -> tuple[float, float, bool]:
     positive_logits = logits[outcomes == 1.0]
     negative_logits = logits[outcomes == 0.0]
     # With one covariate, a finite maximum-likelihood slope exists only when the

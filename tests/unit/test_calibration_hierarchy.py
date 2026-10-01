@@ -80,6 +80,21 @@ def test_reversed_association_with_saturated_logits_still_converges() -> None:
     assert item.calibration_slope < 0.0
 
 
+def test_clustered_logits_far_from_one_half_still_converge() -> None:
+    rng = np.random.default_rng(11)
+    logits = 10.0 + rng.normal(0.0, 1e-3, size=200)
+    outcome_probability = 1.0 / (1.0 + np.exp(-(logits - 10.0) * 2_000.0))
+    outcomes_column = (rng.uniform(size=200) < outcome_probability).astype(np.int64)
+    probabilities = np.tile((1.0 / (1.0 + np.exp(-logits)))[:, None], (1, 5))
+    outcomes = np.tile(outcomes_column[:, None], (1, 5))
+
+    item = weak_calibration(outcomes, probabilities)[0]
+
+    assert item.converged
+    assert item.calibration_slope is not None
+    assert item.calibration_slope > 0.0
+
+
 def test_quasi_separation_with_a_shared_boundary_value_has_no_finite_slope() -> None:
     probabilities = np.tile(np.array([0.2, 0.4, 0.5, 0.5, 0.7])[:, None], (1, 5))
     outcomes = np.tile(np.array([[0], [0], [0], [1], [1]]), (1, 5))
