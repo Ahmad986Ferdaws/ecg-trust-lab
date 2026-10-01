@@ -27,6 +27,7 @@ def test_synthetic_demo_reports_both_planned_losses(capsys: pytest.CaptureFixtur
         assert set(names) == {
             "mean_label_entropy (frozen gate score)",
             "worst_label_entropy",
+            "threshold_proximity",
             "ensemble_epistemic_mean",
             "ensemble_epistemic_max",
         }
@@ -61,7 +62,7 @@ def test_prediction_file_round_trip_without_members(
     report = json.loads(capsys.readouterr().out)
 
     assert report["source"] == "fold9.npz"
-    assert len(report["losses"]["mean_binary_log_loss"]["scores"]) == 2
+    assert len(report["losses"]["mean_binary_log_loss"]["scores"]) == 3
 
 
 def test_missing_file_is_reported(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -124,3 +125,12 @@ def test_empty_or_corrupt_archives_use_the_error_path(
 
     assert tool.main(["--predictions", str(path)]) == 2
     assert "error" in capsys.readouterr().err
+
+
+def test_threshold_proximity_follows_the_supplied_thresholds() -> None:
+    probabilities = np.array([[0.31, 0.9, 0.9, 0.9, 0.9], [0.5, 0.9, 0.9, 0.9, 0.9]])
+    thresholds = np.array([0.3, 0.5, 0.5, 0.5, 0.5])
+
+    score = tool.scores_for(probabilities, None, thresholds)["threshold_proximity"]
+
+    assert score[0] > score[1]

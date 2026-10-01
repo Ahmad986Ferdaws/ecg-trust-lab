@@ -61,13 +61,17 @@ def _binary_entropy_bits(probabilities: FloatArray) -> FloatArray:
 
 
 def scores_for(
-    probabilities: FloatArray, member_probabilities: object | None
+    probabilities: FloatArray,
+    member_probabilities: object | None,
+    thresholds: FloatArray,
 ) -> dict[str, FloatArray]:
     """Named per-record uncertainty scores; higher means more uncertain."""
 
     scores: dict[str, FloatArray] = {
         "mean_label_entropy (frozen gate score)": mean_normalized_binary_entropy(probabilities),
         "worst_label_entropy": _binary_entropy_bits(probabilities).max(axis=1),
+        # Research blueprint 9.3: proximity to the selected decision thresholds.
+        "threshold_proximity": -np.abs(probabilities - thresholds[None, :]).min(axis=1),
     }
     if member_probabilities is not None:
         ensemble = decompose_ensemble_uncertainty(member_probabilities)  # type: ignore[arg-type]
@@ -105,7 +109,7 @@ def compare(
     member_probabilities: object | None = None,
 ) -> dict[str, object]:
     losses = record_losses(probabilities, targets, thresholds)
-    scores = scores_for(probabilities, member_probabilities)
+    scores = scores_for(probabilities, member_probabilities, thresholds)
     results: dict[str, object] = {}
     for loss_name, loss in losses.items():
         rows = []
