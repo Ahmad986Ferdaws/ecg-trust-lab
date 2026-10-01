@@ -84,6 +84,8 @@ def test_missing_file_is_reported(tmp_path: Path, capsys: pytest.CaptureFixture[
         ({"member_probabilities": np.full((2, 4, 5), 0.5 + 0.1j)}, "real-valued"),
         ({"thresholds": np.full(4, 0.5)}, "thresholds"),
         ({"thresholds": np.full(5, 2.0)}, "thresholds"),
+        ({"thresholds": np.full(5, 0.5 + 1j)}, "thresholds"),
+        ({"thresholds": np.ones(5, dtype=bool)}, "thresholds"),
         ({"probabilities": np.full((4, 5), 1.5)}, "probabilities"),
     ],
 )

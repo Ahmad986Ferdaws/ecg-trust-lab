@@ -137,7 +137,15 @@ def load(path: Path) -> tuple[FloatArray, NDArray[np.int64], FloatArray, object 
         raise ComparisonError("fold-10 rows are sealed; compare development predictions only")
     if not np.isin(folds, ALL_FOLDS).all():
         raise ComparisonError("fold_ids must be PTB-XL development folds")
-    thresholds = np.asarray(arrays.get("thresholds", np.full(5, 0.5)), dtype=np.float64)
+    raw_thresholds = np.asarray(arrays.get("thresholds", np.full(5, 0.5)))
+    if (
+        raw_thresholds.dtype == np.object_
+        or np.issubdtype(raw_thresholds.dtype, np.bool_)
+        or np.iscomplexobj(raw_thresholds)
+        or not np.issubdtype(raw_thresholds.dtype, np.number)
+    ):
+        raise ComparisonError("thresholds must be five finite values in [0, 1]")
+    thresholds = np.asarray(raw_thresholds, dtype=np.float64)
     if (
         thresholds.shape != (5,)
         or not np.isfinite(thresholds).all()
