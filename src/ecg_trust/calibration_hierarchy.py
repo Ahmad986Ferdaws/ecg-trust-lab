@@ -166,13 +166,17 @@ def _logistic_slope_centered(
         weights = fitted * (1.0 - fitted)
         gradient = design.T @ (outcomes - fitted)
         hessian = design.T @ (design * weights[:, None])
+        # Cholesky both proves the Hessian is positive definite and solves it; a
+        # failed factorization or a negative decrement is a numerical failure.
         try:
-            direction = np.linalg.solve(hessian, gradient)
+            lower = np.linalg.cholesky(hessian)
         except np.linalg.LinAlgError:
             return None
-        if not np.isfinite(direction).all():
+        direction = np.linalg.solve(lower.T, np.linalg.solve(lower, gradient))
+        decrement = float(gradient @ direction)
+        if not np.isfinite(direction).all() or not math.isfinite(decrement) or decrement < 0.0:
             return None
-        return direction, float(gradient @ direction)
+        return direction, decrement
 
     # Converge on the Newton decrement, which scales the gradient by the inverse
     # curvature: a weakly identified slope (tiny curvature) is not declared

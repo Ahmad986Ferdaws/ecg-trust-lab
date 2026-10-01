@@ -237,6 +237,21 @@ def test_weakly_identified_slope_is_not_reported_with_a_wrong_value() -> None:
         assert slope > 1e3
 
 
+def test_non_positive_definite_curvature_is_a_numerical_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ecg_trust import calibration_hierarchy as module
+
+    def fail(_: object) -> object:
+        raise np.linalg.LinAlgError("not positive definite")
+
+    monkeypatch.setattr(module.np.linalg, "cholesky", fail)
+    logits = np.array([-1.0, -1.0, 1.0, 1.0, 0.0])
+    outcomes = np.array([0.0, 1.0, 1.0, 0.0, 1.0])
+
+    assert module._logistic_slope(logits, outcomes, 10)[2] is False
+
+
 def test_degenerate_labels_and_bad_controls_are_rejected() -> None:
     with pytest.raises(CalibrationHierarchyError, match="both outcomes"):
         weak_calibration(np.zeros((5, 5), dtype=np.int64), np.full((5, 5), 0.2))
