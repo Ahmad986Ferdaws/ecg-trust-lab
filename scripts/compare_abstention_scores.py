@@ -28,6 +28,7 @@ import argparse
 import json
 import math
 import sys
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -199,6 +200,8 @@ def main(argv: list[str] | None = None) -> int:
         SelectiveMetricError,
         OSError,
         ValueError,
+        EOFError,
+        zipfile.BadZipFile,
     ) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

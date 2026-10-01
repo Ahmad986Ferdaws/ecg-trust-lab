@@ -108,3 +108,14 @@ def test_unsafe_or_malformed_files_exit_with_an_error(
 
     assert tool.main(["--predictions", str(path)]) == 2
     assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("content", [b"", b"PK\x03\x04 not a real archive"])
+def test_empty_or_corrupt_archives_use_the_error_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], content: bytes
+) -> None:
+    path = tmp_path / "broken.npz"
+    path.write_bytes(content)
+
+    assert tool.main(["--predictions", str(path)]) == 2
+    assert "error" in capsys.readouterr().err
