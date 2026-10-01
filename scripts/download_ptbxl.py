@@ -12,12 +12,14 @@ import argparse
 import csv
 import os
 import shutil
+import stat
 import sys
 import time
 from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -61,6 +63,46 @@ def _url_for(relative_path: str) -> str:
     return BASE_URL + "/".join(quote(part) for part in canonical.split("/"))
 
 
+def _check_partial(path: Path) -> None:
+    """Refuse aliases and special files before reading or replacing a partial."""
+
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise ManifestError("download partial must be an unaliased regular file")
+
+
+def _open_partial(path: Path, *, append: bool) -> BinaryIO:
+    # Avoid O_TRUNC until the opened inode has passed the ownership checks. This
+    # also protects a hard-linked file and platforms without O_NOFOLLOW.
+    _check_partial(path)
+    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    # A regular path can be replaced by a FIFO after lstat. Nonblocking open
+    # reaches the descriptor checks (or fails) without waiting for a pipe reader.
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        metadata = os.fstat(descriptor)
+        current = path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or not stat.S_ISREG(current.st_mode)
+            or (metadata.st_dev, metadata.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise ManifestError("download partial changed or aliases another file")
+        if append:
+            os.lseek(descriptor, 0, os.SEEK_END)
+        else:
+            os.ftruncate(descriptor, 0)
+        return os.fdopen(descriptor, "wb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def _download_once(
     relative_path: str,
     destination_root: Path,
@@ -81,6 +123,7 @@ def _download_once(
         return DownloadResult(canonical, "verified-existing", 0)
 
     partial = destination.with_name(destination.name + ".part")
+    _check_partial(partial)
     if force:
         partial.unlink(missing_ok=True)
     start = partial.stat().st_size if partial.is_file() else 0
@@ -102,10 +145,10 @@ def _download_once(
     with response_context as response:
         status = getattr(response, "status", response.getcode())
         append = bool(start and status == 206)
-        mode = "ab" if append else "wb"
-        with partial.open(mode) as handle:
+        with _open_partial(partial, append=append) as handle:
             shutil.copyfileobj(response, handle, length=1024 * 1024)
 
+    _check_partial(partial)
     if expected_sha256 is not None:
         observed = sha256_file(partial)
         if observed != expected_sha256:
