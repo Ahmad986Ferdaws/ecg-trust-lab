@@ -27,6 +27,13 @@ from ecg_trust.models import (
 Precision = Literal["bf16", "fp32"]
 
 
+def build_seeded_model(model_factory: Callable[[], nn.Module], *, seed: int) -> nn.Module:
+    """Initialize a benchmark model independently of previous workloads/probes."""
+
+    torch.manual_seed(seed)
+    return model_factory()
+
+
 @dataclass(frozen=True, slots=True)
 class BenchmarkModelSpec:
     """Named architecture configuration included in benchmark JSON."""
@@ -146,6 +153,8 @@ def _validate_benchmark_request(
     warmup_steps: int,
     measured_steps: int,
 ) -> None:
+    if precision not in {"bf16", "fp32"}:
+        raise ValueError("benchmark precision must be bf16 or fp32")
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
     if warmup_steps < 0:
@@ -225,11 +234,15 @@ def benchmark_train_steps(
     seed: int = 2026,
     learning_rate: float = 1e-3,
 ) -> TrainBenchmarkResult:
-    """Measure synthetic forward/backward/optimizer training-step performance."""
+    """Measure synthetic training steps on a caller-initialized model.
+
+    The seed controls inputs and training randomness. Use ``build_seeded_model``
+    before this call when model initialization must share the recorded seed.
+    """
 
     _validate_benchmark_request(device, precision, batch_size, warmup_steps, measured_steps)
-    if learning_rate <= 0:
-        raise ValueError("learning_rate must be positive")
+    if not math.isfinite(learning_rate) or learning_rate <= 0:
+        raise ValueError("learning_rate must be finite and positive")
 
     torch.manual_seed(seed)
     if device.type == "cuda":
@@ -349,6 +362,7 @@ def probe_safe_batch_size(
 
     if device.type != "cuda":
         raise ValueError("safe batch probing is available only for CUDA")
+    _validate_benchmark_request(device, precision, 1, 0, 1)
     candidates = batch_probe_candidates(maximum_batch_size)
     attempts: list[BatchProbeAttempt] = []
     maximum_successful: int | None = None
@@ -357,7 +371,7 @@ def probe_safe_batch_size(
     for batch_size in candidates:
         model: nn.Module | None = None
         try:
-            model = model_factory()
+            model = build_seeded_model(model_factory, seed=seed)
             result = benchmark_train_steps(
                 model,
                 model_name=model_name,
@@ -451,6 +465,7 @@ __all__ = [
     "TrainBenchmarkResult",
     "batch_probe_candidates",
     "benchmark_train_steps",
+    "build_seeded_model",
     "environment_metadata",
     "percentile",
     "probe_safe_batch_size",
