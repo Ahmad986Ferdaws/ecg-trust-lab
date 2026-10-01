@@ -27,7 +27,6 @@ def test_synthetic_demo_reports_both_planned_losses(capsys: pytest.CaptureFixtur
         assert set(names) == {
             "mean_label_entropy (frozen gate score)",
             "worst_label_entropy",
-            "ensemble_total_mean",
             "ensemble_epistemic_mean",
             "ensemble_epistemic_max",
         }
@@ -77,7 +76,13 @@ def test_missing_file_is_reported(tmp_path: Path, capsys: pytest.CaptureFixture[
         ({"fold_ids": np.array([9, 9])}, "one entry per record"),
         ({"fold_ids": np.array([9.0, 9.0, 9.0, 9.0])}, "integers"),
         ({"fold_ids": np.array([9, 9, 10, 9])}, "fold-10"),
-        ({"fold_ids": np.array([9, 9, 11, 9])}, "development folds"),
+        ({"fold_ids": np.array([9, 9, 11, 9])}, "fold 9"),
+        ({"fold_ids": np.array([9, 9, 8, 9])}, "fold 9"),
+        ({"fold_ids": np.array([1, 9, 9, 9])}, "fold 9"),
+        (
+            {"member_probabilities": np.stack((np.full((4, 5), 0.2), np.full((4, 5), 0.6)))},
+            "mean of member_probabilities",
+        ),
         ({"member_probabilities": np.full((2, 3, 5), 0.5)}, "member_probabilities"),
         ({"member_probabilities": np.full((2, 4, 5), 1.5)}, "[0, 1]"),
         ({"member_probabilities": np.ones((2, 4, 5), dtype=bool)}, "real numeric"),

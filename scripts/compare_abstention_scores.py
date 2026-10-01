@@ -6,10 +6,13 @@ Reads an ``.npz`` with:
 * ``probabilities``: ``[records, 5]`` calibrated probabilities (canonical order);
 * ``targets``: ``[records, 5]`` binary labels;
 * optional ``member_probabilities``: ``[members, records, 5]`` for ensemble scores;
-* ``fold_ids``: ``[records]`` PTB-XL folds; every row must be a development
-  fold (1-9), so sealed fold-10 predictions are refused. Fold IDs can't identify
-  spent one-shot cohorts inside fold 9, so never pass rows from one (such as the
-  source-support cohort C);
+  ``probabilities`` must then be their mean, so every score describes the same
+  predictions whose losses are reported;
+* ``fold_ids``: ``[records]`` PTB-XL folds; every row must be fold 9, the only
+  fold the research blueprint (section 9.3) allows for abstention-score
+  selection. Training (1-7), model-selection (8), and sealed (10) rows are
+  refused. Fold IDs can't identify spent one-shot cohorts inside fold 9, so
+  never pass rows from one (such as the source-support cohort C);
 * optional ``thresholds``: ``[5]`` decision thresholds (default 0.5).
 
 Following the research blueprint (section 9.3), the primary per-record loss is
@@ -40,7 +43,7 @@ from ecg_trust.ensemble_uncertainty import (
 )
 from ecg_trust.evaluation import EvaluationValidationError, validate_multilabel_arrays
 from ecg_trust.post_analysis import mean_normalized_binary_entropy
-from ecg_trust.protocol import ALL_FOLDS, FINAL_TEST_FOLDS
+from ecg_trust.protocol import CALIBRATION_FOLDS, FINAL_TEST_FOLDS
 from ecg_trust.selective_metrics import SelectiveMetricError, augrc, excess_aurc
 
 FloatArray = NDArray[np.float64]
@@ -70,7 +73,9 @@ def scores_for(
         ensemble = decompose_ensemble_uncertainty(member_probabilities)  # type: ignore[arg-type]
         if ensemble.total.shape != probabilities.shape:
             raise ComparisonError("member_probabilities must be [members, records, 5]")
-        scores["ensemble_total_mean"] = ensemble.per_record("total")
+        member_mean = np.asarray(member_probabilities, dtype=np.float64).mean(axis=0)
+        if not np.allclose(member_mean, probabilities, rtol=0.0, atol=1e-6):
+            raise ComparisonError("probabilities must equal the mean of member_probabilities")
         scores["ensemble_epistemic_mean"] = ensemble.per_record("epistemic")
         scores["ensemble_epistemic_max"] = ensemble.per_record("epistemic", reduction="max")
     return scores
@@ -136,8 +141,8 @@ def load(path: Path) -> tuple[FloatArray, NDArray[np.int64], FloatArray, object 
         raise ComparisonError("fold_ids must be integers with one entry per record")
     if np.isin(folds, FINAL_TEST_FOLDS).any():
         raise ComparisonError("fold-10 rows are sealed; compare development predictions only")
-    if not np.isin(folds, ALL_FOLDS).all():
-        raise ComparisonError("fold_ids must be PTB-XL development folds")
+    if not np.isin(folds, CALIBRATION_FOLDS).all():
+        raise ComparisonError("fold_ids must all be fold 9, the abstention-selection fold")
     raw_thresholds = np.asarray(arrays.get("thresholds", np.full(5, 0.5)))
     if (
         raw_thresholds.dtype == np.object_
