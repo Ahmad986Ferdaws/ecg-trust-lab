@@ -44,6 +44,11 @@ jobs:
       - name: Strict mypy (Windows scientific runtime target)
         if: ${{ !cancelled() }}
         run: uv run --no-sync mypy --platform win32
+      - name: Build and smoke-test the installed wheel
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/ecg-wheel"
+          uv pip install --no-deps --target "$RUNNER_TEMP/ecg-wheel-install" "$RUNNER_TEMP"/ecg-wheel/*.whl
+          uv run --no-sync python -I scripts/smoke_installed_wheel.py "$RUNNER_TEMP/ecg-wheel-install"
       - name: Confirm frozen dependency files are unchanged
         if: ${{ !cancelled() }}
         run: git diff --exit-code -- pyproject.toml uv.lock
