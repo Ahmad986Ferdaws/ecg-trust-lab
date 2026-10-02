@@ -39,6 +39,9 @@ one-shot source-support evaluation without rewriting that source artifact. The
 experiment completed successfully but missed its preregistered support gate;
 it is not an OOD-validation or clinical-validation result.
 
+For service deployments, the [analysis capacity guide](docs/SENTINEL_ANALYSIS_CAPACITY.md)
+explains optional per-process limits and retry behavior under load.
+
 ## Demo walkthrough
 
 [![ECG Trust Lab demo poster](publication/media/ecg-trust-lab-demo-poster.png)](publication/media/ecg-trust-lab-research-demo.mp4)
