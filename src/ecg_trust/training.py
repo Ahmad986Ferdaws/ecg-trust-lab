@@ -148,6 +148,8 @@ def _unpack_batch(batch: object) -> tuple[Tensor, Tensor]:
     inputs, targets = batch
     if not isinstance(inputs, Tensor) or not isinstance(targets, Tensor):
         raise TrainingValidationError("batch inputs and targets must be tensors")
+    if targets.is_complex():
+        raise TrainingValidationError("targets must be real-valued binary tensors")
     if inputs.ndim < 1 or targets.ndim != 2:
         raise TrainingValidationError(
             "inputs need a batch axis and targets must be [batch, labels]"
@@ -160,6 +162,8 @@ def _unpack_batch(batch: object) -> tuple[Tensor, Tensor]:
 def _prepare_pos_weight(pos_weight: Tensor | None, device: torch.device) -> Tensor | None:
     if pos_weight is None:
         return None
+    if pos_weight.is_complex():
+        raise TrainingValidationError("pos_weight must be a real-valued tensor")
     if pos_weight.ndim != 1 or pos_weight.numel() < 1:
         raise TrainingValidationError("pos_weight must be a non-empty one-dimensional tensor")
     converted = pos_weight.detach().to(device=device, dtype=torch.float32)
