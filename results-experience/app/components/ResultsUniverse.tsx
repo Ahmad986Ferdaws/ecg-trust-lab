@@ -532,6 +532,8 @@ export function ResultsUniverse({ className }: ResultsUniverseProps) {
           display: "flex",
           justifyContent: "space-between",
           color: INK,
+          background: PAPER,
+          boxShadow: `0 0 0 4px ${PAPER}`,
           fontFamily: "var(--mono)",
           fontSize: "12px",
           fontWeight: 700,
@@ -540,7 +542,7 @@ export function ResultsUniverse({ className }: ResultsUniverseProps) {
         }}
       >
         <span style={{ color: RESNET }}>RESNET LENS</span>
-        <span style={{ opacity: 0.54 }}>SAME WAVEFORM · EQUAL BASELINE</span>
+        <span>SAME WAVEFORM · EQUAL BASELINE</span>
         <span style={{ color: TRANSFORMER }}>TRANSFORMER LENS</span>
       </div>
 
@@ -553,6 +555,8 @@ export function ResultsUniverse({ className }: ResultsUniverseProps) {
             left: "2.2%",
             top: `${16.5 + index * 5.82}%`,
             color: focusedLead === index ? INK : "#65665E",
+            background: PAPER,
+            boxShadow: `0 0 0 2px ${PAPER}`,
             fontFamily: "var(--mono)",
             fontSize: "12px",
             fontWeight: focusedLead === index ? 800 : 650,
