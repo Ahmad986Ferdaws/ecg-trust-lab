@@ -221,6 +221,9 @@ def acquire(
 
     checksums_path = resolve_relative_path(destination, "SHA256SUMS.txt")
     checksums = parse_sha256sums(checksums_path.read_text(encoding="utf-8"))
+    # Metadata chooses every waveform operand. Verify it before parsing the
+    # worklist, even when missing checksums are permitted for ancillary files.
+    verify_sha256sums(destination, checksums, ["ptbxl_database.csv"])
     paths = selected_paths(resolve_relative_path(destination, "ptbxl_database.csv"))
     paths_to_verify = [path for path in paths if path != "SHA256SUMS.txt"]
     missing_checksum_entries = sorted(path for path in paths_to_verify if path not in checksums)
@@ -283,7 +286,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--retries", type=int, default=5)
     parser.add_argument("--verify-only", action="store_true")
-    parser.add_argument("--allow-missing-checksums", action="store_true")
+    parser.add_argument(
+        "--allow-missing-checksums",
+        action="store_true",
+        help="allow missing selected-file digests (metadata must still be checksummed)",
+    )
     parser.add_argument("--force", action="store_true", help="redownload all selected files")
     args = parser.parse_args(argv)
     if args.workers < 1 or args.workers > 64:
