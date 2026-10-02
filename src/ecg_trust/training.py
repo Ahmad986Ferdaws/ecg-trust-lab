@@ -13,8 +13,10 @@ import math
 import os
 import random
 import tempfile
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -584,7 +586,7 @@ def load_checkpoint(
     map_location: str | torch.device = "cpu",
     strict_model: bool = True,
 ) -> CheckpointMetadata:
-    """Verify provenance before restoring model, optimizer, scaler, and stopper."""
+    """Verify provenance and restore training state, rolling back failed loads."""
 
     expected_protocol_hash = _validate_sha256(expected_protocol_hash, "expected_protocol_hash")
     expected_manifest_hash = _validate_sha256(expected_manifest_hash, "expected_manifest_hash")
@@ -664,12 +666,49 @@ def load_checkpoint(
             cast(Mapping[str, object], _checkpoint_mapping(stopper_state, "early_stopping"))
         )
 
-    model.load_state_dict(cast(Any, model_state), strict=strict_model)
-    optimizer.load_state_dict(cast(dict[str, Any], optimizer_state))
-    if scaler is not None and validated_scaler_state is not None:
-        scaler.load_state_dict(validated_scaler_state)
-    if early_stopping is not None and validated_stopper is not None:
-        early_stopping.load_state_dict(validated_stopper.state_dict())
+    # state_dict tensors alias live parameters/buffers. Deep copies are required
+    # before any loader runs: a loader can mutate some fields before rejecting
+    # another field, including PyTorch's model and GradScaler implementations.
+    original_model = deepcopy(model.state_dict())
+    original_optimizer = deepcopy(optimizer.state_dict())
+    original_scaler = None if scaler is None else deepcopy(scaler.state_dict())
+    original_stopper = None if early_stopping is None else deepcopy(early_stopping.state_dict())
+    original_modes = tuple((module, module.training) for module in model.modules())
+    rollback: list[tuple[str, Callable[[], object]]] = []
+    try:
+        rollback.append(("model", partial(model.load_state_dict, original_model, strict=True)))
+        model.load_state_dict(cast(Any, model_state), strict=strict_model)
+        rollback.append(("optimizer", partial(optimizer.load_state_dict, original_optimizer)))
+        optimizer.load_state_dict(cast(dict[str, Any], optimizer_state))
+        if scaler is not None and validated_scaler_state is not None:
+            assert original_scaler is not None
+            rollback.append(("scaler", partial(scaler.load_state_dict, original_scaler)))
+            scaler.load_state_dict(validated_scaler_state)
+        if early_stopping is not None and validated_stopper is not None:
+            assert original_stopper is not None
+            rollback.append(("early stopping", partial(
+                early_stopping.load_state_dict, original_stopper
+            )))
+            early_stopping.load_state_dict(validated_stopper.state_dict())
+    except BaseException as error:
+        failed_components: list[str] = []
+        for name, restore in reversed(rollback):
+            try:
+                restore()
+            except BaseException:
+                # A custom loader can itself fail during rollback. Continue
+                # restoring the remaining components and report the failure.
+                failed_components.append(name)
+        if failed_components:
+            raise CheckpointValidationError(
+                "checkpoint restoration failed; rollback also failed for "
+                + ", ".join(failed_components)
+            ) from error
+        raise
+    finally:
+        # Calling train() here would overwrite intentionally mixed child modes.
+        for module, training in original_modes:
+            module.training = training
 
     return CheckpointMetadata(
         epoch=epoch,
