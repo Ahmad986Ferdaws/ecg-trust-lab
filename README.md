@@ -29,6 +29,10 @@ input and lead-quality assurance, unfamiliar-input detection, conformal
 uncertainty, and reason-aware fail-closed decisions without modifying or
 superseding the sealed PTB-XL or SPH evidence.
 
+An [offline model passport command](docs/OFFLINE_MODEL_PASSPORT.md) verifies an
+existing aggregate passport against independently supplied release identities
+and exports canonical JSON or an escaped Markdown report.
+
 The vNext code now contains the assurance contracts, quality and uncertainty
 primitives, five-state service boundary, synthetic Failure Lab, monitoring,
 audit, governance, and future-study scaffolds described in that document. It
