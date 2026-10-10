@@ -4,8 +4,10 @@ This project compares a 1D residual network with a patch-based ECG transformer o
 
 The canonical task is **multi-label prediction of the five PTB-XL diagnostic superclasses** (NORM, MI, STTC, CD, and HYP). The local demo is a research-only interface that loads a compatible 12-lead ECG, shows calibrated probabilities and an abstention decision, and highlights waveform regions associated with each output.
 
-Start with the concise [build order](docs/BUILD_ORDER.md) or the full
-[research and implementation blueprint](docs/RESEARCH_BLUEPRINT.md). The
+Start with the [project navigation and setup guide](docs/START_HERE.md) to
+choose between the results website, source-only checks, and scientific
+reconstruction. The concise [build order](docs/BUILD_ORDER.md) and full
+[research blueprint](docs/RESEARCH_BLUEPRINT.md) explain the scientific workflow. The
 [data card](docs/DATA_CARD.md) records the verified dataset contract, and the
 [completed r3 model card](docs/MODEL_CARD_PTBXL_SUPERCLASS_R3.md) separates the
 sealed fold-10 result from post-evaluation descriptive audits. The
@@ -111,9 +113,12 @@ demonstration, not a clinical-use demonstration.
   strict mypy before the one-shot run. The generated private artifacts remain
   local and Git-ignored.
 - The historical August 9 r3 repository gate passed all 434 tests, Ruff, and
-  strict mypy. The current post-SPH repository gate separately passed all 494
+  strict mypy. The historical post-SPH repository gate separately passed all 494
   tests, Ruff, and strict mypy. Pytest emitted one upstream Starlette/httpx
   deprecation warning.
+- These test totals describe their recorded revisions. The checks on the
+  current commit and the [contribution workflow](CONTRIBUTING.md) define the
+  current engineering gate.
 - [DEV-001](reports/PROTOCOL_DEVIATIONS.md) records bounded pre-evaluation
   exposure of raw fold-10 label-bearing metadata rows. No waveform,
   prediction, model metric, or exposed value informed a choice, but strict

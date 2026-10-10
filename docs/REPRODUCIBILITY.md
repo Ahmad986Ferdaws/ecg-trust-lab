@@ -159,7 +159,7 @@ default installed-package or temporary-directory paths; the unrestricted test
 process itself completed normally.
 
 That 434-test result is the historical r3 gate, not the current suite count.
-After the frozen SPH transport implementation and audit were added, the current
+After the frozen SPH transport implementation and audit were added, that
 repository gate separately passed **494 tests**, Ruff, and strict mypy, with
 the same single upstream Starlette/httpx deprecation warning.
 
@@ -771,7 +771,7 @@ manifest and file hashes in run metadata are stored as the 64-character digest.
 | Manifest | Strict canonical counts, waveform existence, and patient-fold isolation pass; hash inventory matches | Complete |
 | Signal contract | Real folds 1/8/9 load as finite float32 `[12, 1000]` in canonical lead order | Complete |
 | Normalization | Provenance says folds 1-7, 14,955 records, and the selected-row hash matches | Complete |
-| Code quality | pytest, Ruff, strict mypy, and CUDA verification all exit zero | Complete; historical r3 gate: 434 tests; current post-SPH gate: 494 tests; Ruff and strict mypy passed; CUDA verification passed in the recorded environment gate |
+| Code quality | pytest, Ruff, strict mypy, and CUDA verification all exit zero | Complete for the recorded revisions; historical r3 gate: 434 tests; historical post-SPH gate: 494 tests; Ruff and strict mypy passed; CUDA verification passed in the recorded environment gate |
 | Capacity benchmark | Finite train steps; exact matched parameter counts; descriptive compute JSON saved | Complete |
 | Smoke training | Unique run completes and writes valid best/last checkpoints; no scientific claim attached | Complete |
 | Development | `status: complete`; fold-8 selection only; all seeds/configs use equal declared budgets | Complete |
