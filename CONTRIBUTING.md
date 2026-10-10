@@ -42,6 +42,15 @@ mean the CPU tests ran on Windows. Report skipped tests and environment limits.
 The CPU setup bypasses the scientific CUDA package source without rewriting
 the tracked dependency files. Do not use a later syncing command to replace it.
 
+CPU CI adds test totals, failures, errors, and skips to the run summary even
+when tests fail. Its `cpu-test-metadata` artifact retains counts JSON and
+sanitized JUnit for seven days. Identifiers confirmed in tracked test source
+remain available; parameter values, paths, failure text, properties, and captured
+output are excluded. Skips use fixed private-artifact, platform, GPU, or other
+categories rather than arbitrary reason text. A missing or invalid report is
+shown as unavailable, never as a successful run with zero tests. The original
+test step remains the failure gate.
+
 For public result presentation, Node.js 22.13+ can run the dependency-free check:
 
 ```bash
