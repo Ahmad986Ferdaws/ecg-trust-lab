@@ -454,6 +454,24 @@ class TrustSentinelEngine:
 
         return self._artifacts.manifest_sha256
 
+    def verified_artifacts(self) -> SentinelArtifacts:
+        """Snapshot path-free identities after checking the graph and loaded model binding."""
+
+        try:
+            self._runtime_binding.verify_intact()
+            expected_checkpoints = tuple(
+                identity.unprefixed_sha256
+                for identity in self._runtime_binding.identities_for_role(ArtifactRole.CHECKPOINT)
+            )
+            if (
+                self._model_runner.bound_manifest_sha256 != self._artifacts.manifest_sha256
+                or self._model_runner.bound_checkpoint_sha256s != expected_checkpoints
+            ):
+                raise RuntimeBindingError("loaded model identity changed")
+        except Exception:
+            raise SentinelComponentUnavailable("verified runtime identity is unavailable") from None
+        return self._artifacts
+
     def analyze(
         self,
         *,
