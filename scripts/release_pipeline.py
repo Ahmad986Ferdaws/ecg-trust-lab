@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
@@ -14,6 +15,7 @@ from ecg_trust.final_evaluation_spec import (
     FinalEvaluationSpec,
     load_final_evaluation_spec,
 )
+from ecg_trust.prediction_export import PredictionExportError
 from ecg_trust.protocol import (
     FINAL_TEST_CONFIRMATION,
     ExperimentProtocol,
@@ -201,8 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def _run(args: argparse.Namespace) -> int:
     protocol = load_protocol(args.protocol)
 
     if args.command == "seal-refits":
@@ -299,6 +300,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
     raise AssertionError(f"unhandled command {args.command!r}")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return _run(args)
+    except (OSError, ValueError, PredictionExportError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
