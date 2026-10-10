@@ -21,19 +21,16 @@ import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import * as THREE from "three";
 import { useExperienceMotion } from "./ExperienceMotion";
+import { SchematicLeadFallback } from "./SchematicLeadFallback";
+import styles from "./ResultsUniverse.module.css";
+import {
+  SCHEMATIC_LEADS as LEADS,
+  sampledLeadValue,
+  type LeadDefinition,
+} from "../../lib/schematic-leads";
 
 type ResultsUniverseProps = {
   className?: string;
-};
-
-type LeadDefinition = {
-  name: string;
-  phase: number;
-  polarity: number;
-  p: number;
-  r: number;
-  s: number;
-  t: number;
 };
 
 type LeadResource = {
@@ -52,37 +49,6 @@ const SAMPLE_COUNT = 520;
 const ACQUISITION_SECONDS = 1.9;
 const LEAD_SPACING = 0.53;
 const TOP_LEAD_Y = 2.95;
-
-const LEADS: readonly LeadDefinition[] = [
-  { name: "I", phase: 0.01, polarity: 1, p: 0.11, r: 0.78, s: 0.2, t: 0.27 },
-  { name: "II", phase: 0, polarity: 1, p: 0.14, r: 1, s: 0.23, t: 0.34 },
-  { name: "III", phase: 0.018, polarity: 1, p: 0.09, r: 0.58, s: 0.29, t: 0.23 },
-  { name: "aVR", phase: 0.006, polarity: -1, p: 0.1, r: 0.72, s: 0.2, t: 0.26 },
-  { name: "aVL", phase: 0.014, polarity: 1, p: 0.07, r: 0.43, s: 0.15, t: 0.18 },
-  { name: "aVF", phase: 0.003, polarity: 1, p: 0.11, r: 0.76, s: 0.25, t: 0.28 },
-  { name: "V1", phase: 0.012, polarity: 1, p: 0.07, r: 0.22, s: 0.72, t: -0.13 },
-  { name: "V2", phase: 0.009, polarity: 1, p: 0.08, r: 0.42, s: 0.62, t: 0.2 },
-  { name: "V3", phase: 0.005, polarity: 1, p: 0.1, r: 0.7, s: 0.44, t: 0.29 },
-  { name: "V4", phase: 0, polarity: 1, p: 0.12, r: 1.02, s: 0.27, t: 0.35 },
-  { name: "V5", phase: 0.004, polarity: 1, p: 0.11, r: 0.91, s: 0.19, t: 0.32 },
-  { name: "V6", phase: 0.008, polarity: 1, p: 0.1, r: 0.7, s: 0.14, t: 0.27 },
-] as const;
-
-function gaussian(x: number, center: number, width: number, amplitude: number) {
-  const distance = (x - center) / width;
-  return amplitude * Math.exp(-0.5 * distance * distance);
-}
-
-function sampledLeadValue(progress: number, lead: LeadDefinition) {
-  const beatCount = 3.28;
-  const phase = (progress * beatCount + lead.phase) % 1;
-  const p = gaussian(phase, 0.18, 0.035, lead.p);
-  const q = gaussian(phase, 0.365, 0.011, -lead.r * 0.13);
-  const r = gaussian(phase, 0.395, 0.009, lead.r);
-  const s = gaussian(phase, 0.43, 0.016, -lead.s);
-  const t = gaussian(phase, 0.68, 0.07, lead.t);
-  return lead.polarity * (p + q + r + s + t);
-}
 
 function buildLeadResource(lead: LeadDefinition): LeadResource {
   const positions: number[] = [];
@@ -371,37 +337,6 @@ function ResultsScene({
   );
 }
 
-function CanvasFallback() {
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        position: "absolute",
-        inset: 0,
-        overflow: "hidden",
-        backgroundColor: PAPER,
-        backgroundImage:
-          "repeating-linear-gradient(0deg, transparent 0 15px, rgba(152,72,59,.09) 15px 16px), repeating-linear-gradient(90deg, transparent 0 15px, rgba(152,72,59,.09) 15px 16px)",
-      }}
-    >
-      {LEADS.map((lead, index) => (
-        <div
-          key={lead.name}
-          style={{
-            position: "absolute",
-            left: "7%",
-            right: "5%",
-            top: `${17.5 + index * 5.82}%`,
-            height: 2,
-            background: `linear-gradient(90deg, ${RESNET} 0 50%, ${TRANSFORMER} 50% 100%)`,
-            opacity: 0.72,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
 class SceneErrorBoundary extends Component<
   { children: ReactNode },
   { hasError: boolean }
@@ -419,7 +354,7 @@ class SceneErrorBoundary extends Component<
   }
 
   render() {
-    if (this.state.hasError) return <CanvasFallback />;
+    if (this.state.hasError) return null;
     return this.props.children;
   }
 }
@@ -457,6 +392,7 @@ function getServerVisibility() {
 
 export function ResultsUniverse({ className }: ResultsUniverseProps) {
   const container = useRef<HTMLDivElement>(null);
+  const [webglAvailable, setWebglAvailable] = useState(false);
   const [acquisitionComplete, setAcquisitionComplete] = useState(false);
   const [focusedLead, setFocusedLead] = useState<number | null>(null);
   const { paused } = useExperienceMotion();
@@ -470,13 +406,42 @@ export function ResultsUniverse({ className }: ResultsUniverseProps) {
     () => setAcquisitionComplete(true),
     [],
   );
+  useEffect(() => {
+    // Keep the server-rendered schematic until browser capability is known.
+    // Release the probe immediately rather than leaving a second GPU context alive.
+    const probe = document.createElement("canvas");
+    try {
+      const context = probe.getContext("webgl2");
+      if (context && !context.isContextLost()) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Browser capability is only available after hydration.
+        setWebglAvailable(true);
+        context.getExtension("WEBGL_lose_context")?.loseContext();
+      }
+    } catch {
+      // Privacy settings or exhausted GPU resources can make getContext throw.
+      // The deterministic SVG remains visible without attempting a renderer.
+    }
+  }, []);
+  const onCanvasReady = useCallback((canvas: HTMLCanvasElement | null) => {
+    if (!canvas) return;
+    const onUnavailable = () => {
+      setWebglAvailable(false);
+      setFocusedLead(null);
+    };
+    canvas.addEventListener("webglcontextlost", onUnavailable);
+    canvas.addEventListener("webglcontextcreationerror", onUnavailable);
+    return () => {
+      canvas.removeEventListener("webglcontextlost", onUnavailable);
+      canvas.removeEventListener("webglcontextcreationerror", onUnavailable);
+    };
+  }, []);
   const shouldAnimate =
     inView && documentVisible && !paused && !acquisitionComplete;
 
   return (
     <div
       ref={container}
-      className={className}
+      className={[styles.scene, className].filter(Boolean).join(" ")}
       aria-hidden="true"
       style={{
         position: "absolute",
@@ -487,50 +452,52 @@ export function ResultsUniverse({ className }: ResultsUniverseProps) {
         background: PAPER,
       }}
     >
-      <SceneErrorBoundary>
-        <Canvas
-          aria-hidden="true"
-          role="presentation"
-          tabIndex={-1}
-          fallback={<CanvasFallback />}
-          dpr={1.25}
-          frameloop={shouldAnimate ? "always" : "demand"}
-          camera={{ position: [0, 0, 12], fov: 43, near: 0.1, far: 30 }}
-          gl={{
-            alpha: false,
-            antialias: true,
-            depth: true,
-            stencil: false,
-            powerPreference: "high-performance",
-          }}
-          onCreated={({ gl }) => {
-            gl.outputColorSpace = THREE.SRGBColorSpace;
-            gl.toneMapping = THREE.NoToneMapping;
-          }}
-          onPointerMissed={() => setFocusedLead(null)}
-          style={{ position: "absolute", inset: 0 }}
-        >
-          <Suspense fallback={null}>
-            <ResultsScene
-              acquisitionComplete={acquisitionComplete}
-              focusedLead={focusedLead}
-              onAcquisitionComplete={onAcquisitionComplete}
-              onFocusLead={setFocusedLead}
-              paused={paused}
-            />
-          </Suspense>
-        </Canvas>
-      </SceneErrorBoundary>
+      <SchematicLeadFallback />
+      {webglAvailable ? (
+        <SceneErrorBoundary>
+          <Canvas
+            ref={onCanvasReady}
+            aria-hidden="true"
+            role="presentation"
+            tabIndex={-1}
+            dpr={1.25}
+            frameloop={shouldAnimate ? "always" : "demand"}
+            camera={{ position: [0, 0, 12], fov: 43, near: 0.1, far: 30 }}
+            gl={{
+              alpha: false,
+              antialias: true,
+              depth: true,
+              stencil: false,
+              powerPreference: "high-performance",
+            }}
+            onCreated={({ gl }) => {
+              gl.outputColorSpace = THREE.SRGBColorSpace;
+              gl.toneMapping = THREE.NoToneMapping;
+            }}
+            onPointerMissed={() => setFocusedLead(null)}
+            style={{ position: "absolute", inset: 0 }}
+          >
+            <Suspense fallback={null}>
+              <ResultsScene
+                acquisitionComplete={acquisitionComplete}
+                focusedLead={focusedLead}
+                onAcquisitionComplete={onAcquisitionComplete}
+                onFocusLead={setFocusedLead}
+                paused={paused}
+              />
+            </Suspense>
+          </Canvas>
+        </SceneErrorBoundary>
+      ) : null}
 
       <div
         aria-hidden="true"
+        className={styles.lensLabels}
         style={{
           position: "absolute",
           top: "4.5%",
           left: "7%",
           right: "5%",
-          display: "flex",
-          justifyContent: "space-between",
           color: INK,
           fontFamily: "var(--mono)",
           fontSize: "12px",
@@ -540,8 +507,8 @@ export function ResultsUniverse({ className }: ResultsUniverseProps) {
         }}
       >
         <span style={{ color: RESNET }}>RESNET LENS</span>
-        <span style={{ opacity: 0.54 }}>SAME WAVEFORM · EQUAL BASELINE</span>
-        <span style={{ color: TRANSFORMER }}>TRANSFORMER LENS</span>
+        <span className={styles.sharedBaseline} style={{ opacity: 0.54 }}>SAME WAVEFORM · EQUAL BASELINE</span>
+        <span className={styles.transformerLabel} style={{ color: TRANSFORMER }}>TRANSFORMER LENS</span>
       </div>
 
       {LEADS.map((lead, index) => (

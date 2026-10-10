@@ -1,0 +1,27 @@
+.scene {
+  container-type: inline-size;
+}
+
+.lensLabels {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@container (max-width: 620px) {
+  .lensLabels {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    row-gap: 8px;
+  }
+
+  .sharedBaseline {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    text-align: center;
+  }
+
+  .transformerLabel {
+    text-align: right;
+  }
+}
