@@ -1291,16 +1291,20 @@ def _best_f1_threshold(
     default: float,
 ) -> tuple[float, float]:
     candidates = np.unique(np.r_[probabilities, default, 0.0, 1.0])
+    order = np.argsort(probabilities, kind="stable")
+    sorted_probabilities = probabilities[order]
+    cumulative_positives = np.r_[0, np.cumsum(targets[order], dtype=np.int64)]
+    total_positives = int(cumulative_positives[-1])
+    # Include all observations tied at the threshold (prediction uses >=).
+    # One sorted prefix sum replaces a full confusion-matrix scan per candidate.
+    positions = np.searchsorted(sorted_probabilities, candidates, side="left")
     best_threshold = default
     best_score = -1.0
-    for candidate_value in candidates:
+    for candidate_value, position in zip(candidates, positions, strict=True):
         candidate = float(candidate_value)
-        predictions = probabilities >= candidate
-        positives = targets == 1
-        true_positives = int(np.sum(predictions & positives))
-        false_positives = int(np.sum(predictions & ~positives))
-        false_negatives = int(np.sum(~predictions & positives))
-        denominator = 2 * true_positives + false_positives + false_negatives
+        true_positives = total_positives - int(cumulative_positives[position])
+        predicted_positives = targets.size - int(position)
+        denominator = predicted_positives + total_positives
         score = 0.0 if denominator == 0 else 2.0 * true_positives / denominator
         score_better = score > best_score + 1e-12
         score_tied = abs(score - best_score) <= 1e-12
