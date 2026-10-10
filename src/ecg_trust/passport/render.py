@@ -20,7 +20,7 @@ def render_model_passport_markdown(passport: ModelPassport) -> str:
         "",
         "## Release identity",
         "",
-        f"- Passport ID: `{_escape(passport.passport_id)}`",
+        f"- Passport ID: `{passport.passport_id}`",
         f"- Passport SHA-256: `{passport.passport_sha256}`",
         f"- Release SHA-256: `{passport.release_sha256}`",
         f"- TrustBundle SHA-256: `{passport.bundle_sha256}`",
@@ -147,9 +147,9 @@ def _summary_lines(title: str, summary: EvidenceSummaryBase) -> list[str]:
         f"## {_escape(title)}",
         "",
         f"- Status: `{summary.status.value}`",
-        f"- Method: `{_escape(summary.method)}`",
+        f"- Method: `{summary.method}`",
         f"- Artifact SHA-256: `{artifact}`",
-        f"- Cohorts: `{', '.join(_escape(value) for value in summary.cohort_ids)}`",
+        f"- Cohorts: `{', '.join(summary.cohort_ids)}`",
         f"- Aggregate counts: `{summary.sample_count}` samples, `{summary.patient_count}` patients",
         f"- Summary: {_escape(summary.summary)}",
     ]
@@ -174,8 +174,10 @@ def _metric_text(metric: AggregateMetric) -> str:
 
 
 def _escape(value: str) -> str:
+    # Use only in ordinary Markdown text. Validated identifiers inside code
+    # spans must stay literal: CommonMark does not process backslash escapes there.
     escaped = value.replace("\\", "\\\\")
-    for character in ("`", "*", "_", "{", "}", "[", "]", "<", ">", "#", "|"):
+    for character in ("`", "*", "_", "{", "}", "[", "]", "<", ">", "#", "|", "&"):
         escaped = escaped.replace(character, "\\" + character)
     return escaped
 
