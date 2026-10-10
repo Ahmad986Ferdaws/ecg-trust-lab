@@ -1097,19 +1097,30 @@ def _pairwise_review_statistics(
     absolute_difference_sum = 0.0
     pair_count = 0
     for reviews in reviews_by_proposal.values():
-        for left_index, left in enumerate(reviews):
-            for right in reviews[left_index + 1 :]:
-                pair_count += 1
-                agreement_count += left.useful_for_model_review == right.useful_for_model_review
-                absolute_difference_sum += abs(
-                    left.morphology_plausibility_rating - right.morphology_plausibility_rating
-                )
+        vote_counts = [0, 0]
+        rating_counts = [0] * 5
+        for review in reviews:
+            vote_counts[review.useful_for_model_review] += 1
+            rating_counts[review.morphology_plausibility_rating - 1] += 1
+        panel_size = sum(vote_counts)
+        pair_count += panel_size * (panel_size - 1) // 2
+        agreement_count += sum(count * (count - 1) // 2 for count in vote_counts)
+
+        # Each pair of unequal ratings contributes its distance once. The
+        # five-point rating contract makes this a fixed-size histogram pass.
+        lower_count = 0
+        lower_rating_sum = 0
+        for rating, count in enumerate(rating_counts, start=1):
+            absolute_difference_sum += count * (rating * lower_count - lower_rating_sum)
+            lower_count += count
+            lower_rating_sum += rating * count
     if pair_count == 0:
         return None, None, None
     observed_agreement = agreement_count / pair_count
-    all_reviews = tuple(review for reviews in reviews_by_proposal.values() for review in reviews)
     usefulness_prevalence = statistics.fmean(
-        review.useful_for_model_review for review in all_reviews
+        review.useful_for_model_review
+        for reviews in reviews_by_proposal.values()
+        for review in reviews
     )
     expected_agreement = usefulness_prevalence**2 + (1.0 - usefulness_prevalence) ** 2
     kappa = (
