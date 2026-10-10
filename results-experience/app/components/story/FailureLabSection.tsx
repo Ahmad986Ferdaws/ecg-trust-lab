@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable jsx-a11y/no-noninteractive-tabindex -- Both named scroll regions need keyboard focus to expose offscreen content. */
+
 import { useState } from "react";
 import {
   SYNTHETIC_DURATION_SECONDS,
@@ -335,6 +337,7 @@ export function FailureLabSection() {
               className={styles.svgScroller}
               role="region"
               aria-label="Scrollable synthetic 12-lead ECG preview"
+              tabIndex={0}
             >
               <svg
                 className={styles.waveform}
@@ -465,6 +468,7 @@ export function FailureLabSection() {
             className={styles.tableScroller}
             role="region"
             aria-label="Scrollable Failure Lab scenario register"
+            tabIndex={0}
           >
             <table>
               <thead>
