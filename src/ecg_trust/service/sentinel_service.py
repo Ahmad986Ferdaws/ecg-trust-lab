@@ -657,7 +657,7 @@ def create_sentinel_app(
             code, message = "method_not_allowed", "The request method is not allowed."
         else:
             code, message = "request_rejected", "The request was rejected."
-        return _json_response(
+        response = _json_response(
             _error_result(
                 effective_config,
                 status_code=exc.status_code,
@@ -665,6 +665,11 @@ def create_sentinel_app(
                 message=message,
             )
         )
+        if exc.status_code == 405 and exc.headers is not None:
+            for name, value in exc.headers.items():
+                if name.lower() == "allow":
+                    response.headers["Allow"] = value
+        return response
 
     @app.exception_handler(Exception)
     async def unexpected_error_handler(request: Request, exc: Exception) -> Response:

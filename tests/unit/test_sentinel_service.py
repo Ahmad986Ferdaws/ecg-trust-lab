@@ -189,6 +189,25 @@ def _assert_security_headers(response: Response) -> None:
     assert response.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "allowed"),
+    [("POST", "/api/v1/healthz", "GET"), ("GET", "/api/v1/inferences", "POST")],
+)
+def test_method_errors_preserve_allowed_methods(
+    method: str, path: str, allowed: str
+) -> None:
+    with TestClient(_app()) as client:
+        response = client.request(method, path)
+
+    assert response.status_code == 405
+    assert allowed in response.headers["allow"].split(", ")
+    assert _body(response)["error"] == {
+        "code": "method_not_allowed",
+        "message": "The request method is not allowed.",
+    }
+    _assert_security_headers(response)
+
+
 def test_health_is_live_without_backends_and_sets_security_boundary() -> None:
     with TestClient(create_sentinel_app()) as client:
         response = client.get("/api/v1/healthz")
