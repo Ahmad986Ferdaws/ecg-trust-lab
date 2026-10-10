@@ -1,6 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import {
+  SYNTHETIC_DURATION_SECONDS,
+  shiftedSyntheticEcg,
+  syntheticEcg,
+} from "../../../lib/synthetic-waveform";
 
 import styles from "./FailureLabSection.module.css";
 
@@ -152,23 +157,6 @@ const DROPOUT_INDEXES: ReadonlyArray<ReadonlySet<number>> = [
   new Set([2, 7, 10, 5]),
 ];
 
-function gaussian(value: number, center: number, width: number): number {
-  const distance = (value - center) / width;
-  return Math.exp(-0.5 * distance * distance);
-}
-
-function baseEcg(time: number, profileIndex: number): number {
-  const phase = ((time % 1) + 1) % 1;
-  const polarity = profileIndex === 3 || profileIndex === 6 ? -1 : 1;
-  const scale = 0.74 + (profileIndex % 5) * 0.08;
-  const p = 0.12 * gaussian(phase, 0.18, 0.035);
-  const q = -0.2 * gaussian(phase, 0.355, 0.012);
-  const r = 1.08 * gaussian(phase, 0.38, 0.014);
-  const s = -0.32 * gaussian(phase, 0.415, 0.018);
-  const t = 0.3 * gaussian(phase, 0.66, 0.07);
-  return polarity * scale * (p + q + r + s + t);
-}
-
 function dropoutIndexes(severity: number): ReadonlySet<number> {
   return DROPOUT_INDEXES[severity] ?? DROPOUT_INDEXES[1];
 }
@@ -182,8 +170,9 @@ function scenarioValue(
   const chestLead = leadIndex >= 6;
   const sourceIndex =
     scenarioId === "lead-order" ? (leadIndex + severity) % LEADS.length : leadIndex;
-  const shiftedTime = scenarioId === "time-shift" ? time + severity * 0.055 : time;
-  let value = baseEcg(shiftedTime, sourceIndex);
+  let value = scenarioId === "time-shift"
+    ? shiftedSyntheticEcg(time, sourceIndex, severity * 0.055)
+    : syntheticEcg(time, sourceIndex);
 
   if (scenarioId === "baseline-wander") {
     value += severity * 0.1 * Math.sin(time * 0.72 + leadIndex * 0.08);
@@ -226,7 +215,7 @@ function buildLeadPath(scenarioId: ScenarioId, severity: number, leadIndex: numb
   for (let sample = 0; sample < SAMPLE_COUNT; sample += 1) {
     const progress = sample / (SAMPLE_COUNT - 1);
     const x = PLOT_LEFT + progress * plotWidth;
-    const time = progress * 6.2;
+    const time = progress * SYNTHETIC_DURATION_SECONDS;
     const y = centerY - scenarioValue(scenarioId, severity, time, leadIndex) * 13.5;
     commands.push(`${sample === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
   }
@@ -379,9 +368,9 @@ export function FailureLabSection() {
                 {scenarioId === "contiguous-mask" ? (
                   <rect
                     className={styles.maskBand}
-                    x={PLOT_LEFT + ((2.35 / 6.2) * (PLOT_RIGHT - PLOT_LEFT))}
+                    x={PLOT_LEFT + ((2.35 / SYNTHETIC_DURATION_SECONDS) * (PLOT_RIGHT - PLOT_LEFT))}
                     y={18 + 6 * ROW_HEIGHT}
-                    width={(severity * 0.28 * (PLOT_RIGHT - PLOT_LEFT)) / 6.2}
+                    width={(severity * 0.28 * (PLOT_RIGHT - PLOT_LEFT)) / SYNTHETIC_DURATION_SECONDS}
                     height={6 * ROW_HEIGHT}
                     aria-hidden="true"
                   />
