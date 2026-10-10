@@ -719,3 +719,22 @@
     scroll-behavior: auto;
   }
 }
+
+@media print {
+  .header, .previewBoundary, .workbench, .checkpoint,
+  .vocabulary > header, .scenarioRegister > header, .runnerNote {
+    display: block;
+    margin-block: 12pt;
+    padding: 8pt 0;
+  }
+  .controls { display: none; }
+  .previewFigure { margin: 0; break-inside: avoid; }
+  .svgScroller, .tableScroller { overflow: visible; }
+  .waveform { width: 100%; min-width: 0; height: auto; }
+  .tableScroller table { min-width: 0; width: 100%; }
+  .tableScroller tr { break-inside: avoid; }
+  .stateLedger { display: block; }
+  .stateLedger > div, .stateLedger > div:first-child,
+  .stateLedger > div:last-child { min-height: 0; padding: 8pt 0; break-inside: avoid; }
+  .stateLedger dt span { margin-bottom: 6pt; }
+}
