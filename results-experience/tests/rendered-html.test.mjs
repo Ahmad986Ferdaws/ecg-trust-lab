@@ -54,6 +54,19 @@ test("server-renders the complete Signal Ledger evidence experience", async () =
   assert.match(html, /15,193/);
   assert.match(html, /12 leads × 10 seconds/);
   assert.match(html, /No SPH tuning/);
+  assert.match(html, /id="evidence-sources"/);
+  assert.match(html, /Unadjudicated ontology bridge/);
+  assert.match(html, /unknown, not verified negatives/);
+  assert.match(html, /Rare transported endpoints/);
+  assert.match(html, /complete operator-level outcome blindness is not claimed/);
+  for (const path of [
+    "reports/FINAL_RESULTS_PUBLIC.md",
+    "publication/external_transport_sph_r2/FINAL_RESULTS.md",
+    "docs/TRUST_SENTINEL_OOD_COMPLETION_RESULT.md",
+    "reports/PROTOCOL_DEVIATIONS.md",
+  ]) {
+    assert.ok(html.includes(`https://github.com/Ahmad986Ferdaws/ecg-trust-lab/blob/43cf519ad1e0a664a5689a913e9123fc147294c9/${path}`));
+  }
   assert.match(html, /id="source-support"/);
   assert.match(html, /The experiment completed\. The gate did not pass\./);
   assert.match(html, /94\.62%/);

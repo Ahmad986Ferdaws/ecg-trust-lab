@@ -1,0 +1,74 @@
+.section {
+  width: min(100%, 1440px);
+  margin: 0 auto;
+  padding: clamp(4rem, 7vw, 7rem) clamp(1.25rem, 5vw, 5.5rem);
+  border-block: 1px solid var(--ink);
+  background: var(--paper-bright);
+}
+
+.header > p:first-child,
+.limitations header > p {
+  color: var(--resnet);
+  font: 0.75rem var(--mono);
+}
+
+.header h2 {
+  max-width: 20ch;
+  margin: 1.1rem 0 1.5rem;
+  font: 400 clamp(2.5rem, 4.5vw, 4.8rem) / 1 var(--serif);
+  letter-spacing: -0.04em;
+}
+
+.header > p:last-child {
+  max-width: 65ch;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.sources {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 3rem 0 4rem;
+  padding: 0;
+  list-style: none;
+  border-block: 1px solid var(--rule-dark);
+}
+
+.sources li {
+  padding: 1.5rem;
+  border-inline-end: 1px solid var(--rule);
+}
+
+.sources li:first-child { padding-inline-start: 0; }
+.sources li:last-child { border-inline-end: 0; }
+.sources li > span { font: 0.75rem var(--mono); color: var(--muted); }
+.sources h3 { font: 400 1.4rem / 1.3 var(--serif); }
+.sources p { color: var(--muted); font-size: 0.9rem; line-height: 1.6; }
+
+.section a {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-color: var(--rule-dark);
+}
+.section a:hover { text-decoration-color: currentColor; color: var(--resnet); }
+
+.limitations {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 3rem;
+}
+
+.limitations h3 { max-width: 15ch; font: 400 2rem / 1.15 var(--serif); }
+.limitations dl { margin: 0; }
+.limitations dl > div { padding-block: 1.25rem; border-top: 1px solid var(--rule); }
+.limitations dt { font-weight: 600; }
+.limitations dd { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.6; }
+.limitations dd a { color: var(--resnet); }
+
+@media (max-width: 760px) {
+  .sources, .limitations { grid-template-columns: 1fr; }
+  .sources li, .sources li:first-child { padding: 1.5rem 0; border-inline-end: 0; }
+  .sources li + li { border-top: 1px solid var(--rule); }
+  .limitations { gap: 0; }
+  .limitations h3 { max-width: none; }
+}
