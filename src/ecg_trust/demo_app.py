@@ -83,6 +83,15 @@ class DemoAppConfig:
     examples: tuple[DemoExample, ...] = ()
 
     def __post_init__(self) -> None:
+        for name in (
+            "max_header_bytes",
+            "max_signal_bytes",
+            "integrated_gradients_steps",
+            "inference_concurrency",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise DemoWebError(f"{name} must be an integer")
         if self.max_header_bytes < 1024:
             raise DemoWebError("max_header_bytes must be at least 1024")
         if self.max_signal_bytes < 1024:
@@ -91,6 +100,15 @@ class DemoAppConfig:
             raise DemoWebError("integrated_gradients_steps must be in [2, 256]")
         if not 1 <= self.inference_concurrency <= 8:
             raise DemoWebError("inference_concurrency must be in [1, 8]")
+        try:
+            examples = tuple(self.examples)
+        except TypeError as error:
+            raise DemoWebError("examples must be a sequence of DemoExample values") from error
+        if isinstance(self.examples, (str, bytes)) or any(
+            not isinstance(example, DemoExample) for example in examples
+        ):
+            raise DemoWebError("examples must contain only DemoExample values")
+        object.__setattr__(self, "examples", examples)
         identifiers = [example.example_id for example in self.examples]
         if len(identifiers) != len(set(identifiers)):
             raise DemoWebError("example IDs must be unique")
