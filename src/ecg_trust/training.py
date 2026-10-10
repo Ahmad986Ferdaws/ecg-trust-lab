@@ -73,9 +73,12 @@ def select_device(
             raise TrainingValidationError("CUDA was requested but is not available")
         if device.index is not None and device.index >= torch.cuda.device_count():
             raise TrainingValidationError(f"CUDA device index {device.index} is not available")
-    bf16_enabled = bool(
-        enable_bf16 and device.type == "cuda" and torch.cuda.is_bf16_supported()
-    )
+    bf16_enabled = False
+    if enable_bf16 and device.type == "cuda":
+        # PyTorch checks the current device, which may differ from cuda:N.
+        # The context restores the caller's current device after the query.
+        with torch.cuda.device(device):
+            bf16_enabled = bool(torch.cuda.is_bf16_supported())
     return TrainingRuntime(device=device, bf16_enabled=bf16_enabled)
 
 
