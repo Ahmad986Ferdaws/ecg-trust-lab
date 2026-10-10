@@ -1,3 +1,5 @@
+import { COHORTS, METRIC_IDS, MODELS, type CohortId, type ModelId } from "../../../lib/results.ts";
+
 export type MetricKey = "auroc" | "averagePrecision" | "brier" | "ece";
 
 export type MetricEstimate = {
@@ -14,7 +16,8 @@ export type ModelBenchmark = {
 };
 
 export type BenchmarkDataset = {
-  id: "ptb-xl" | "sph";
+  id: "ptb-xl" | "sph" | "sph-broad" | "sph-no-ambiguous";
+  cohortId: CohortId;
   tabLabel: string;
   eyebrow: string;
   title: string;
@@ -31,6 +34,11 @@ export type CohortSnapshot = {
     label: string;
   };
   broad: {
+    ecgs: number;
+    patients: number;
+    label: string;
+  };
+  noAmbiguous: {
     ecgs: number;
     patients: number;
     label: string;
@@ -68,93 +76,78 @@ export const METRIC_META: Record<
     label: "ECE",
     longLabel: "Expected calibration error",
     direction: "lower",
-    plotDomain: [0, 0.07],
+    plotDomain: [0, 0.1],
   },
 };
 
-/** Audited research outputs. Values are means ± sample SD across three frozen seeds. */
-export const AUDITED_BENCHMARKS: BenchmarkDataset[] = [
+/** Every displayed estimate is adapted from the same audited result model. */
+function modelBenchmark(cohortId: CohortId, modelId: ModelId): ModelBenchmark {
+  const id = modelId === "resnet1d" ? "resnet" : "transformer";
+  const result = COHORTS[cohortId].results[modelId];
+  return {
+    id,
+    name: MODELS[modelId].name,
+    descriptor: "Three frozen seeds",
+    accent: id,
+    metrics: Object.fromEntries(METRIC_IDS.map((metric) => [
+      metric, { value: result[metric].mean, spread: result[metric].sd },
+    ])) as Record<MetricKey, MetricEstimate>,
+  };
+}
+
+const benchmarkViews: Array<Omit<BenchmarkDataset, "models">> = [
   {
     id: "ptb-xl",
+    cohortId: "ptbxl_fold10",
     tabLabel: "Sealed PTB-XL",
     eyebrow: "In-distribution benchmark",
     title: "The ResNet clears the 0.92 AUROC benchmark.",
     description:
       "Two architectures face the same sealed superclass task. Discrimination, precision, and calibration are shown together—not collapsed into a single score.",
-    models: [
-      {
-        id: "resnet",
-        name: "1D ResNet",
-        descriptor: "Convolutional baseline",
-        accent: "resnet",
-        metrics: {
-          auroc: { value: 0.921921, spread: 0.000913 },
-          averagePrecision: { value: 0.810248, spread: 0.003327 },
-          brier: { value: 0.08504, spread: 0.000718 },
-          ece: { value: 0.022744, spread: 0.002984 },
-        },
-      },
-      {
-        id: "transformer",
-        name: "ECG Transformer",
-        descriptor: "Attention architecture",
-        accent: "transformer",
-        metrics: {
-          auroc: { value: 0.89742, spread: 0.00327 },
-          averagePrecision: { value: 0.76527, spread: 0.007739 },
-          brier: { value: 0.096807, spread: 0.001968 },
-          ece: { value: 0.025646, spread: 0.001163 },
-        },
-      },
-    ],
   },
   {
     id: "sph",
-    tabLabel: "SPH transport",
+    cohortId: "sph_primary",
+    tabLabel: "SPH primary",
     eyebrow: "Frozen external transport",
     title: "Frozen-model performance on the SPH primary cohort.",
     description:
       "The same frozen models are transported to the primary SPH cohort. Strong AUROC persists while average precision and calibration expose the dataset shift.",
-    models: [
-      {
-        id: "resnet",
-        name: "1D ResNet",
-        descriptor: "Frozen for transport",
-        accent: "resnet",
-        metrics: {
-          auroc: { value: 0.930912, spread: 0.000964 },
-          averagePrecision: { value: 0.698955, spread: 0.006752 },
-          brier: { value: 0.061301, spread: 0.000248 },
-          ece: { value: 0.052477, spread: 0.000877 },
-        },
-      },
-      {
-        id: "transformer",
-        name: "ECG Transformer",
-        descriptor: "Frozen for transport",
-        accent: "transformer",
-        metrics: {
-          auroc: { value: 0.924088, spread: 0.001231 },
-          averagePrecision: { value: 0.657838, spread: 0.007557 },
-          brier: { value: 0.064153, spread: 0.003962 },
-          ece: { value: 0.06148, spread: 0.006313 },
-        },
-      },
-    ],
+  },
+  {
+    id: "sph-broad",
+    cohortId: "sph_broad",
+    tabLabel: "SPH broad",
+    eyebrow: "Sensitivity · unknown absences",
+    title: "Broad sensitivity includes unmapped records.",
+    description:
+      `${COHORTS.sph_broad.description} Missing mappings are unknown, not verified negative diagnoses. This sensitivity analysis does not replace the primary transport result.`,
+  },
+  {
+    id: "sph-no-ambiguous",
+    cohortId: "sph_no_ambiguous",
+    tabLabel: "SPH no ambiguity",
+    eyebrow: "Sensitivity · restricted mapping",
+    title: "Sensitivity to removing ambiguous mapped codes.",
+    description:
+      `${COHORTS.sph_no_ambiguous.description} Removing these codes changes the label mix and reduces rare endpoint counts; the underlying ontology bridge remains unadjudicated.`,
   },
 ];
+
+export const AUDITED_BENCHMARKS: BenchmarkDataset[] = benchmarkViews.map((view) => ({
+  ...view,
+  models: [modelBenchmark(view.cohortId, "resnet1d"), modelBenchmark(view.cohortId, "ecg_transformer")],
+}));
+
+function cohortSnapshot(cohortId: CohortId, label: string) {
+  const { records, patients } = COHORTS[cohortId].count;
+  return { ecgs: records, patients, label };
+}
 
 export const AUDITED_TRANSPORT_COHORT: CohortSnapshot = {
   sourceLabel: "PTB-XL",
   destinationLabel: "SPH",
-  primary: {
-    ecgs: 15_698,
-    patients: 15_193,
-    label: "Primary transport cohort",
-  },
-  broad: {
-    ecgs: 18_842,
-    patients: 18_157,
-    label: "Broad sensitivity cohort",
-  },
+  primary: cohortSnapshot("sph_primary", "Primary transport cohort"),
+  broad: cohortSnapshot("sph_broad", "Broad sensitivity cohort"),
+  noAmbiguous: cohortSnapshot("sph_no_ambiguous", "No-ambiguous sensitivity cohort"),
 };

@@ -7,6 +7,7 @@ import { COHORTS, SOURCE_SUPPORT_COMPLETION } from "../lib/results.ts";
 import {
   AUDITED_BENCHMARKS,
   AUDITED_TRANSPORT_COHORT,
+  METRIC_META,
 } from "../app/components/story/storyData.ts";
 
 const publication = new URL("../../publication/", import.meta.url);
@@ -71,10 +72,17 @@ for (const cohort of ["ptbxl_fold10", ...Object.keys(cohortNames)]) {
   });
 }
 
-test("both story benchmarks match the sealed artifacts independently", async () => {
-  assert.deepEqual(AUDITED_BENCHMARKS.map(({ id }) => id).sort(), ["ptb-xl", "sph"]);
+test("all story benchmarks and sensitivities match the sealed artifacts independently", async () => {
+  const expectedCohorts = {
+    "ptb-xl": "ptbxl_fold10",
+    sph: "sph_primary",
+    "sph-broad": "sph_broad",
+    "sph-no-ambiguous": "sph_no_ambiguous",
+  };
+  assert.deepEqual(AUDITED_BENCHMARKS.map(({ id }) => id).sort(), Object.keys(expectedCohorts).sort());
   for (const dataset of AUDITED_BENCHMARKS) {
-    const cohort = dataset.id === "ptb-xl" ? "ptbxl_fold10" : "sph_primary";
+    const cohort = expectedCohorts[dataset.id];
+    assert.equal(dataset.cohortId, cohort);
     assert.deepEqual(dataset.models.map(({ id }) => id).sort(), ["resnet", "transformer"]);
     for (const model of dataset.models) {
       const modelId = model.id === "resnet" ? "resnet1d" : "ecg_transformer";
@@ -82,6 +90,11 @@ test("both story benchmarks match the sealed artifacts independently", async () 
       const presentation = Object.fromEntries(Object.entries(expected).map(([metric, value]) =>
         [metric, { value: value.mean, spread: value.sd }]));
       assert.deepEqual(model.metrics, presentation, `${dataset.id}/${model.id}`);
+      for (const [metric, estimate] of Object.entries(model.metrics)) {
+        const [minimum, maximum] = METRIC_META[metric].plotDomain;
+        assert.ok(estimate.value >= minimum && estimate.value <= maximum,
+          `${dataset.id}/${model.id}/${metric}: plotted estimate must not be clamped`);
+      }
     }
   }
 });
@@ -97,7 +110,7 @@ test("SPH cohort totals and all positive counts match the frozen cohort summary"
       [label, { records, patients: expected.positive_patients[label] }]));
     assert.deepEqual(COHORTS[display].positiveCounts, positives, `${display}/positiveCounts`);
   }
-  for (const [display, source] of [["primary", "primary_mapped"], ["broad", "broad_exact10"]]) {
+  for (const [display, source] of [["primary", "primary_mapped"], ["broad", "broad_exact10"], ["noAmbiguous", "no_ambiguous_mapped"]]) {
     assert.equal(AUDITED_TRANSPORT_COHORT[display].ecgs, cohorts[source].records, `${display}/ecgs`);
     assert.equal(AUDITED_TRANSPORT_COHORT[display].patients, cohorts[source].patients, `${display}/patients`);
   }
