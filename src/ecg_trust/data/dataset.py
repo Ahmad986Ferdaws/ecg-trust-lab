@@ -391,7 +391,7 @@ class PTBXLDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         normalization: Optional training-derived per-lead statistics.
 
     WFDB paths may be stored with or without ``.hea``/``.dat`` suffixes.  No
-    resampling, padding, truncation, or per-record normalization is performed.
+    resampling, padding, truncation, unit conversion, or per-record normalization is performed.
     Such silent repairs would weaken the experimental data contract.
     """
 
@@ -612,6 +612,22 @@ class PTBXLDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             )
         if not np.isfinite(canonical_signal).all():
             raise RecordValidationError(f"record {path!s} contains non-finite signal values")
+
+        units = getattr(record, "units", None)
+        if (
+            not isinstance(units, Sequence)
+            or isinstance(units, (str, bytes))
+            or len(units) != len(signal_names)
+        ):
+            raise RecordValidationError(
+                f"record {path!s} must declare one physical unit per lead"
+            )
+        for lead in LEADS:
+            unit = units[positions[lead]]
+            if unit != "mV":
+                raise RecordValidationError(
+                    f"record {path!s} lead {lead!r} has physical unit {unit!r}; expected 'mV'"
+                )
 
         tensor = torch.from_numpy(canonical_signal)
         if self.normalization is not None:
