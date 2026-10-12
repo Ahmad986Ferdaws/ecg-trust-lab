@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import platform
 import sys
@@ -142,13 +143,34 @@ def _backward_step(
     scaler.update()
 
 
-def main() -> None:
-    """Print a machine-readable report and fail if real CUDA training does not work."""
+def main(argv: list[str] | None = None) -> None:
+    """Print diagnostics or require a real CUDA training smoke test by default."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--environment-only",
+        action="store_true",
+        help="report runtime/device information without allocating or training the smoke model",
+    )
+    args = parser.parse_args(argv)
     report: dict[str, Any] = {"environment": {}}
+    if args.environment_only:
+        report.update(
+            {
+                "scope": "environment_only",
+                "training_smoke_test_performed": False,
+                "notice": (
+                    "Informational runtime probe only. No training or model validation was "
+                    "performed; this does not satisfy the CUDA training-stack verification gate."
+                ),
+            }
+        )
     try:
         report["environment"] = _device_report()
-        report["training_smoke_test"] = _training_smoke_test()
-        report["status"] = "PASS"
+        if args.environment_only:
+            report["status"] = "INFORMATIONAL"
+        else:
+            report["training_smoke_test"] = _training_smoke_test()
+            report["status"] = "PASS"
     except Exception as error:
         report["status"] = "FAIL"
         report["error"] = f"{type(error).__name__}: {error}"
