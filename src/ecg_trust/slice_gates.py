@@ -130,7 +130,22 @@ def _weighted(
     groups: Sequence[str],
 ) -> float:
     total = sum(weights[group].count for group in groups)
-    return math.fsum(observations[group].value * (weights[group].count / total) for group in groups)
+    try:
+        value = math.fsum(
+            observations[group].value * (weights[group].count / total) for group in groups
+        )
+    except OverflowError as error:
+        raise SliceGateError("weighted metric must be finite") from error
+    if not math.isfinite(value):
+        raise SliceGateError("weighted metric must be finite")
+    return value
+
+
+def _degradation(reference: float, candidate: float, sign: float) -> float:
+    value = sign * (reference - candidate)
+    if not math.isfinite(value):
+        raise SliceGateError("metric difference must be finite")
+    return value
 
 
 def evaluate_slice_gate(
@@ -171,7 +186,7 @@ def evaluate_slice_gate(
     verdicts: list[SliceVerdict] = []
     for group in sorted(before):
         old, new = before[group], after[group]
-        degradation = sign * (old.value - new.value)
+        degradation = _degradation(old.value, new.value, sign)
         if min(old.count, new.count) < min_count:
             status = SliceStatus.INSUFFICIENT
         elif _exceeds(degradation, slice_limit):
@@ -193,8 +208,8 @@ def evaluate_slice_gate(
     supported = [item.group for item in verdicts if item.status is not SliceStatus.INSUFFICIENT]
     overall: float | None = None
     if supported:
-        overall = sign * (
-            _weighted(before, before, supported) - _weighted(after, before, supported)
+        overall = _degradation(
+            _weighted(before, before, supported), _weighted(after, before, supported), sign
         )
         overall_status = SliceStatus.FAIL if _exceeds(overall, overall_limit) else SliceStatus.PASS
     else:

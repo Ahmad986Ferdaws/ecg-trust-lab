@@ -39,6 +39,7 @@ tool on held-out data needs its own protocol; see
 | `prior_shift.estimate_label_shift`, `adjust_to_priors` | How much of an external miscalibration is just prevalence? | Saerens et al. EM (Neural Computation, 2002) under the label-shift assumption. Exploratory for SPH. |
 | `conformal.GroupConditionalConformal` | Does coverage hold inside each subgroup, not just on average? | Mondrian conformal; small groups get trivial `{0, 1}` sets and are listed. Don't convert its sets with the v1 case-contract adapter: the adapter can't detect them and would stamp pooled provenance and marginal coverage on them. |
 | `slice_gates.evaluate_slice_gate` | Did a candidate regress overall or in any group? | Compares at a fixed reference composition; small groups block by default. |
+| `scripts/compare_slices.py` | Can I apply the subgroup gate to existing aggregate JSON without writing Python? | [Input and report guide](AGGREGATE_SLICE_COMPARISON.md); explicit metric direction and limits, input digest, exit status for automation. |
 | `class_balance.training_class_balance` | What BCE `pos_weight` would folds 1–7 imply? | Refuses rows from folds 8–10. |
 
 ## Protocol planning and input quality
