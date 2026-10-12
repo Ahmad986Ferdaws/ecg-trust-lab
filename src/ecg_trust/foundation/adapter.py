@@ -201,8 +201,8 @@ class FoundationEncoderAdapter:
         if state_after is None or input_after is None:  # pragma: no cover - defensive
             raise FoundationAdapterError("encoder verification did not complete")
 
-        if input_after != adapter_input_hash:
-            raise FoundationAdapterError("encoder mutated its canonical input batch")
+        # Restore frozen state before another refusal can exit this path.
+        # A faulty forward can mutate both its input and model state.
         if frozen and state_after != state_before:
             if state_snapshot is None:  # pragma: no cover - defensive type narrowing
                 raise FoundationAdapterError("frozen encoder state snapshot is unavailable")
@@ -213,6 +213,8 @@ class FoundationEncoderAdapter:
                     "frozen encoder mutated state and restoration failed"
                 ) from exc
             raise FoundationAdapterError("frozen encoder mutated parameters or buffers")
+        if input_after != adapter_input_hash:
+            raise FoundationAdapterError("encoder mutated its canonical input batch")
         if forward_error is not None:
             raise FoundationAdapterError("external encoder forward pass failed") from forward_error
         if not isinstance(output, Tensor):

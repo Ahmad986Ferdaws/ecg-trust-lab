@@ -461,6 +461,53 @@ def test_adapter_rejects_invalid_embedding_outputs(
         _adapter(encoder).extract(batch)
 
 
+@pytest.mark.parametrize("raise_after_mutation", [False, True])
+@pytest.mark.parametrize("input_nonfinite", [False, True])
+def test_combined_mutations_restore_frozen_state_before_refusal(
+    batch: Tensor, raise_after_mutation: bool, input_nonfinite: bool
+) -> None:
+    class CombinedMutationEncoder(StateMutatingEncoder):
+        def forward(self, waveforms: Tensor) -> Tensor:
+            self.projection.weight.add_(0.25)
+            self.invocation_count.add_(1)
+            waveforms.add_(float("nan") if input_nonfinite else 0.1)
+            if raise_after_mutation:
+                raise RuntimeError("synthetic encoder failure")
+            return TinyEncoder.forward(self, waveforms)
+
+    encoder = CombinedMutationEncoder()
+    encoder.train()
+    encoder.projection.eval()
+    adapter = _adapter(encoder)
+    before_state = model_state_sha256(encoder)
+    before_batch = batch.clone()
+    before_modes = tuple(module.training for module in encoder.modules())
+
+    with pytest.raises(FoundationAdapterError):
+        adapter.extract(batch)
+
+    assert model_state_sha256(encoder) == before_state
+    assert torch.equal(batch, before_batch)
+    assert tuple(module.training for module in encoder.modules()) == before_modes
+
+
+def test_combined_mutation_reports_failed_state_restoration(batch: Tensor, monkeypatch) -> None:
+    class CombinedMutationEncoder(StateMutatingEncoder):
+        def forward(self, waveforms: Tensor) -> Tensor:
+            waveforms.add_(0.1)
+            return super().forward(waveforms)
+
+    encoder = CombinedMutationEncoder()
+    adapter = _adapter(encoder)
+
+    def broken_restore(*args, **kwargs):
+        raise RuntimeError("synthetic restoration failure")
+
+    monkeypatch.setattr(encoder, "load_state_dict", broken_restore)
+    with pytest.raises(FoundationAdapterError, match="restoration failed"):
+        adapter.extract(batch)
+
+
 def test_frozen_adapter_rejects_and_restores_state_mutation(batch: Tensor) -> None:
     encoder = _freeze(StateMutatingEncoder())
     before = encoder.invocation_count.clone()
