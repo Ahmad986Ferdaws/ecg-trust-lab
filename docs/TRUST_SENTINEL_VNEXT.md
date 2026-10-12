@@ -99,11 +99,21 @@ nothing about error among singleton decisions. Nothing selects it: the Sentinel
 engine, the case contract, and `configs/trust_sentinel_vnext.yaml` still use
 `labelwise_split_conformal`. Enabling it, or any particular budgets, for a
 release requires a new preregistered protocol and a new case-contract version.
-Until that version exists, its prediction sets must not be converted to case
-contracts: they use the shared `BinaryPredictionSets` type, which carries no
-provenance, so `conformal_prediction_sets_to_contracts` would stamp them with
-the pooled artifact type and coverage scope. Its budgets are research
+The case-contract adapter refuses class- and group-conditional models. Their
+shared `BinaryPredictionSets` masks carry no calibration provenance, so masks
+alone cannot justify a pooled coverage statement. Miss budgets remain research
 parameters, not clinical operating points.
+
+`conformal_prediction_sets_to_contracts` now requires the keyword argument
+`calibration_model`: pass the exact `LabelwiseBinaryConformal` object loaded
+from the supplied `calibration_artifact`. The adapter recomputes membership on
+the supplied probabilities and refuses mismatched masks, labels or a different
+model type. Existing callers must supply that model; masks alone are refused.
+Sentinel already obtains it from its verified release and supplies it directly.
+The adapter does not independently load the reference or verify its hash:
+release verification remains responsible for binding the model to its artifact.
+Valid pooled contract JSON, calibration artifacts and prediction-set formats
+are unchanged. This check does not fit a model or promote experimental methods.
 
 The source-calibration protocol has now completed as a development-only,
 patient-separated preparation step; its independently audited aggregate status
