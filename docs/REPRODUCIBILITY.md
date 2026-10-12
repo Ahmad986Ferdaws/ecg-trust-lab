@@ -273,6 +273,15 @@ Optional descriptive figures use development records only:
 uv run python scripts/plot_dataset_overview.py
 ```
 
+To inspect an already-authorized normalization file without loading waveforms,
+import `NormalizationStats` from `ecg_trust.normalization` and call
+`NormalizationStats.load(path)`. This module validates saved values and
+training-fold provenance without importing PyTorch, WFDB, pandas or NumPy.
+The existing `ecg_trust.data.dataset` imports remain supported. Fitting still
+belongs to `compute_normalization_stats` in the dataset module; loading a saved
+artifact does not refit it, check its hash against a release, or authorize a
+held-out evaluation.
+
 ## 7. Synthetic capacity and throughput benchmark
 
 First prove the benchmark path without GPU dependence:
