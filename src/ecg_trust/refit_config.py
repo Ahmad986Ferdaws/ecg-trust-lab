@@ -13,6 +13,11 @@ from typing import Literal, Self, cast
 
 import yaml  # type: ignore[import-untyped]
 
+from ecg_trust._config_loading import (
+    DuplicateConfigKeyError,
+    load_json_unique_keys,
+    load_yaml_unique_keys,
+)
 from ecg_trust.experiment_config import LoaderConfig, ModelConfig, OutputConfig, RuntimeConfig
 from ecg_trust.protocol import MODEL_SELECTION_FOLDS, TRAIN_FOLDS
 
@@ -796,13 +801,13 @@ def load_refit_config(
     try:
         serialized = config_path.read_text(encoding="utf-8")
         decoded: object = (
-            json.loads(serialized)
+            load_json_unique_keys(serialized)
             if config_path.suffix.casefold() == ".json"
-            else yaml.safe_load(serialized)
+            else load_yaml_unique_keys(serialized)
         )
     except OSError as error:
         raise RefitConfigError(f"could not read refit config {config_path}: {error}") from error
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, DuplicateConfigKeyError) as error:
         raise RefitConfigError(f"invalid JSON in {config_path}: {error}") from error
     except yaml.YAMLError as error:
         raise RefitConfigError(f"invalid YAML in {config_path}: {error}") from error

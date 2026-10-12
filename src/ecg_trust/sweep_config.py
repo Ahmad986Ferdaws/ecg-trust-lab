@@ -13,6 +13,7 @@ from typing import Literal, Self, cast
 
 import yaml  # type: ignore[import-untyped]
 
+from ecg_trust._config_loading import load_yaml_unique_keys
 from ecg_trust.experiment_config import DevelopmentExperimentConfig, load_experiment_config
 from ecg_trust.protocol import MODEL_SELECTION_FOLDS, TRAIN_FOLDS
 
@@ -638,7 +639,7 @@ def load_sweep_config(
 
     config_path = Path(path)
     try:
-        decoded: object = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        decoded: object = load_yaml_unique_keys(config_path.read_text(encoding="utf-8"))
     except OSError as error:
         raise SweepConfigError(f"could not read sweep config {config_path}: {error}") from error
     except yaml.YAMLError as error:
