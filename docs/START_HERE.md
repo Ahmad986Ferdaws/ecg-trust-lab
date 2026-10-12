@@ -13,6 +13,7 @@ path that matches what you want to do.
 | Review external transport | [SPH results](../publication/external_transport_sph_r2/FINAL_RESULTS.md) and [frozen protocol](EXTERNAL_TRANSPORT_SPH_R2.md) | No |
 | Understand the support gate that missed its target | [Source-support completion result](TRUST_SENTINEL_OOD_COMPLETION_RESULT.md) | No |
 | Improve or test the Python code | [Contribution workflow](../CONTRIBUTING.md) | Most CPU tests run without private artifacts |
+| Try the Python toolkit and interpret its reports | [Synthetic research tour](SYNTHETIC_RESEARCH_TOUR.md) | No |
 | Reconstruct the scientific environment | [Reproducibility guide](REPRODUCIBILITY.md) and [environment record](ENVIRONMENT.md) | Yes, for waveform/model execution |
 
 ## Open the results notebook
