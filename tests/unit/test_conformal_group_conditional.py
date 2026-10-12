@@ -154,27 +154,22 @@ def test_artifact_round_trips_and_rejects_tampering() -> None:
         GroupConditionalConformal.from_dict({**payload, "extra": 1})
 
 
-def test_case_contract_adapter_cannot_tell_these_sets_from_pooled_ones() -> None:
-    # Characterizes a known hazard shared with the class-conditional calibrator:
-    # prediction sets carry no provenance, so the v1 case-contract adapter stamps
-    # the pooled artifact type and scope. The module docstring forbids this
-    # conversion; replace with a refusal test when the adapter can take the model.
+def test_case_contract_adapter_refuses_conditional_model() -> None:
     probabilities, targets = _cohort(80, noise=1.0, seed=7)
     model = GroupConditionalConformal.fit(probabilities, targets, ["a"] * 80, label_names=LABELS)
     row = probabilities[:1]
 
-    contracts = conformal_prediction_sets_to_contracts(
-        model.predict(row, ["a"]),
-        row[0],
-        calibration_artifact=ArtifactReference(
-            schema_version=ARTIFACT_REFERENCE_SCHEMA_VERSION,
-            artifact_id="group-conditional-conformal",
-            file_sha256="sha256:" + "a" * 64,
-            size_bytes=10,
-            media_type="application/json",
-            sensitive=False,
-        ),
-    )
-
-    assert contracts[0].calibration_artifact_type == "ecg_trust.labelwise_binary_conformal"
-    assert contracts[0].coverage_scope == "labelwise_marginal_under_exchangeability"
+    with pytest.raises(ValueError, match="pooled LabelwiseBinaryConformal"):
+        conformal_prediction_sets_to_contracts(
+            model.predict(row, ["a"]),
+            row[0],
+            calibration_model=model,  # type: ignore[arg-type]
+            calibration_artifact=ArtifactReference(
+                schema_version=ARTIFACT_REFERENCE_SCHEMA_VERSION,
+                artifact_id="group-conditional-conformal",
+                file_sha256="sha256:" + "a" * 64,
+                size_bytes=10,
+                media_type="application/json",
+                sensitive=False,
+            ),
+        )

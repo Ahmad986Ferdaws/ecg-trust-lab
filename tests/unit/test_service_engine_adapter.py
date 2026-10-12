@@ -6,7 +6,7 @@ from typing import cast
 import numpy as np
 import pytest
 
-from ecg_trust.conformal import BinaryPredictionSets
+from ecg_trust.conformal import BinaryPredictionSets, LabelwiseBinaryConformal
 from ecg_trust.constants import SUPERCLASSES
 from ecg_trust.contract_adapters import conformal_prediction_sets_to_contracts
 from ecg_trust.contracts import (
@@ -94,6 +94,14 @@ def _result(decision: TrustDecision) -> SentinelCaseResult:
         sets,
         probabilities,
         calibration_artifact=_artifact(),
+        calibration_model=LabelwiseBinaryConformal(
+            label_names=SUPERCLASSES,
+            alpha=0.1,
+            thresholds=(0.2,) * 5,
+            n_calibration_samples=20,
+            quantile_rank=19,
+            quantile_level=0.95,
+        ),
     )
     return SentinelCaseResult(
         release_id="release-vnext",

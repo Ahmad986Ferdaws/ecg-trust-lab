@@ -37,7 +37,7 @@ tool on held-out data needs its own protocol; see
 | Tool | Question it answers | Notes |
 |---|---|---|
 | `prior_shift.estimate_label_shift`, `adjust_to_priors` | How much of an external miscalibration is just prevalence? | Saerens et al. EM (Neural Computation, 2002) under the label-shift assumption. Exploratory for SPH. |
-| `conformal.GroupConditionalConformal` | Does coverage hold inside each subgroup, not just on average? | Mondrian conformal; small groups get trivial `{0, 1}` sets and are listed. Don't convert its sets with the v1 case-contract adapter: the adapter can't detect them and would stamp pooled provenance and marginal coverage on them. |
+| `conformal.GroupConditionalConformal` | Does coverage hold inside each subgroup, not just on average? | Mondrian conformal; small groups get trivial `{0, 1}` sets and are listed. The v1 case-contract adapter requires the pooled calibration model and checks membership against it; group-conditional models are refused. |
 | `slice_gates.evaluate_slice_gate` | Did a candidate regress overall or in any group? | Compares at a fixed reference composition; small groups block by default. |
 | `class_balance.training_class_balance` | What BCE `pos_weight` would folds 1–7 imply? | Refuses rows from folds 8–10. |
 

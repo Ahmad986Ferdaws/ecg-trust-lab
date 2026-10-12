@@ -8,7 +8,12 @@ from typing import Final, Literal, cast
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ecg_trust.conformal import BinaryDecision, BinaryPredictionSets, UncertaintyKind
+from ecg_trust.conformal import (
+    BinaryDecision,
+    BinaryPredictionSets,
+    LabelwiseBinaryConformal,
+    UncertaintyKind,
+)
 from ecg_trust.constants import SUPERCLASSES
 from ecg_trust.contracts import (
     CASE_DISTRIBUTION_ASSESSMENT_SCHEMA_VERSION,
@@ -185,20 +190,31 @@ def conformal_prediction_sets_to_contracts(
     calibrated_probabilities: ArrayLike,
     *,
     calibration_artifact: ArtifactReference,
+    calibration_model: LabelwiseBinaryConformal,
 ) -> tuple[LabelPredictionSetDecision, ...]:
-    """Convert exactly one canonical five-label conformal prediction."""
+    """Convert one case only after verifying its pooled calibration membership.
+
+    The caller must supply the model loaded from ``calibration_artifact``. This
+    check binds masks to the supplied model and probabilities; verification of
+    the artifact bytes remains the release provider's responsibility.
+    """
+
+    if type(calibration_model) is not LabelwiseBinaryConformal:
+        raise ValueError("case contracts require the pooled LabelwiseBinaryConformal model")
+    if calibration_model.label_names != SUPERCLASSES:
+        raise ValueError("calibration model label order must match the canonical superclasses")
 
     if prediction_sets.n_samples != 1:
         raise ValueError("case contract conversion requires exactly one prediction row")
     if prediction_sets.label_names != SUPERCLASSES:
         raise ValueError("conformal label order must match the canonical superclasses")
-    probabilities = np.asarray(calibrated_probabilities, dtype=np.float64)
-    if probabilities.shape != (len(SUPERCLASSES),):
+    raw_probabilities = np.asarray(calibrated_probabilities)
+    if raw_probabilities.shape != (len(SUPERCLASSES),):
         raise ValueError("calibrated_probabilities must contain five values")
-    if not np.isfinite(probabilities).all() or np.any(
-        (probabilities < 0.0) | (probabilities > 1.0)
-    ):
-        raise ValueError("calibrated_probabilities must be finite values in [0, 1]")
+    expected = calibration_model.predict(raw_probabilities[None, :])
+    if prediction_sets != expected:
+        raise ValueError("prediction sets do not match the supplied pooled calibration model")
+    probabilities = np.asarray(raw_probabilities, dtype=np.float64)
 
     negative = prediction_sets.include_not_supported[0]
     positive = prediction_sets.include_supported[0]

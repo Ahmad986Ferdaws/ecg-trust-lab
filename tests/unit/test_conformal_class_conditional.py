@@ -296,12 +296,7 @@ def test_decisions_feed_the_existing_trust_policy_unchanged() -> None:
     assert results[1].uncertain_labels == ("HYP",)
 
 
-def test_case_contract_adapter_cannot_tell_these_sets_from_pooled_ones() -> None:
-    # Characterizes a known hazard. BinaryPredictionSets carry no provenance, and the
-    # v1 case contract admits only the pooled artifact type and scope, so the adapter
-    # stamps those on class-conditional sets. The module docstring and
-    # docs/TRUST_SENTINEL_VNEXT.md forbid this conversion. When a new case-contract
-    # version lets the adapter take the calibrator, replace this with a refusal test.
+def test_case_contract_adapter_refuses_conditional_model() -> None:
     generator = np.random.default_rng(3)
     targets = generator.binomial(1, 0.5, size=(200, len(SUPERCLASSES))).astype(np.int8)
     probabilities = np.where(
@@ -318,27 +313,20 @@ def test_case_contract_adapter_cannot_tell_these_sets_from_pooled_ones() -> None
     )
     row = [0.9, 0.6, 0.1, 0.1, 0.1]
 
-    contracts = conformal_prediction_sets_to_contracts(
-        calibrator.predict([row]),
-        np.asarray(row),
-        calibration_artifact=ArtifactReference(
-            schema_version=ARTIFACT_REFERENCE_SCHEMA_VERSION,
-            artifact_id="class-conditional-conformal",
-            file_sha256="sha256:" + "a" * 64,
-            size_bytes=10,
-            media_type="application/json",
-            sensitive=False,
-        ),
-    )
-
-    assert {item.calibration_artifact_type for item in contracts} == {
-        "ecg_trust.labelwise_binary_conformal"
-    }
-    assert {item.coverage_scope for item in contracts} == {
-        "labelwise_marginal_under_exchangeability"
-    }
-    assert calibrator.to_dict()["artifact_type"] != contracts[0].calibration_artifact_type
-    assert calibrator.to_dict()["coverage_scope"] != contracts[0].coverage_scope
+    with pytest.raises(ValueError, match="pooled LabelwiseBinaryConformal"):
+        conformal_prediction_sets_to_contracts(
+            calibrator.predict([row]),
+            np.asarray(row),
+            calibration_model=calibrator,  # type: ignore[arg-type]
+            calibration_artifact=ArtifactReference(
+                schema_version=ARTIFACT_REFERENCE_SCHEMA_VERSION,
+                artifact_id="class-conditional-conformal",
+                file_sha256="sha256:" + "a" * 64,
+                size_bytes=10,
+                media_type="application/json",
+                sensitive=False,
+            ),
+        )
 
 
 def test_default_labelwise_artifact_and_prediction_sets_are_unchanged() -> None:

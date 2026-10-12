@@ -549,6 +549,7 @@ class TrustSentinelEngine:
                 prediction_sets,
                 model_evidence.calibrated_probabilities,
                 calibration_artifact=self._artifacts.conformal_artifact,
+                calibration_model=conformal,
             )
         except Exception:
             final_policy = evaluate_trust_policy(

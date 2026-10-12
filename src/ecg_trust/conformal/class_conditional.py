@@ -32,10 +32,10 @@ defaults.
 
 Nothing in the Sentinel engine, case contracts, or frozen configurations
 selects this artifact. The engine accepts only ``LabelwiseBinaryConformal``.
-``predict`` returns plain ``BinaryPredictionSets``, which carry no provenance,
-and ``conformal_prediction_sets_to_contracts`` stamps whatever sets it receives
-with the pooled artifact type and coverage scope. It cannot detect these sets,
-so it must not be used to convert them.
+``predict`` returns plain ``BinaryPredictionSets``, which carry no provenance.
+The v1 case-contract adapter requires the actual pooled calibration model and
+checks membership against it; this class-conditional model is refused. Its
+results need a separate contract with their own coverage scope.
 """
 
 from __future__ import annotations

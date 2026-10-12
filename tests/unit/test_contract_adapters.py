@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from ecg_trust.conformal import BinaryPredictionSets
+from ecg_trust.conformal import BinaryPredictionSets, LabelwiseBinaryConformal
 from ecg_trust.contract_adapters import (
     case_distribution_assessment_from_score,
     conformal_prediction_sets_to_contracts,
@@ -158,6 +158,17 @@ def test_unavailable_distribution_adapter_preserves_fail_closed_reason() -> None
     assert result.is_out_of_distribution is None
 
 
+def _pooled_model() -> LabelwiseBinaryConformal:
+    return LabelwiseBinaryConformal(
+        label_names=("NORM", "MI", "STTC", "CD", "HYP"),
+        alpha=0.1,
+        thresholds=(0.2, 0.2, 0.6, 0.4, 0.2),
+        n_calibration_samples=20,
+        quantile_rank=19,
+        quantile_level=0.95,
+    )
+
+
 def test_conformal_adapter_preserves_both_and_empty_uncertainty() -> None:
     sets = BinaryPredictionSets.from_masks(
         label_names=("NORM", "MI", "STTC", "CD", "HYP"),
@@ -169,6 +180,7 @@ def test_conformal_adapter_preserves_both_and_empty_uncertainty() -> None:
         sets,
         np.asarray([0.9, 0.1, 0.5, 0.5, 0.2]),
         calibration_artifact=_artifact("conformal-v1"),
+        calibration_model=_pooled_model(),
     )
 
     assert tuple(item.decision for item in result) == (
@@ -194,6 +206,7 @@ def test_conformal_adapter_rejects_noncanonical_case_shapes_and_labels() -> None
             two_rows,
             np.zeros(5),
             calibration_artifact=_artifact(),
+            calibration_model=_pooled_model(),
         )
 
     wrong_labels = BinaryPredictionSets.from_masks(
@@ -206,4 +219,56 @@ def test_conformal_adapter_rejects_noncanonical_case_shapes_and_labels() -> None
             wrong_labels,
             np.zeros(5),
             calibration_artifact=_artifact(),
+            calibration_model=_pooled_model(),
+        )
+
+
+@pytest.mark.parametrize("mask", ["negative", "positive"])
+def test_conformal_adapter_refuses_masks_from_another_model(mask: str) -> None:
+    model = _pooled_model()
+    probabilities = np.asarray([0.9, 0.1, 0.5, 0.5, 0.2])
+    expected = model.predict(probabilities[None, :])
+    negative = expected.not_supported_mask
+    positive = expected.supported_mask
+    if mask == "negative":
+        negative[0, 0] = not negative[0, 0]
+    else:
+        positive[0, 0] = not positive[0, 0]
+    wrong = BinaryPredictionSets.from_masks(
+        label_names=model.label_names,
+        include_not_supported=negative,
+        include_supported=positive,
+    )
+    with pytest.raises(ValueError, match="do not match"):
+        conformal_prediction_sets_to_contracts(
+            wrong, probabilities, calibration_artifact=_artifact(), calibration_model=model
+        )
+
+
+def test_conformal_adapter_refuses_stale_probabilities() -> None:
+    model = _pooled_model()
+    sets = model.predict([[0.9, 0.1, 0.5, 0.5, 0.2]])
+    with pytest.raises(ValueError, match="do not match"):
+        conformal_prediction_sets_to_contracts(
+            sets, [0.1] * 5, calibration_artifact=_artifact(), calibration_model=model
+        )
+
+
+def test_conformal_adapter_requires_calibration_evidence() -> None:
+    sets = _pooled_model().predict([[0.1] * 5])
+    with pytest.raises(TypeError, match="calibration_model"):
+        conformal_prediction_sets_to_contracts(  # type: ignore[call-arg]
+            sets, [0.1] * 5, calibration_artifact=_artifact()
+        )
+
+
+def test_conformal_adapter_rejects_wrong_model_label_order() -> None:
+    from dataclasses import replace
+
+    model = _pooled_model()
+    wrong = replace(model, label_names=tuple(reversed(model.label_names)))
+    with pytest.raises(ValueError, match="calibration model label order"):
+        conformal_prediction_sets_to_contracts(
+            model.predict([[0.1] * 5]), [0.1] * 5,
+            calibration_artifact=_artifact(), calibration_model=wrong,
         )
