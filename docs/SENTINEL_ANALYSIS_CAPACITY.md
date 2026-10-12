@@ -17,6 +17,14 @@ the existing uncapped behavior. Case validation and inference share the limit,
 which covers resolving a case, loading its verified release, and running the
 backend. Health and readiness requests do not consume these slots.
 
+The liveness endpoint (`/api/v1/healthz`) only builds a static boundary response
+and runs on the event loop, so it does not wait for a free analysis worker.
+[Starlette runs synchronous endpoints in a shared worker pool](https://starlette.dev/threadpool/);
+an occupied pool must not make this lightweight liveness probe wait behind
+analysis. Liveness does not check backend health or available analysis capacity.
+Readiness (`/api/v1/readyz`) performs dependency checks and can still wait for a
+worker; event-loop stalls and server connection limits can also delay probes.
+
 When every slot is occupied, a new analysis returns HTTP 503 immediately with
 `decision: ABSTAIN`, `reason_codes: [SERVICE_BUSY]`, and `Retry-After: 1`. The
 response has the usual research boundary and no-store headers, with no model

@@ -756,7 +756,7 @@ def create_sentinel_app(
         )
 
     @app.get(f"{API_PREFIX}/healthz", response_model=HealthResponse)
-    def healthz() -> HealthResponse:
+    async def healthz() -> HealthResponse:
         return HealthResponse(**_boundary_fields(effective_config))
 
     @app.get(
