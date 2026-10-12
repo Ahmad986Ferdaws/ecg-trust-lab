@@ -83,6 +83,7 @@ def _training_smoke_test() -> dict[str, Any]:
     amp_dtype = torch.bfloat16 if use_bf16 else torch.float16
     model = CudaSmokeModel().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_dtype == torch.float16)
     criterion = nn.BCEWithLogitsLoss()
     signals = torch.randn(16, 12, 1000, device=device)
     targets = torch.randint(0, 2, (16, 5), device=device, dtype=torch.float32)
@@ -95,8 +96,7 @@ def _training_smoke_test() -> dict[str, Any]:
         with torch.autocast(device_type="cuda", dtype=amp_dtype):
             logits = model(signals)
             loss = criterion(logits, targets)
-        loss.backward()
-        optimizer.step()
+        _backward_step(loss, model, optimizer, scaler)
         losses.append(float(loss.detach()))
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - start
@@ -110,6 +110,7 @@ def _training_smoke_test() -> dict[str, Any]:
 
     return {
         "autocast_dtype": str(amp_dtype).removeprefix("torch."),
+        "gradient_scaling": scaler.is_enabled(),
         "batch_shape": list(signals.shape),
         "output_shape": list(logits.shape),
         "steps": len(losses),
@@ -120,10 +121,32 @@ def _training_smoke_test() -> dict[str, Any]:
     }
 
 
+def _backward_step(
+    loss: Tensor,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scaler: torch.amp.GradScaler,
+) -> None:
+    """Check every smoke step before updating weights, using unscaled gradients."""
+
+    if not bool(torch.isfinite(loss).all()):
+        raise RuntimeError("Non-finite loss detected during CUDA training smoke test.")
+    scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
+    scaler.unscale_(optimizer)
+    if not all(
+        parameter.grad is None or bool(torch.isfinite(parameter.grad).all())
+        for parameter in model.parameters()
+    ):
+        raise RuntimeError("Non-finite gradient detected during CUDA training smoke test.")
+    scaler.step(optimizer)
+    scaler.update()
+
+
 def main() -> None:
     """Print a machine-readable report and fail if real CUDA training does not work."""
-    report: dict[str, Any] = {"environment": _device_report()}
+    report: dict[str, Any] = {"environment": {}}
     try:
+        report["environment"] = _device_report()
         report["training_smoke_test"] = _training_smoke_test()
         report["status"] = "PASS"
     except Exception as error:
