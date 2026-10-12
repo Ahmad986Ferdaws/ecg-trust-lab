@@ -7,6 +7,7 @@ path that matches what you want to do.
 | Your goal | Start with | Needs private data or model weights? |
 | --- | --- | --- |
 | Understand the project and findings | [Portfolio case study](PORTFOLIO_CASE_STUDY.md) | No |
+| Assess technical adoption or acquisition readiness | [Technical diligence and handover](TECHNICAL_DILIGENCE.md) | Public review: no; real inference handover: yes |
 | Run the interactive results notebook | [Website guide](../results-experience/README.md) | No |
 | Check the numbers displayed on the website | Public evidence command below | No |
 | Review the completed classifier study | [Public PTB-XL results](../reports/FINAL_RESULTS_PUBLIC.md) and [model card](MODEL_CARD_PTBXL_SUPERCLASS_R3.md) | No |
