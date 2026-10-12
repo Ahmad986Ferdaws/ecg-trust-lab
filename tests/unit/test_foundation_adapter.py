@@ -626,3 +626,13 @@ def test_comparison_rejects_local_pretraining_claims_and_duplicates() -> None:
             trainability_policy=_frozen_policy(),
             cohort_members=[duplicate, duplicate],
         )
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1", None, 2])
+def test_foundation_spec_requires_integer_schema_version(version: object) -> None:
+    spec = _spec()
+    payload = spec.to_dict()
+    assert FoundationModelSpec.from_dict(payload) == spec
+    payload["schema_version"] = version
+    with pytest.raises(FoundationIntegrityError, match="schema_version"):
+        FoundationModelSpec.from_dict(payload)

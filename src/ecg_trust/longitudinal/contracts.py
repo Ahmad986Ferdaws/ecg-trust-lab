@@ -271,7 +271,8 @@ class TimelineConfig:
             "config_sha256",
         }
         _exact_keys(payload, expected, "timeline config")
-        if payload["schema_version"] != TIMELINE_CONFIG_SCHEMA_VERSION:
+        version = payload["schema_version"]
+        if type(version) is not int or version != TIMELINE_CONFIG_SCHEMA_VERSION:
             raise LongitudinalIntegrityError("unsupported timeline config schema_version")
         if payload["artifact_type"] != TIMELINE_CONFIG_ARTIFACT_TYPE:
             raise LongitudinalIntegrityError("invalid timeline config artifact_type")

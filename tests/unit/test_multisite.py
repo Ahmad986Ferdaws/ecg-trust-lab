@@ -552,3 +552,32 @@ def test_ontology_is_bound_to_exact_manifest_hash() -> None:
 
     with pytest.raises(MultisiteIntegrityError, match="different manifest"):
         ReviewedSharedOntology.from_dict(ontology.to_dict(), manifest=second_manifest)
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1", None, 2])
+def test_manifest_requires_integer_schema_version(version: object) -> None:
+    manifest = _three_source_manifest()
+    payload = manifest.to_dict()
+    assert MultisiteManifest.from_dict(payload) == manifest
+    payload["schema_version"] = version
+    with pytest.raises(MultisiteIntegrityError, match="schema_version"):
+        MultisiteManifest.from_dict(payload)
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1", None, 2])
+def test_ontology_requires_integer_schema_version(version: object) -> None:
+    record = _record(codes=(NORMAL,))
+    manifest = build_multisite_manifest([record])
+    ontology = build_reviewed_shared_ontology(
+        manifest, ontology_name="synthetic", ontology_version="1",
+        shared_labels=("NORM",),
+        decisions=[_reviewed_decision(
+            dataset=record.source_dataset, version=record.source_version,
+            code=NORMAL, label="NORM",
+        )],
+    )
+    payload = ontology.to_dict()
+    assert ReviewedSharedOntology.from_dict(payload, manifest=manifest) == ontology
+    payload["schema_version"] = version
+    with pytest.raises(MultisiteIntegrityError, match="schema_version"):
+        ReviewedSharedOntology.from_dict(payload, manifest=manifest)
