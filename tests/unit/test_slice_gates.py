@@ -147,3 +147,14 @@ def test_malformed_inputs_are_rejected(
 def test_observation_validation(group: str, count: int, value: float) -> None:
     with pytest.raises(SliceGateError):
         SliceObservation(group, count, value)
+
+
+@pytest.mark.parametrize("higher_is_better", [True, False])
+@pytest.mark.parametrize("candidate_value", [-1e308, 1e308])
+def test_unrepresentable_differences_are_refused(higher_is_better, candidate_value):
+    with pytest.raises(SliceGateError, match="finite"):
+        evaluate_slice_gate(
+            _obs(("group", 100, -candidate_value)),
+            _obs(("group", 100, candidate_value)),
+            higher_is_better=higher_is_better,
+        )
