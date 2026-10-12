@@ -13,7 +13,7 @@ from ecg_trust.constants import SUPERCLASSES
 from ecg_trust.contracts import TrustDecision
 from ecg_trust.quality.signal_quality import SignalMetadata
 from ecg_trust.sentinel_engine import SentinelCaseResult
-from ecg_trust.service.sentinel_service import (
+from ecg_trust.service.domain import (
     AnalysisOutcome,
     ReasonCode,
     ResolvedCase,

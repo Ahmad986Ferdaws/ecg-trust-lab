@@ -13,7 +13,7 @@ from ecg_trust.registry import (
     VerifiedTrustBundle,
     load_and_verify_trust_bundle,
 )
-from ecg_trust.service.sentinel_service import (
+from ecg_trust.service.domain import (
     DependencyUnavailableError,
     ResourceNotFoundError,
     VerifiedRelease,
