@@ -6,8 +6,9 @@ import hashlib
 import json
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import suppress
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -37,9 +38,31 @@ class AuditArtifactIntegrityError(AuditArtifactError):
     """Raised when a stored audit artifact fails integrity verification."""
 
 
+class _MetadataSnapshot(Mapping[str, object]):
+    """Return detached JSON values while retaining one verified metadata snapshot.
+
+    Nested dict/list values keep ordinary JSON equality and serialization
+    semantics. Editing a retrieved value never changes the stored snapshot.
+    """
+
+    __slots__ = ("_values",)
+
+    def __init__(self, values: Mapping[str, object]) -> None:
+        self._values = MappingProxyType(deepcopy(dict(values)))
+
+    def __getitem__(self, key: str) -> object:
+        return deepcopy(self._values[key])
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+
 @dataclass(frozen=True, slots=True)
 class AuditArrayArtifact:
-    """Verified immutable arrays and metadata."""
+    """Verified arrays and metadata; the loader seals their in-memory snapshots."""
 
     npz_path: Path
     json_path: Path
@@ -184,7 +207,7 @@ def load_audit_array_artifact(
         artifact_sha256=stored_artifact_sha256,
         npz_sha256=npz_sha256,
         arrays=MappingProxyType(arrays),
-        metadata=MappingProxyType(metadata),
+        metadata=_MetadataSnapshot(metadata),
     )
 
 
@@ -216,10 +239,13 @@ def _validated_arrays(
             raise AuditArtifactError(f"array {name!r} must be non-empty")
         if array.dtype.kind == "f" and not np.all(np.isfinite(array)):
             raise AuditArtifactError(f"array {name!r} must contain only finite values")
-        immutable = np.array(array, copy=True)
-        immutable.setflags(write=False)
-        result[name] = cast(NDArray[np.generic], immutable)
+        result[name] = _immutable_array(array)
     return result
+
+
+def _immutable_array(array: NDArray[np.generic]) -> NDArray[np.generic]:
+    # Bytes backing prevents re-enabling writes on either the array or its base.
+    return np.frombuffer(array.tobytes(), dtype=array.dtype).reshape(array.shape)
 
 
 def _finite_json_mapping(value: Mapping[str, object], context: str) -> dict[str, object]:
@@ -331,9 +357,7 @@ def _load_npz(
                     array.dtype.kind == "f" and not np.all(np.isfinite(array))
                 ):
                     raise AuditArtifactIntegrityError("audit array content is invalid")
-                immutable = np.array(array, copy=True)
-                immutable.setflags(write=False)
-                result[name] = cast(NDArray[np.generic], immutable)
+                result[name] = _immutable_array(array)
     except AuditArtifactIntegrityError:
         raise
     except (OSError, ValueError, KeyError) as error:
