@@ -83,6 +83,15 @@ finite losses and gradients. It refuses to silently pass on CPU. The JSON
 output must end with `"status": "PASS"`; archive that output with the run
 record.
 
+For setup diagnostics, `ecg-verify --help` shows usage without probing devices
+or starting the smoke test. `ecg-verify --environment-only` prints runtime and
+device information without allocating the smoke model or running training. Its
+successful output is `"status": "INFORMATIONAL"`, including on CPU; it does not
+satisfy the CUDA verification gate above. Device probing may still initialize
+the CUDA runtime. A probe failure returns a JSON `FAIL` report and exit code 1;
+unknown command options exit with code 2 before device probing. Run these
+commands in the already configured environment; they install no dependencies.
+
 Do not replace the locked CUDA build with a generic CPU-only PyTorch package.
 The training runners use deterministic algorithms, disable cuDNN benchmarking,
 and seed Python, NumPy, PyTorch, CUDA, DataLoader workers, and the loader

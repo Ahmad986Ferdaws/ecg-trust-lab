@@ -18,7 +18,7 @@ def test_cuda_device_probe_failure_is_reported_as_json(
 
     monkeypatch.setattr(system_check, "_device_report", failed_probe)
     with pytest.raises(SystemExit) as error:
-        system_check.main()
+        system_check.main([])
     assert error.value.code == 1
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "FAIL"
@@ -30,7 +30,7 @@ def test_unavailable_cuda_still_fails_instead_of_using_cpu(
 ) -> None:
     monkeypatch.setattr(system_check.torch.cuda, "is_available", lambda: False)
     with pytest.raises(SystemExit) as error:
-        system_check.main()
+        system_check.main([])
     assert error.value.code == 1
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "FAIL"
@@ -134,3 +134,94 @@ def test_smoke_loop_selects_scaling_and_checks_each_step_on_cpu(
     assert len(checked_steps) == report["steps"] == 3
     assert report["gradient_scaling"] is not bf16
     assert report["gradients_finite"] is True
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_environment_only_never_invokes_training_and_never_claims_pass(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], available: bool
+) -> None:
+    environment = {"cuda_available": available, "python": "3.12.test", "torch": "test"}
+    monkeypatch.setattr(system_check, "_device_report", lambda: environment)
+
+    def forbidden_training() -> None:
+        pytest.fail("environment-only diagnostics must not run the training smoke test")
+
+    monkeypatch.setattr(system_check, "_training_smoke_test", forbidden_training)
+    system_check.main(["--environment-only"])
+    report = json.loads(capsys.readouterr().out)
+    assert report["environment"] == environment
+    assert report["scope"] == "environment_only"
+    assert report["status"] == "INFORMATIONAL"
+    assert report["training_smoke_test_performed"] is False
+    assert "training_smoke_test" not in report
+    assert "does not satisfy" in report["notice"]
+
+
+def test_default_command_preserves_training_success_report(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = []
+
+    def train() -> dict[str, object]:
+        calls.append("training")
+        return {"steps": 3, "gradients_finite": True}
+
+    monkeypatch.setattr(system_check, "_device_report", lambda: {"cuda_available": True})
+    monkeypatch.setattr(system_check, "_training_smoke_test", train)
+    system_check.main([])
+    assert calls == ["training"]
+    assert json.loads(capsys.readouterr().out) == {
+        "environment": {"cuda_available": True},
+        "training_smoke_test": {"steps": 3, "gradients_finite": True},
+        "status": "PASS",
+    }
+
+
+@pytest.mark.parametrize("args,exit_code", [(["--help"], 0), (["--unknown-option"], 2)])
+def test_argument_handling_does_not_probe_or_train(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    args: list[str],
+    exit_code: int,
+) -> None:
+    def forbidden_probe() -> None:
+        pytest.fail("argument handling must happen before device probing")
+
+    monkeypatch.setattr(system_check, "_device_report", forbidden_probe)
+    monkeypatch.setattr(system_check, "_training_smoke_test", forbidden_probe)
+    with pytest.raises(SystemExit) as error:
+        system_check.main(args)
+    assert error.value.code == exit_code
+    captured = capsys.readouterr()
+    if exit_code == 0:
+        assert "--environment-only" in captured.out
+        assert captured.err == ""
+    else:
+        assert captured.out == ""
+        assert "unrecognized arguments" in captured.err
+
+
+def test_environment_probe_failure_retains_diagnostic_scope(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def failed_probe() -> None:
+        raise RuntimeError("synthetic probe failure")
+
+    monkeypatch.setattr(system_check, "_device_report", failed_probe)
+    with pytest.raises(SystemExit) as error:
+        system_check.main(["--environment-only"])
+    assert error.value.code == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "FAIL"
+    assert report["scope"] == "environment_only"
+    assert report["training_smoke_test_performed"] is False
+    assert "synthetic probe failure" in report["error"]
+
+
+def test_main_reads_command_line_arguments_when_not_supplied(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(system_check.sys, "argv", ["ecg-verify", "--environment-only"])
+    monkeypatch.setattr(system_check, "_device_report", lambda: {"cuda_available": False})
+    system_check.main()
+    assert json.loads(capsys.readouterr().out)["status"] == "INFORMATIONAL"
