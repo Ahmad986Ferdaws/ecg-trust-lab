@@ -90,6 +90,9 @@ research scaffolds for foundation representations, counterfactual review,
 longitudinal studies, and human-factors studies. These modules are tested
 research infrastructure, not completed clinical studies or claims of benefit.
 
+The [audit maintenance guide](AUDIT_LEDGER_MAINTENANCE.md) describes the record
+format and storage boundary, compatibility checks and existing limits.
+
 The `conformal` package also provides an opt-in
 `ClassConditionalLabelwiseConformal` artifact. It calibrates each label's
 positive and negative outcomes separately under miss budgets that the caller
