@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, cast
@@ -18,6 +19,11 @@ from ecg_trust.stress import (
     StressScenario,
     apply_stress_scenario,
 )
+from ecg_trust.trust_policy import PUBLIC_CONFIDENCE_ABSTENTION_REASON, TrustReasonCode
+
+_PUBLIC_REASONS = frozenset(
+    reason.value for reason in TrustReasonCode if reason is not TrustReasonCode.LABEL_SET_INCOHERENT
+) | {PUBLIC_CONFIDENCE_ABSTENTION_REASON}
 
 
 class FailureLabError(RuntimeError):
@@ -47,11 +53,38 @@ class FailureLabDecision:
     probabilities: tuple[float, ...] | None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.decision, TrustDecision):
+            raise FailureLabError("decision must use the closed trust-decision vocabulary")
+        if (
+            not isinstance(self.reason_codes, (tuple, list))
+            or not 1 <= len(self.reason_codes) <= len(_PUBLIC_REASONS)
+        ):
+            raise FailureLabError("reason codes must be a non-empty bounded tuple or list")
+        reasons = tuple(self.reason_codes)
+        if any(not isinstance(reason, str) or reason not in _PUBLIC_REASONS for reason in reasons):
+            raise FailureLabError("reason codes must use the public trust vocabulary")
+        if len(set(reasons)) != len(reasons):
+            raise FailureLabError("reason codes must be unique")
+        object.__setattr__(self, "reason_codes", reasons)
         exposed = self.decision is TrustDecision.PREDICTION_ALLOWED
         if exposed != (self.probabilities is not None):
             raise FailureLabError("probabilities must follow the trust disclosure decision")
-        if self.probabilities is not None and len(self.probabilities) != len(SUPERCLASSES):
-            raise FailureLabError("an allowed Failure Lab result requires five probabilities")
+        if self.probabilities is not None:
+            if not isinstance(self.probabilities, (tuple, list)) or len(self.probabilities) != len(
+                SUPERCLASSES
+            ):
+                raise FailureLabError("an allowed Failure Lab result requires five probabilities")
+            probabilities = tuple(self.probabilities)
+            if any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not 0 <= value <= 1
+                for value in probabilities
+            ):
+                raise FailureLabError("probabilities must be finite real numbers in [0, 1]")
+            object.__setattr__(
+                self, "probabilities", tuple(float(value) for value in probabilities)
+            )
 
     @classmethod
     def from_case_result(cls, result: SentinelCaseResult) -> FailureLabDecision:
@@ -86,6 +119,10 @@ class FailureLabTrial:
     def __post_init__(self) -> None:
         if not isinstance(self.source_kind, SignalSourceKind):
             raise FailureLabError("source_kind must use the closed signal-source vocabulary")
+        if not isinstance(self.baseline, FailureLabDecision) or not isinstance(
+            self.stressed, FailureLabDecision
+        ):
+            raise FailureLabError("trial decisions must be validated FailureLabDecision values")
         both_exposed = (
             self.baseline.probabilities is not None and self.stressed.probabilities is not None
         )
@@ -93,6 +130,30 @@ class FailureLabTrial:
             raise FailureLabError(
                 "probability deltas require prediction permission on both waveforms"
             )
+        if self.probability_delta is not None:
+            if not isinstance(self.probability_delta, (tuple, list)) or len(
+                self.probability_delta
+            ) != len(SUPERCLASSES):
+                raise FailureLabError("probability deltas must contain five values")
+            delta = tuple(self.probability_delta)
+            if any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not -1 <= value <= 1
+                for value in delta
+            ):
+                raise FailureLabError("probability deltas must be finite real numbers in [-1, 1]")
+            baseline = cast(tuple[float, ...], self.baseline.probabilities)
+            stressed = cast(tuple[float, ...], self.stressed.probabilities)
+            expected = tuple(
+                after - before for before, after in zip(baseline, stressed, strict=True)
+            )
+            if any(
+                not math.isclose(value, actual, rel_tol=1e-12, abs_tol=1e-12)
+                for value, actual in zip(delta, expected, strict=True)
+            ):
+                raise FailureLabError("probability deltas do not match the two decisions")
+            object.__setattr__(self, "probability_delta", tuple(float(value) for value in delta))
         if self.scenario.scenario_sha256 != self.provenance.scenario_sha256:
             raise FailureLabError("scenario and applied provenance do not match")
 

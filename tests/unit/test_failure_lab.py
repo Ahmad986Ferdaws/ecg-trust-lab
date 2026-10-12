@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import cast
 
@@ -211,3 +211,27 @@ def test_non_synthetic_trial_cannot_cross_the_public_boundary(
 
     with pytest.raises(FailureLabError, match="only synthetic"):
         trial.to_public_dict()
+
+
+def _allowed_trial():
+    return _run(
+        FakeAnalyzer([
+            _result(TrustDecision.PREDICTION_ALLOWED, (0.5,) * 5),
+            _result(TrustDecision.PREDICTION_ALLOWED, (0.75,) * 5),
+        ])
+    )
+
+
+def test_trial_snapshots_deltas_and_checks_them_against_decisions() -> None:
+    delta = [0.25] * 5
+    trial = replace(_allowed_trial(), probability_delta=delta)
+    delta[0] = -0.5
+    assert trial.to_public_dict()["probability_delta"]["NORM"] == 0.25
+    with pytest.raises(FailureLabError, match="do not match"):
+        replace(trial, probability_delta=(0.5,) * 5)
+
+
+@pytest.mark.parametrize("delta", [(0.25,), (True,) * 5, (float("nan"),) * 5, "0.25"])
+def test_trial_refuses_malformed_delta(delta: object) -> None:
+    with pytest.raises(FailureLabError, match="deltas"):
+        replace(_allowed_trial(), probability_delta=delta)
