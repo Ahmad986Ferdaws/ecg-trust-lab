@@ -30,6 +30,7 @@ from numpy.typing import NDArray
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
+from ecg_trust._config_loading import load_yaml_unique_keys
 from ecg_trust.audit_artifacts import (
     AuditArrayFiles,
     load_audit_array_artifact,
@@ -291,7 +292,7 @@ def load_sph_transport_spec(path: str | Path = SPH_TRANSPORT_CONFIG) -> SPHTrans
 
     source = Path(path).resolve()
     try:
-        decoded: object = yaml.safe_load(source.read_text(encoding="utf-8"))
+        decoded: object = load_yaml_unique_keys(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError) as error:
         raise SPHTransportIntegrityError(f"could not load frozen SPH protocol: {error}") from error
     payload = _mapping(decoded, "frozen SPH protocol")
@@ -2304,7 +2305,9 @@ def _validate_supersession_contract(payload: Mapping[str, object], project_root:
     ):
         raise SPHTransportIntegrityError("superseded v1 protocol file identity differs")
     try:
-        predecessor_decoded: object = yaml.safe_load(predecessor_path.read_text(encoding="utf-8"))
+        predecessor_decoded: object = load_yaml_unique_keys(
+            predecessor_path.read_text(encoding="utf-8")
+        )
     except (OSError, UnicodeError, yaml.YAMLError) as error:
         raise SPHTransportIntegrityError(
             f"could not load superseded v1 protocol: {error}"

@@ -317,6 +317,10 @@ drift also raises an error.
 
 ## 8. Training flow
 
+Configuration mappings must have unique explicit keys; see the
+[configuration input rules](CONFIGURATION_INPUTS.md). Parsing does not silently
+choose between repeated training controls.
+
 ### 8.1 Smoke training
 
 ```powershell

@@ -19,6 +19,7 @@ from typing import Self, cast
 
 import yaml  # type: ignore[import-untyped]
 
+from ecg_trust._config_loading import load_yaml_unique_keys
 from ecg_trust.constants import PTBXL_VERSION, SUPERCLASSES
 
 PROTOCOL_SCHEMA_VERSION = 1
@@ -478,7 +479,7 @@ def load_protocol(path: str | Path = DEFAULT_PROTOCOL_PATH) -> ExperimentProtoco
             f"could not read protocol file {protocol_path}: {exc}"
         ) from exc
     try:
-        raw: object = yaml.safe_load(serialized)
+        raw: object = load_yaml_unique_keys(serialized)
     except yaml.YAMLError as exc:
         raise ProtocolValidationError(f"invalid protocol YAML in {protocol_path}: {exc}") from exc
     return ExperimentProtocol.from_mapping(_expect_mapping(raw, str(protocol_path)))
