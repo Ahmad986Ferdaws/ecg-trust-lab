@@ -46,6 +46,16 @@ def test_cli_renders_both_formats(output_format: str, capsys: pytest.CaptureFixt
         payload = json.loads(output)
         assert payload["presets"] == ["v1", "v2"]
         assert len(payload["cases"]) == len(report.CASES)
+        assert payload["cases"] == report.evaluate()
+        assert payload["preset_versions"] == {
+            name: config.version for name, config in report.PRESETS.items()
+        }
+        assert "Synthetic" in payload["notice"]
+        assert "no patient data or model inference" in payload["notice"]
     else:
-        assert output.startswith("| Case | Should refuse | v1 | v2 |")
+        assert output.startswith("# Synthetic quality-gate stress report")
+        assert "no patient data or model inference" in output
+        assert "| Case | Should refuse | v1 | v2 |" in output
+        for config in report.PRESETS.values():
+            assert config.version in output
         assert output.count("(fail-open)") == 5

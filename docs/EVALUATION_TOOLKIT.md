@@ -47,3 +47,9 @@ tool on held-out data needs its own protocol; see
 |---|---|---|
 | `gate_power.plan_gate`, `scripts/plan_gate.py` | How likely is a preregistered proportion gate to pass if the system works as designed? | Binomial or split-conformal (beta-binomial) count approximation; see the [source-support note](TRUST_SENTINEL_OOD_COMPLETION_GATE_POWER_NOTE.md). |
 | `SENTINEL_V2_SIGNAL_QUALITY_CONFIG`, `scripts/quality_gate_stress_report.py` | Which acquisition faults does each quality preset refuse? | v2 adds the flat-run and duplicated-waveform checks; v1 stays frozen. |
+
+The stress command's JSON and Markdown exports identify the synthetic source,
+research limits and full preset versions so they remain interpretable when
+shared separately from this guide. JSON schema version 1 retains `presets` and
+`cases` and adds report metadata. A report is a demonstration on constructed
+faults, not a population-performance estimate or release promotion.
