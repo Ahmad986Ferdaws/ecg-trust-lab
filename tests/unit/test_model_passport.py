@@ -583,7 +583,8 @@ def test_rendered_code_identifiers_preserve_literal_underscores() -> None:
     from ecg_trust.passport import canonical_sha256
 
     body = json.loads(
-        _passport().model_dump_json(exclude={"passport_sha256"})
+        _passport()
+        .model_dump_json(exclude={"passport_sha256"})
         .replace("passport-release-001", "passport_release_001")
         .replace("ptbxl-fold10", "ptbxl_fold10")
     )
@@ -621,3 +622,47 @@ def test_rendered_free_text_preserves_entities_and_markup_as_literal_text() -> N
     assert literal in "".join(collector.parts)
     assert "custom-tag" not in collector.tags
     assert model_passport_to_json_bytes(passport) == before
+
+
+@pytest.mark.parametrize("exporter", [model_passport_to_json_bytes, render_model_passport_markdown])
+@pytest.mark.parametrize("fault", ["identity", "nested_metric", "clinical_claim", "private_text"])
+def test_public_exports_revalidate_copied_passports(exporter, fault: str) -> None:
+    passport = _passport()
+    if fault == "identity":
+        modified = passport.model_copy(update={"release_id": "changed-without-resealing"})
+    elif fault == "nested_metric":
+        metric = passport.macro_performance.discrimination.model_copy(update={"value": 0.999})
+        performance = passport.macro_performance.model_copy(update={"discrimination": metric})
+        modified = passport.model_copy(update={"macro_performance": performance})
+    elif fault == "clinical_claim":
+        # Even a matching self-hash cannot make an unsupported clinical flag valid.
+        import hashlib
+
+        modified = passport.model_copy(update={"clinical_use_permitted": True})
+        body = modified.model_dump(mode="json", exclude={"passport_sha256"})
+        digest = hashlib.sha256(
+            json.dumps(body, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        modified = modified.model_copy(update={"passport_sha256": "sha256:" + digest})
+    else:
+        modified = passport.model_copy(update={"limitations": ("/private/synthetic-person/file",)})
+    with pytest.raises((ModelPassportIntegrityError, ModelPassportPrivacyError)):
+        exporter(modified)
+
+
+def test_serialized_passport_obeys_the_reader_byte_limit(monkeypatch) -> None:
+    from ecg_trust.passport import models
+
+    passport = _passport()
+    canonical_size = len(model_passport_to_json_bytes(passport))
+    monkeypatch.setattr(models, "MAX_CANONICAL_PASSPORT_BYTES", canonical_size)
+    assert len(model_passport_to_json_bytes(passport)) == canonical_size
+    monkeypatch.setattr(models, "MAX_CANONICAL_PASSPORT_BYTES", canonical_size - 1)
+    with pytest.raises(ModelPassportIntegrityError, match="size"):
+        model_passport_to_json_bytes(passport)
+
+
+@pytest.mark.parametrize("exporter", [model_passport_to_json_bytes, render_model_passport_markdown])
+def test_exporters_refuse_values_outside_the_passport_contract(exporter) -> None:
+    with pytest.raises(ModelPassportIntegrityError, match="ModelPassport instance"):
+        exporter(None)

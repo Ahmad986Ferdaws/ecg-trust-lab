@@ -7,12 +7,14 @@ from ecg_trust.passport.models import (
     EvidenceStatus,
     EvidenceSummaryBase,
     ModelPassport,
+    _revalidate_model_passport_content,
 )
 
 
 def render_model_passport_markdown(passport: ModelPassport) -> str:
-    """Render a stable, escaped research passport without row-level material."""
+    """Revalidate and render a stable, escaped research passport."""
 
+    passport = _revalidate_model_passport_content(passport)
     lines = [
         f"# Model Passport: {_escape(passport.release_id)}",
         "",
