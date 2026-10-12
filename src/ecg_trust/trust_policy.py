@@ -30,6 +30,19 @@ class TrustPolicyValidationError(ValueError):
     """Raised when policy inputs violate the frozen decision contract."""
 
 
+def _snapshot[T](values: tuple[T, ...], name: str) -> tuple[T, ...]:
+    if not isinstance(values, (tuple, list)):
+        raise TrustPolicyValidationError(f"{name} must be a tuple or list")
+    return tuple(values)
+
+
+def _validate_text_codes(values: tuple[str, ...], name: str) -> None:
+    if any(not isinstance(value, str) or not value.strip() for value in values):
+        raise TrustPolicyValidationError(f"{name} must contain non-empty strings")
+    if len(set(values)) != len(values):
+        raise TrustPolicyValidationError(f"{name} must be unique")
+
+
 class TrustReasonCode(StrEnum):
     """Stable, user-explainable reasons emitted by the trust router."""
 
@@ -107,6 +120,15 @@ class TrustPolicyInputs:
     conformal_decisions: tuple[BinaryDecision, ...] | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "distribution_reason_codes",
+            _snapshot(self.distribution_reason_codes, "distribution_reason_codes"),
+        )
+        if self.conformal_decisions is not None:
+            object.__setattr__(
+                self, "conformal_decisions",
+                _snapshot(self.conformal_decisions, "conformal_decisions"),
+            )
         for name in ("release_integrity_verified", "input_contract_valid"):
             if not isinstance(getattr(self, name), bool):
                 raise TrustPolicyValidationError(f"{name} must be boolean")
@@ -119,10 +141,7 @@ class TrustPolicyInputs:
                 raise TrustPolicyValidationError("quality_report must be a SignalQualityReport")
             if not isinstance(self.quality_report.status, QualityStatus):
                 raise TrustPolicyValidationError("quality status must use QualityStatus")
-        if len(set(self.distribution_reason_codes)) != len(self.distribution_reason_codes):
-            raise TrustPolicyValidationError("distribution reason codes must be unique")
-        if any(not value.strip() for value in self.distribution_reason_codes):
-            raise TrustPolicyValidationError("distribution reason codes must be non-empty")
+        _validate_text_codes(self.distribution_reason_codes, "distribution reason codes")
         if self.conformal_decisions is not None and len(self.conformal_decisions) != len(
             SUPERCLASSES
         ):
@@ -155,14 +174,22 @@ class TrustPolicyResult:
     label_coherence_required: bool = False
 
     def __post_init__(self) -> None:
-        if not self.policy_version.strip():
+        if not isinstance(self.policy_version, str) or not self.policy_version.strip():
             raise TrustPolicyValidationError("policy_version must be non-empty")
+        if not isinstance(self.decision, TrustDecision):
+            raise TrustPolicyValidationError("decision must use TrustDecision")
+        for name in (
+            "reason_codes", "quality_reason_codes", "distribution_reason_codes",
+            "uncertain_labels", "incoherent_labels",
+        ):
+            object.__setattr__(self, name, _snapshot(getattr(self, name), name))
+        if any(not isinstance(reason, TrustReasonCode) for reason in self.reason_codes):
+            raise TrustPolicyValidationError("reason_codes must use TrustReasonCode")
         if not self.reason_codes or len(set(self.reason_codes)) != len(self.reason_codes):
             raise TrustPolicyValidationError("reason_codes must be non-empty and unique")
-        if len(set(self.quality_reason_codes)) != len(self.quality_reason_codes):
-            raise TrustPolicyValidationError("quality_reason_codes must be unique")
-        if len(set(self.distribution_reason_codes)) != len(self.distribution_reason_codes):
-            raise TrustPolicyValidationError("distribution_reason_codes must be unique")
+        _validate_text_codes(self.quality_reason_codes, "quality_reason_codes")
+        _validate_text_codes(self.distribution_reason_codes, "distribution_reason_codes")
+        _validate_text_codes(self.uncertain_labels, "uncertain_labels")
         if any(label not in SUPERCLASSES for label in self.uncertain_labels):
             raise TrustPolicyValidationError("uncertain_labels must use canonical labels")
         if any(label not in SUPERCLASSES for label in self.incoherent_labels) or len(
@@ -368,7 +395,7 @@ def evaluate_trust_policy(
         )
 
     if config.require_label_coherence:
-        # Inputs validate each decision's type and count, not the container type.
+        # Evaluate only the validated immutable decisions retained by the inputs.
         incoherent = find_incoherent_labels(tuple(decisions))
         if incoherent:
             return _result(
