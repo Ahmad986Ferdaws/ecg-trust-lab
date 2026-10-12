@@ -470,6 +470,9 @@ from fresh weights, and performs no validation or early stopping.
 
 ## 9. Export immutable fold predictions
 
+For destination requirements, concurrent writers and incomplete-pair recovery,
+see the [artifact storage contract](ARTIFACT_STORAGE.md).
+
 `scripts/predict.py` validates the completed run metadata, resolved-config
 wrapper and hash, checkpoint schema/config/protocol/manifest lineage,
 normalization file hash and folds-1-7 provenance, exact model metadata/state,

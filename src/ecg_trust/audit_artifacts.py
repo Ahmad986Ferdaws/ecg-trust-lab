@@ -16,6 +16,8 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from ecg_trust._artifact_storage import publish_new_pair
+
 AUDIT_ARRAY_SCHEMA_VERSION = 1
 _ROOT_KEYS = {
     "schema_version",
@@ -77,24 +79,28 @@ def save_audit_array_artifact(
     arrays: Mapping[str, NDArray[np.generic]],
     metadata: Mapping[str, object],
 ) -> AuditArrayFiles:
-    """Atomically save a new self-hashed NPZ/JSON pair without overwriting."""
+    """Publish a new self-hashed NPZ/JSON pair without replacing existing files."""
 
-    npz_path, json_path = _paths(path)
+    npz_path, json_path = _paths(path, for_save=True)
     kind = _artifact_type(artifact_type)
     validated_arrays = _validated_arrays(arrays)
     normalized_metadata = _finite_json_mapping(metadata, "metadata")
     npz_path.parent.mkdir(parents=True, exist_ok=True)
-    existing = [candidate for candidate in (npz_path, json_path) if candidate.exists()]
+    existing = [
+        candidate for candidate in (npz_path, json_path)
+        if candidate.exists() or candidate.is_symlink()
+    ]
     if existing:
         raise FileExistsError(
             "audit artifact is immutable; refusing to overwrite "
             + ", ".join(str(candidate) for candidate in existing)
         )
 
-    npz_temp = _temporary_path(npz_path)
-    json_temp = _temporary_path(json_path)
-    npz_committed = False
+    npz_temp = None
+    json_temp = None
     try:
+        npz_temp = _temporary_path(npz_path)
+        json_temp = _temporary_path(json_path)
         _write_npz(npz_temp, validated_arrays)
         npz_sha256 = _sha256_file(npz_temp)
         body: dict[str, object] = {
@@ -112,15 +118,12 @@ def save_audit_array_artifact(
         artifact_sha256 = _canonical_sha256(body)
         sidecar = {**body, "artifact_sha256": artifact_sha256}
         _write_json(json_temp, sidecar)
-        os.replace(npz_temp, npz_path)
-        npz_committed = True
-        os.replace(json_temp, json_path)
-    except Exception:
-        _unlink(npz_temp)
-        _unlink(json_temp)
-        if npz_committed and not json_path.exists():
-            _unlink(npz_path)
-        raise
+        publish_new_pair(npz_temp, npz_path, json_temp, json_path)
+    finally:
+        if npz_temp is not None:
+            _unlink(npz_temp)
+        if json_temp is not None:
+            _unlink(json_temp)
     return AuditArrayFiles(
         npz_path=npz_path,
         json_path=json_path,
@@ -188,9 +191,14 @@ def load_audit_array_artifact(
     )
 
 
-def _paths(path: str | Path) -> tuple[Path, Path]:
+def _paths(path: str | Path, *, for_save: bool = False) -> tuple[Path, Path]:
     source = Path(path)
     npz_path = source if source.suffix.casefold() == ".npz" else source.with_suffix(".npz")
+    if for_save:
+        # Resolve the parent but preserve the final names so a dangling symlink
+        # is treated as an occupied destination, never as a new target to write.
+        npz_path = npz_path.parent.resolve() / npz_path.name
+        return npz_path, npz_path.with_suffix(".json")
     return npz_path.resolve(), npz_path.with_suffix(".json").resolve()
 
 

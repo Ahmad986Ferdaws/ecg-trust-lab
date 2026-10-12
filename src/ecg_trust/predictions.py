@@ -3,8 +3,9 @@
 Prediction arrays are stored in a non-pickled NPZ archive and provenance is
 stored in a canonical JSON sidecar. The sidecar binds itself to the archive
 with SHA-256, while an artifact hash covers both the archive digest and all
-metadata. Files are committed with same-directory atomic replacements and an
-existing artifact pair is never overwritten.
+metadata. Each complete file is published with an atomic no-replace link.
+An interrupted pair remains invalid until both files verify; existing evidence
+is never overwritten by a competing producer using this API.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from ecg_trust import __version__
+from ecg_trust._artifact_storage import publish_new_pair
 from ecg_trust.protocol import (
     LABEL_ORDER,
     ExperimentProtocol,
@@ -354,20 +356,24 @@ def save_prediction_artifact(
     protocol: ExperimentProtocol,
     test_access: FinalTestAccessToken | None = None,
 ) -> PredictionArtifactFiles:
-    """Atomically save a new NPZ/JSON pair without overwriting existing files."""
+    """Publish a new NPZ/JSON pair without replacing existing files."""
 
     _validate_artifact_for_protocol(artifact, protocol, test_access=test_access)
     npz_path, json_path = _resolve_artifact_paths(path, for_save=True)
     npz_path.parent.mkdir(parents=True, exist_ok=True)
-    existing = [candidate for candidate in (npz_path, json_path) if candidate.exists()]
+    existing = [
+        candidate for candidate in (npz_path, json_path)
+        if candidate.exists() or candidate.is_symlink()
+    ]
     if existing:
         names = ", ".join(str(candidate) for candidate in existing)
         raise FileExistsError(f"prediction artifact is immutable; refusing to overwrite {names}")
 
-    npz_temp = _temporary_path(npz_path)
-    json_temp = _temporary_path(json_path)
-    npz_committed = False
+    npz_temp = None
+    json_temp = None
     try:
+        npz_temp = _temporary_path(npz_path)
+        json_temp = _temporary_path(json_path)
         _write_npz(npz_temp, artifact._array_dict())
         npz_digest = _sha256_file(npz_temp)
         npz_size = npz_temp.stat().st_size
@@ -381,15 +387,12 @@ def save_prediction_artifact(
         metadata["artifact_sha256"] = artifact_digest
         _write_json(json_temp, metadata)
 
-        os.replace(npz_temp, npz_path)
-        npz_committed = True
-        os.replace(json_temp, json_path)
-    except Exception:
-        _unlink_if_present(npz_temp)
-        _unlink_if_present(json_temp)
-        if npz_committed and not json_path.exists():
-            _unlink_if_present(npz_path)
-        raise
+        publish_new_pair(npz_temp, npz_path, json_temp, json_path)
+    finally:
+        if npz_temp is not None:
+            _unlink_if_present(npz_temp)
+        if json_temp is not None:
+            _unlink_if_present(json_temp)
 
     return PredictionArtifactFiles(
         npz_path=npz_path,
