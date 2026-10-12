@@ -29,3 +29,6 @@ inside one application process; it does not limit the ASGI server's connection
 queue, duplicate waiters, or the combined capacity of multiple worker processes.
 Choose the limit for the actual model's memory and runtime requirements. No
 clinical behavior, trust thresholds, or scientific artifact formats change.
+
+The separate [request-body limit](SENTINEL_REQUEST_LIMITS.md) bounds incoming
+content before parsing and before an analysis slot is acquired.
