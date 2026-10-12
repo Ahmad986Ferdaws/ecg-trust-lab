@@ -160,7 +160,8 @@ class TemporalSplitManifest:
         }
         if set(payload) != expected:
             raise LongitudinalIntegrityError("split manifest has missing or unknown fields")
-        if payload["schema_version"] != SPLIT_SCHEMA_VERSION:
+        version = payload["schema_version"]
+        if type(version) is not int or version != SPLIT_SCHEMA_VERSION:
             raise LongitudinalIntegrityError("unsupported split manifest schema_version")
         if payload["artifact_type"] != SPLIT_ARTIFACT_TYPE:
             raise LongitudinalIntegrityError("invalid split manifest artifact_type")

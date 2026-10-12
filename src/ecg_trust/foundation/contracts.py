@@ -373,7 +373,8 @@ class FoundationModelSpec:
             "spec_sha256",
         }
         expect_exact_keys(payload, expected, "foundation model spec")
-        if payload["schema_version"] != FOUNDATION_SPEC_SCHEMA_VERSION:
+        version = payload["schema_version"]
+        if type(version) is not int or version != FOUNDATION_SPEC_SCHEMA_VERSION:
             raise FoundationIntegrityError("unsupported foundation spec schema_version")
         if payload["artifact_type"] != FOUNDATION_SPEC_ARTIFACT_TYPE:
             raise FoundationIntegrityError("invalid foundation spec artifact_type")

@@ -238,7 +238,8 @@ class MultisiteManifest:
             {"schema_version", "artifact_type", "records", "manifest_sha256"},
             context="multisite manifest",
         )
-        if payload["schema_version"] != MANIFEST_SCHEMA_VERSION:
+        version = payload["schema_version"]
+        if type(version) is not int or version != MANIFEST_SCHEMA_VERSION:
             raise MultisiteIntegrityError("unsupported multisite manifest schema_version")
         if payload["artifact_type"] != MANIFEST_ARTIFACT_TYPE:
             raise MultisiteIntegrityError("unexpected multisite manifest artifact_type")
@@ -439,7 +440,8 @@ class ReviewedSharedOntology:
             },
             context="reviewed shared ontology",
         )
-        if payload["schema_version"] != ONTOLOGY_SCHEMA_VERSION:
+        version = payload["schema_version"]
+        if type(version) is not int or version != ONTOLOGY_SCHEMA_VERSION:
             raise MultisiteIntegrityError("unsupported ontology schema_version")
         if payload["artifact_type"] != ONTOLOGY_ARTIFACT_TYPE:
             raise MultisiteIntegrityError("unexpected ontology artifact_type")

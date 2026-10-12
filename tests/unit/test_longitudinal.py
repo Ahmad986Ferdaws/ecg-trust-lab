@@ -627,3 +627,23 @@ def test_public_evaluation_is_aggregate_only_and_carries_research_limits() -> No
     assert "patient_key" not in serialized
     assert "encounter_key" not in serialized
     assert "patient_token" not in serialized
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1", None, 2])
+def test_timeline_config_requires_integer_schema_version(version: object) -> None:
+    config = _config()
+    payload = config.to_dict()
+    assert TimelineConfig.from_dict(payload) == config
+    payload["schema_version"] = version
+    with pytest.raises(LongitudinalIntegrityError, match="schema_version"):
+        TimelineConfig.from_dict(payload)
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1", None, 2])
+def test_temporal_split_requires_integer_schema_version(version: object) -> None:
+    split = _build_split()
+    payload = split.to_dict()
+    assert TemporalSplitManifest.from_dict(payload) == split
+    payload["schema_version"] = version
+    with pytest.raises(LongitudinalIntegrityError, match="schema_version"):
+        TemporalSplitManifest.from_dict(payload)
