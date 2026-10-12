@@ -28,14 +28,8 @@ from ecg_trust.data.dataset import NormalizationStats, PTBXLDataset
 from ecg_trust.data.manifest import ManifestError, sha256_file, validate_relative_path
 from ecg_trust.evaluation import compute_multilabel_metrics
 from ecg_trust.experiment_config import DevelopmentExperimentConfig, ModelConfig
-from ecg_trust.models import (
-    MATCHED_CAPACITY_PRESET,
-    ECGTransformer,
-    ECGTransformerConfig,
-    ResNet1D,
-    ResNet1DConfig,
-    count_parameters,
-)
+from ecg_trust.models import MATCHED_CAPACITY_PRESET, count_parameters
+from ecg_trust.models.factory import ModelConstructionError, build_model
 from ecg_trust.protocol import ExperimentProtocol, FoldRole
 from ecg_trust.training import (
     EarlyStopping,
@@ -104,44 +98,12 @@ def _default_dataset_factory(
 
 
 def build_experiment_model(config: ModelConfig) -> nn.Module:
-    """Instantiate a smoke model or one side of the matched-capacity pair."""
+    """Compatibility entry point retaining the development runner error contract."""
 
-    if config.preset == "matched_capacity":
-        if config.architecture == "resnet1d":
-            model: nn.Module = ResNet1D(MATCHED_CAPACITY_PRESET.resnet_config)
-            expected_parameters = MATCHED_CAPACITY_PRESET.expected_resnet_parameters
-        else:
-            model = ECGTransformer(MATCHED_CAPACITY_PRESET.transformer_config)
-            expected_parameters = MATCHED_CAPACITY_PRESET.expected_transformer_parameters
-        observed_parameters = count_parameters(model)
-        if observed_parameters != expected_parameters:
-            raise DevelopmentRunnerError(
-                f"matched-capacity model drift: expected {expected_parameters}, "
-                f"observed {observed_parameters}"
-            )
-        return model
-
-    if config.architecture == "resnet1d":
-        return ResNet1D(
-            ResNet1DConfig(
-                stage_channels=(16, 32),
-                blocks_per_stage=(1, 1),
-                block_dropout=0.0,
-                classifier_dropout=0.0,
-            )
-        )
-    return ECGTransformer(
-        ECGTransformerConfig(
-            patch_size=50,
-            patch_stride=50,
-            embedding_dim=64,
-            depth=2,
-            num_heads=4,
-            mlp_ratio=2.0,
-            dropout=0.0,
-            attention_dropout=0.0,
-        )
-    )
+    try:
+        return build_model(config)
+    except ModelConstructionError as error:
+        raise DevelopmentRunnerError(str(error)) from error
 
 
 def _read_manifest(path: Path) -> pd.DataFrame:

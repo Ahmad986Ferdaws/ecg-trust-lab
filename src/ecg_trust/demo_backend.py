@@ -24,8 +24,8 @@ from ecg_trust.data.dataset import (
 )
 from ecg_trust.data.manifest import sha256_file
 from ecg_trust.experiment_config import ExperimentConfigError, ModelConfig
-from ecg_trust.experiment_runner import DevelopmentRunnerError, build_experiment_model
 from ecg_trust.models import ECGTransformer, ResNet1D, count_parameters
+from ecg_trust.models.factory import ModelConstructionError, build_model
 from ecg_trust.protocol import CALIBRATION_FOLDS, TRAIN_FOLDS, ExperimentProtocol
 from ecg_trust.training import CHECKPOINT_SCHEMA_VERSION
 
@@ -525,8 +525,8 @@ def _load_checkpoint_model(
 
     selection = _model_selection(config)
     try:
-        model = build_experiment_model(selection)
-    except DevelopmentRunnerError as error:
+        model = build_model(selection)
+    except ModelConstructionError as error:
         raise DemoArtifactError(f"could not construct supported model: {error}") from error
     _validate_model_metadata(model, config, selection)
     state_dict = _mapping(checkpoint["model_state_dict"], "checkpoint.model_state_dict")
