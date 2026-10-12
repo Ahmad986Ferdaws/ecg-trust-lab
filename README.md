@@ -48,6 +48,16 @@ it is not an OOD-validation or clinical-validation result.
 For service deployments, the [analysis capacity guide](docs/SENTINEL_ANALYSIS_CAPACITY.md)
 explains optional per-process limits and retry behavior under load.
 
+## Research collaboration and commercial evaluation
+
+The [commercial strategy](docs/COMMERCIAL_STRATEGY.md) proposes a reproducible
+ECG research evaluation toolkit and bounded evaluation service. It maps the
+current evidence, potential buyers, alternatives, unresolved rights and
+milestones for testing demand. This is a proposed direction; the repository
+does not establish paying customers, a supported hosted service or transferable
+rights to every asset. Review it alongside the research limitations below when
+considering a pilot, investment or acquisition.
+
 ## Demo walkthrough
 
 [![ECG Trust Lab demo poster](publication/media/ecg-trust-lab-demo-poster.png)](publication/media/ecg-trust-lab-research-demo.mp4)
