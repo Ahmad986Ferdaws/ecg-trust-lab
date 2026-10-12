@@ -15,6 +15,10 @@ Treat estimation on held-out data as fitting, not read-only analysis. Using any
 tool on held-out data needs its own protocol; see
 [known limitations](KNOWN_LIMITATIONS.md) for what is still open.
 
+For a first-use exercise, the [combined synthetic tour](RESEARCH_TOUR_REPORT.md)
+runs quality, abstention and gate-planning examples together and retains their
+limits, source context and environment in one Markdown or JSON report.
+
 ## Selective prediction (abstention)
 
 | Tool | Question it answers | Notes |

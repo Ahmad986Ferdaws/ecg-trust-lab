@@ -175,29 +175,30 @@ def _markdown(rows: list[dict[str, object]]) -> str:
     return "\n".join(lines)
 
 
+def build_report() -> dict[str, object]:
+    """Return the standalone synthetic report, including its interpretation limits."""
+
+    return {
+        "schema_version": 1,
+        "report_type": "ecg_trust.synthetic_quality_stress",
+        "source": "deterministic_synthetic_ecg",
+        "notice": REPORT_NOTICE,
+        "preset_versions": {name: config.version for name, config in PRESETS.items()},
+        "presets": list(PRESETS),
+        "cases": evaluate(),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     args = parser.parse_args(argv)
-    rows = evaluate()
     if args.format == "json":
         print(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "report_type": "ecg_trust.synthetic_quality_stress",
-                    "source": "deterministic_synthetic_ecg",
-                    "notice": REPORT_NOTICE,
-                    "preset_versions": {name: config.version for name, config in PRESETS.items()},
-                    "presets": list(PRESETS),
-                    "cases": rows,
-                },
-                indent=2,
-                allow_nan=False,
-            )
+            json.dumps(build_report(), indent=2, allow_nan=False)
         )
     else:
-        print(_markdown(rows))
+        print(_markdown(evaluate()))
     return 0
 
 
