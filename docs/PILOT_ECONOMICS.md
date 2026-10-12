@@ -41,3 +41,7 @@ JSON inputs with the estimate so another person can reproduce the calculation.
 Values are USD, not foreign-exchange conversions. Monetary display rounds to
 cents using Decimal's default half-even rule; break-even uses unrounded values.
 Inputs are bounded to one billion with at most four decimal places.
+
+After work starts, use the [delivery review](PILOT_DELIVERY_REVIEW.md) to compare
+this saved JSON estimate with recorded effort and costs. Preserve the original
+plan and keep incomplete support windows marked provisional.

@@ -1,0 +1,13 @@
+{
+  "schema_version": "ecg_trust.pilot_actuals.v1",
+  "basis": "synthetic_example",
+  "support_window_closed": false,
+  "fee_usd": "5000",
+  "work": [
+    {"category": "engineering", "hours": "20", "loaded_hourly_cost_usd": "100"},
+    {"category": "review", "hours": "10", "loaded_hourly_cost_usd": "120"},
+    {"category": "support", "hours": "10", "loaded_hourly_cost_usd": "100"}
+  ],
+  "compute_usd": "300",
+  "other_direct_usd": "100"
+}
