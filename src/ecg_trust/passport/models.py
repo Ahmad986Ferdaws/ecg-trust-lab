@@ -616,10 +616,7 @@ def validate_model_passport(
 ) -> ModelPassport:
     """Revalidate content and fail closed on any expected release identity mismatch."""
 
-    try:
-        validated = ModelPassport.model_validate(passport.model_dump(mode="python"))
-    except ValidationError as error:
-        raise ModelPassportIntegrityError(f"invalid model passport: {error}") from error
+    validated = _revalidate_model_passport_content(passport)
     expected = {
         "release_sha256": expected_release_sha256,
         "bundle_sha256": expected_bundle_sha256,
@@ -631,6 +628,17 @@ def validate_model_passport(
     if expected_release_id is not None and validated.release_id != expected_release_id:
         raise ModelPassportIntegrityError("release_id differs from expectation")
     return validated
+
+
+def _revalidate_model_passport_content(passport: ModelPassport) -> ModelPassport:
+    """Check current content and self-hash; this does not verify external identities."""
+
+    if not isinstance(passport, ModelPassport):
+        raise ModelPassportIntegrityError("expected a ModelPassport instance")
+    try:
+        return ModelPassport.model_validate(passport.model_dump(mode="python"))
+    except ValidationError as error:
+        raise ModelPassportIntegrityError(f"invalid model passport: {error}") from error
 
 
 def canonical_json_bytes(value: Mapping[str, object]) -> bytes:
@@ -654,9 +662,13 @@ def canonical_sha256(value: Mapping[str, object]) -> str:
 
 
 def model_passport_to_json_bytes(passport: ModelPassport) -> bytes:
-    """Return the one accepted serialized representation."""
+    """Revalidate content and return the bounded canonical representation."""
 
-    return canonical_json_bytes(passport.model_dump(mode="json")) + b"\n"
+    validated = _revalidate_model_passport_content(passport)
+    payload = canonical_json_bytes(validated.model_dump(mode="json")) + b"\n"
+    if len(payload) > MAX_CANONICAL_PASSPORT_BYTES:
+        raise ModelPassportIntegrityError("model passport payload size is invalid")
+    return payload
 
 
 def model_passport_from_json_bytes(

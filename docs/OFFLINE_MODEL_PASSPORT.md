@@ -52,3 +52,13 @@ Verification establishes consistency with the supplied identities and the
 [existing passport contract](../src/ecg_trust/passport/models.py). It does not
 independently audit the underlying evidence, prove a release is currently
 promoted, or establish clinical validation.
+
+The Python JSON serializer and Markdown renderer also revalidate the complete
+current object, nested contracts, privacy boundary and self-hash before export.
+A frozen Pydantic object is not sufficient proof of validity: updated
+[`model_copy` values are not validated](https://pydantic.dev/docs/validation/latest/concepts/models/#model-copy).
+Copied or constructed objects that violate the passport contract are refused;
+export does not silently reseal them. JSON exports obey the same 2 MiB limit as
+the reader, including the final newline. Valid JSON and Markdown output retain
+their existing bytes. This content check does not establish independent release
+identity: continue supplying trusted expectations to the verification API or CLI.
