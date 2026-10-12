@@ -46,7 +46,9 @@ experiment completed successfully but missed its preregistered support gate;
 it is not an OOD-validation or clinical-validation result.
 
 For service deployments, the [analysis capacity guide](docs/SENTINEL_ANALYSIS_CAPACITY.md)
-explains optional per-process limits and retry behavior under load.
+explains optional per-process limits and retry behavior under load. The
+[request-body limit](docs/SENTINEL_REQUEST_LIMITS.md) bounds incoming JSON
+before parsing or backend work.
 
 ## Demo walkthrough
 

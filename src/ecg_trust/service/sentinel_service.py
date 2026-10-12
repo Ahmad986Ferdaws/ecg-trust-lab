@@ -32,6 +32,7 @@ from ecg_trust.service._idempotency import (
 from ecg_trust.service._idempotency import (
     _ServiceResult as _ServiceResult,
 )
+from ecg_trust.service._request_limits import RequestBodyLimitMiddleware
 from ecg_trust.service.domain import (
     LABEL_PATTERN as LABEL_PATTERN,
 )
@@ -118,8 +119,15 @@ class SentinelServiceConfig:
     service_version: str = "sentinel-v1"
     max_idempotency_entries: int = 1024
     max_concurrent_analyses: int | None = None
+    max_request_body_bytes: int = 4096
 
     def __post_init__(self) -> None:
+        if (
+            isinstance(self.max_request_body_bytes, bool)
+            or not isinstance(self.max_request_body_bytes, int)
+            or not 256 <= self.max_request_body_bytes <= 1_048_576
+        ):
+            raise ValueError("max_request_body_bytes must be an integer between 256 and 1048576")
         if SERVICE_VERSION_PATTERN.fullmatch(self.service_version) is None:
             raise ValueError("service_version must be a bounded machine identifier")
         if (
@@ -502,8 +510,29 @@ def create_sentinel_app(
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        responses={413: {"model": ErrorResponse, "description": "Request body exceeds the limit"}},
     )
+
+    def reject_oversized_body() -> Response:
+        return _with_security_headers(
+            _json_response(
+                _error_result(
+                    effective_config,
+                    status_code=413,
+                    code="request_body_too_large",
+                    message="The request body exceeds the configured size limit.",
+                )
+            )
+        )
+
     app.add_middleware(_SecurityHeadersMiddleware)
+    # Buffer before response-oriented middleware: a client disconnect can then
+    # finish quietly without invoking a layer that expects a response object.
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_bytes=effective_config.max_request_body_bytes,
+        on_reject=reject_oversized_body,
+    )
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(
