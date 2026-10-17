@@ -20,6 +20,15 @@ from numpy.typing import ArrayLike, NDArray
 FloatArray = NDArray[np.float64]
 
 
+def _is_finite_real(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 class QualityStatus(StrEnum):
     """Fail-closed disposition for an ECG quality assessment."""
 
@@ -158,8 +167,13 @@ class SignalQualityConfig:
             raise ValueError("version must be non-empty")
         if self.expected_leads != canonical_leads:
             raise ValueError("expected_leads must use the canonical 12-lead order")
-        if self.expected_sample_count <= 0:
-            raise ValueError("expected_sample_count must be positive")
+        for count_name, count in (
+            ("expected_sample_count", self.expected_sample_count),
+            ("clipping_warn_run_samples", self.clipping_warn_run_samples),
+            ("clipping_reacquire_run_samples", self.clipping_reacquire_run_samples),
+        ):
+            if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+                raise ValueError(f"{count_name} must be a positive integer")
         if not self.expected_unit.strip():
             raise ValueError("expected_unit must be non-empty")
 
@@ -187,7 +201,7 @@ class SignalQualityConfig:
             "reversal_min_polarity": self.reversal_min_polarity,
         }
         for name, value in positive_values.items():
-            if not math.isfinite(value) or value <= 0.0:
+            if not _is_finite_real(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
 
         ratios = {
@@ -205,16 +219,13 @@ class SignalQualityConfig:
             "reversal_min_evidence_fraction": self.reversal_min_evidence_fraction,
         }
         for name, value in ratios.items():
-            if not math.isfinite(value) or not 0.0 < value < 1.0:
+            if not _is_finite_real(value) or not 0.0 < value < 1.0:
                 raise ValueError(f"{name} must be strictly between zero and one")
 
-        if not math.isfinite(self.reversal_max_inverse_correlation):
+        if not _is_finite_real(self.reversal_max_inverse_correlation):
             raise ValueError("reversal_max_inverse_correlation must be finite")
         if not -1.0 < self.reversal_max_inverse_correlation < 0.0:
             raise ValueError("reversal_max_inverse_correlation must be between -1 and zero")
-        if self.clipping_warn_run_samples <= 0 or self.clipping_reacquire_run_samples <= 0:
-            raise ValueError("clipping run thresholds must be positive")
-
         expected_samples = self.expected_sample_rate_hz * self.expected_duration_seconds
         if not math.isclose(
             expected_samples,
@@ -243,9 +254,7 @@ class SignalQualityConfig:
                 ("flat_run_reacquire_seconds", self.flat_run_reacquire_seconds),
             ):
                 if (
-                    isinstance(value, bool)
-                    or not isinstance(value, (int, float))
-                    or not math.isfinite(value)
+                    not _is_finite_real(value)
                     or value <= 0.0
                 ):
                     raise ValueError(f"{name} must be finite and positive")
@@ -259,9 +268,7 @@ class SignalQualityConfig:
                 )
         tolerance = self.duplicate_lead_tolerance_mv
         if tolerance is not None and (
-            isinstance(tolerance, bool)
-            or not isinstance(tolerance, (int, float))
-            or not math.isfinite(tolerance)
+            not _is_finite_real(tolerance)
             or tolerance < 0.0
         ):
             raise ValueError("duplicate_lead_tolerance_mv must be finite and non-negative")
