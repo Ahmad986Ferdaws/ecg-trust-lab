@@ -555,6 +555,25 @@ def _canonical_lead_positions(lead_names: Sequence[object], context: str) -> lis
     return [positions[lead] for lead in LEADS]
 
 
+def _contains_nonreal_samples(signal: SignalArray) -> bool:
+    """Inspect values before a float cast can erase boolean or complex types."""
+
+    if isinstance(signal, Tensor):
+        return signal.is_complex() or signal.dtype == torch.bool
+    raw = np.asarray(signal, dtype=None if isinstance(signal, np.ndarray) else object)
+    return bool(
+        np.iscomplexobj(raw)
+        or np.issubdtype(raw.dtype, np.bool_)
+        or (
+            raw.dtype.kind == "O"
+            and any(
+                isinstance(value, (bool, np.bool_, complex, np.complexfloating))
+                for value in raw.flat
+            )
+        )
+    )
+
+
 def validate_physical_signal(
     signal: SignalArray,
     *,
@@ -578,8 +597,7 @@ def validate_physical_signal(
     if positions != list(range(len(LEADS))):
         raise DemoInputError("in-memory lead_names must already use canonical order")
     try:
-        is_complex = signal.is_complex() if isinstance(signal, Tensor) else np.iscomplexobj(signal)
-        if is_complex:
+        if _contains_nonreal_samples(signal):
             raise DemoInputError("signal must contain real physical values")
         tensor = torch.as_tensor(signal, dtype=torch.float32)
     except (TypeError, ValueError, RuntimeError) as error:
@@ -620,9 +638,9 @@ def load_wfdb_physical_signal(record_path: str | Path) -> Tensor:
     if physical is None:
         raise DemoInputError("WFDB record has no physical signal")
     try:
-        raw_array = np.asarray(physical)
-        if np.iscomplexobj(raw_array):
+        if _contains_nonreal_samples(physical):
             raise DemoInputError("WFDB physical signal must contain real values")
+        raw_array = np.asarray(physical)
         array = raw_array.astype(np.float32)
     except (TypeError, ValueError, OverflowError) as error:
         raise DemoInputError(f"WFDB physical signal must be real numeric data: {error}") from error
