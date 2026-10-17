@@ -429,11 +429,25 @@ def assess_signal_quality(
     """
 
     try:
-        raw_signal = np.asarray(signal_mv)
+        # Preserve scalar types in Python sequences before NumPy can promote a
+        # mixed boolean/real list to floats. Numeric arrays are checked as stored.
+        raw_signal = np.asarray(
+            signal_mv, dtype=None if isinstance(signal_mv, np.ndarray) else object
+        )
     except (TypeError, ValueError, OverflowError):
         issue = _global_issue(ReasonCode.NON_NUMERIC_SIGNAL, QualityStatus.INVALID)
         return _invalid_report(config, (issue,))
-    if np.iscomplexobj(raw_signal) or np.issubdtype(raw_signal.dtype, np.bool_):
+    if (
+        np.iscomplexobj(raw_signal)
+        or np.issubdtype(raw_signal.dtype, np.bool_)
+        or (
+            raw_signal.dtype.kind == "O"
+            and any(
+                isinstance(value, (bool, np.bool_, complex, np.complexfloating))
+                for value in raw_signal.flat
+            )
+        )
+    ):
         issue = _global_issue(ReasonCode.NON_REAL_SIGNAL, QualityStatus.INVALID)
         return _invalid_report(config, (issue,))
     try:
