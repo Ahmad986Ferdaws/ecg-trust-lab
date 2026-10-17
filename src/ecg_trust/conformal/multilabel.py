@@ -399,6 +399,71 @@ class ConformalMetrics:
     empty_fraction: float
     both_fraction: float
 
+    def __post_init__(self) -> None:
+        _positive_integer(self.n_samples, "n_samples")
+        _positive_integer(self.n_labels, "n_labels")
+        for name, upper in (("labelwise_coverage", 1.0), ("labelwise_mean_set_size", 2.0)):
+            object.__setattr__(
+                self,
+                name,
+                _float_tuple(
+                    getattr(self, name),
+                    name,
+                    expected_length=self.n_labels,
+                    lower=0.0,
+                    upper=upper,
+                ),
+            )
+        for name in (
+            "marginal_coverage",
+            "joint_sample_coverage",
+            "singleton_fraction",
+            "empty_fraction",
+            "both_fraction",
+        ):
+            _closed_unit_float(getattr(self, name), name)
+        _bounded_float(self.mean_set_size, "mean_set_size", 0.0, 2.0)
+
+        # These are identities and bounds for the same finite evaluation array,
+        # not coverage guarantees about a future population.
+        tolerance = 1e-12
+        equalities = (
+            (
+                self.singleton_fraction + self.empty_fraction + self.both_fraction,
+                1.0,
+                "singleton, empty, and both fractions must sum to one",
+            ),
+            (
+                self.marginal_coverage,
+                math.fsum(self.labelwise_coverage) / self.n_labels,
+                "marginal coverage contradicts labelwise coverage",
+            ),
+            (
+                self.mean_set_size,
+                math.fsum(self.labelwise_mean_set_size) / self.n_labels,
+                "mean set size contradicts labelwise set sizes",
+            ),
+            (
+                self.mean_set_size,
+                self.singleton_fraction + 2.0 * self.both_fraction,
+                "mean set size contradicts singleton and both fractions",
+            ),
+        )
+        for observed, expected, message in equalities:
+            if not math.isclose(observed, expected, rel_tol=0.0, abs_tol=tolerance):
+                raise ConformalValidationError(message)
+
+        joint_lower = max(0.0, 1.0 - math.fsum(1.0 - value for value in self.labelwise_coverage))
+        joint_upper = min(self.labelwise_coverage)
+        if not joint_lower - tolerance <= self.joint_sample_coverage <= joint_upper + tolerance:
+            raise ConformalValidationError("joint coverage contradicts labelwise coverage bounds")
+        if not (
+            self.both_fraction - tolerance
+            <= self.marginal_coverage
+            <= 1.0 - self.empty_fraction + tolerance
+        ):
+            raise ConformalValidationError("coverage contradicts empty and both fractions")
+
     def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": _SCHEMA_VERSION,
@@ -441,13 +506,6 @@ class ConformalMetrics:
         singleton_fraction = _closed_unit_float(payload["singleton_fraction"], "singleton_fraction")
         empty_fraction = _closed_unit_float(payload["empty_fraction"], "empty_fraction")
         both_fraction = _closed_unit_float(payload["both_fraction"], "both_fraction")
-        if not math.isclose(
-            singleton_fraction + empty_fraction + both_fraction,
-            1.0,
-            rel_tol=0.0,
-            abs_tol=1e-12,
-        ):
-            raise ConformalValidationError("singleton, empty, and both fractions must sum to one")
         return cls(
             n_samples=n_samples,
             n_labels=n_labels,
